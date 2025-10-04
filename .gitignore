@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+build/
+dist/
+
+# Environment files (NEVER commit real secrets)
+.env
+*.env
+!deployment/env/*.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Data files
+*.parquet
+*.csv
+data/bars/
+*.db
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+*.backup
+*.bak
+
+# Old extracted files (we've reorganized these)
+Tech Stack/
+Deployment/
+strategies/
+quantconnect/
+Documentation/
+backtrader/
+deployment_runtime/
+configs/
+engine/
+tests/
+Final Strategies/
+requests_local/
+*.py
+!src/**/*.py
+!deployment/**/*.py

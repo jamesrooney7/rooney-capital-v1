@@ -1,0 +1,10 @@
+databento>=0.30.0
+backtrader
+python-dotenv
+pyzmq
+requests
+pytest
+joblib
+scikit-learn
+pandas
+pyyaml
