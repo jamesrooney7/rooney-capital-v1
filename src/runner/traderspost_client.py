@@ -15,8 +15,11 @@ immediately.
 from __future__ import annotations
 
 import logging
+import math
 import time
-from datetime import datetime
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from email.utils import parsedate_to_datetime
 from typing import Any, Iterable, Mapping, Optional
 
 import backtrader as bt
@@ -91,6 +94,8 @@ class TradersPostClient:
         backoff = self.backoff_factor
         last_error: Optional[BaseException] = None
 
+        retry_after_hint: Optional[float] = None
+
         while attempt <= self.max_retries:
             try:
                 response = self.session.post(
@@ -98,11 +103,13 @@ class TradersPostClient:
                     json=json_payload,
                     timeout=self.timeout,
                 )
-                if response.status_code >= 400:
+                status = response.status_code
+                if status >= 400:
+                    if status == 429:
+                        raise requests.HTTPError(response=response)
                     try:
                         response.raise_for_status()
                     except requests.HTTPError as exc:
-                        status = response.status_code
                         if 400 <= status < 500:
                             raise TradersPostError(
                                 f"Webhook rejected payload with status {status}: {response.text}"
@@ -116,19 +123,22 @@ class TradersPostClient:
                 return response
             except requests.HTTPError as exc:
                 status = getattr(exc.response, "status_code", None)
-                if status is not None and 400 <= status < 500:
+                if status == 429:
+                    retry_after_hint = _retry_after_seconds(getattr(exc.response, "headers", {}))
+                elif status is not None and 400 <= status < 500:
                     raise TradersPostError(
                         f"Webhook rejected payload with status {status}: {getattr(exc.response, 'text', '')}"
                     ) from exc
                 last_error = exc
             except requests.RequestException as exc:
+                retry_after_hint = None
                 last_error = exc
 
             attempt += 1
             if attempt > self.max_retries:
                 break
 
-            sleep_for = backoff
+            sleep_for = retry_after_hint if retry_after_hint is not None else backoff
             backoff *= 2
             logger.warning(
                 "TradersPost webhook post failed (attempt %s/%s); retrying in %.2fs",
@@ -137,6 +147,7 @@ class TradersPostClient:
                 sleep_for,
             )
             time.sleep(sleep_for)
+            retry_after_hint = None
 
         raise TradersPostError("Failed to deliver payload to TradersPost webhook") from last_error
 
@@ -170,13 +181,18 @@ class TradersPostClient:
         if "json" in kwargs:
             headers.setdefault("Content-Type", "application/json")
         request_headers = self._api_headers(headers)
-        response = self.session.request(
-            method,
-            url,
-            timeout=self.timeout,
-            headers=request_headers,
-            **kwargs,
-        )
+        try:
+            response = self.session.request(
+                method,
+                url,
+                timeout=self.timeout,
+                headers=request_headers,
+                **kwargs,
+            )
+        except requests.RequestException as exc:
+            raise TradersPostError(
+                f"TradersPost API request failed for {method} {url}: {exc}"
+            ) from exc
         if response.status_code == 404 and allow_404:
             return None
         if response.status_code >= 400:
@@ -206,7 +222,7 @@ class TradersPostClient:
         if not isinstance(payload, Mapping):
             return None
         size = payload.get("size")
-        if size in (None, 0, "0", 0.0):
+        if _position_is_flat(size):
             return None
         return dict(payload)
 
@@ -280,6 +296,50 @@ def _ensure_ml_snapshot(snapshot: Mapping[str, Any] | None, strategy: Any) -> di
 
 def _compact(mapping: Iterable[tuple[str, Any]]) -> dict[str, Any]:
     return {key: value for key, value in mapping if value is not None}
+
+
+def _retry_after_seconds(headers: Mapping[str, Any] | None) -> Optional[float]:
+    if not headers:
+        return None
+    value = headers.get("Retry-After")
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if value >= 0 else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            seconds = float(stripped)
+        except ValueError:
+            try:
+                retry_dt = parsedate_to_datetime(stripped)
+            except (TypeError, ValueError, IndexError):
+                return None
+            if retry_dt is None:
+                return None
+            if retry_dt.tzinfo is None:
+                retry_dt = retry_dt.replace(tzinfo=timezone.utc)
+            seconds = (retry_dt - datetime.now(timezone.utc)).total_seconds()
+        if not math.isfinite(seconds):
+            return None
+        return max(0.0, seconds)
+    return None
+
+
+def _position_is_flat(size: Any) -> bool:
+    if size is None:
+        return True
+    candidate = size
+    if isinstance(size, str):
+        candidate = size.strip()
+        if not candidate:
+            return True
+    try:
+        return Decimal(str(candidate)) == 0
+    except (InvalidOperation, ValueError, TypeError):
+        return False
 
 
 def _format_dt(value: Any) -> Optional[str]:
