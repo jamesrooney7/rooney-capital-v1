@@ -1,0 +1,39 @@
+[Unit]
+Description=Rooney Capital Trading Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+WorkingDirectory=/opt/pine/rooney-capital-v1
+
+# Environment configuration
+EnvironmentFile=/opt/pine/runtime/.env
+Environment="PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml"
+Environment="PYTHONUNBUFFERED=1"
+
+# Virtual environment
+ExecStart=/opt/pine/rooney-capital-v1/venv/bin/python /opt/pine/rooney-capital-v1/scripts/launch_worker.py
+
+# Restart configuration
+Restart=on-failure
+RestartSec=30
+StartLimitInterval=350
+StartLimitBurst=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=pine-runner
+
+# Process limits
+LimitNOFILE=65536
+
+# Security hardening (optional)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
