@@ -18,7 +18,6 @@ import logging
 import math
 import time
 from datetime import datetime, timezone
-from decimal import Decimal, InvalidOperation
 from email.utils import parsedate_to_datetime
 from typing import Any, Iterable, Mapping, Optional
 
@@ -50,8 +49,6 @@ class TradersPostClient:
         max_retries: int = 3,
         backoff_factor: float = 0.5,
         timeout: float = 10.0,
-        api_base_url: Optional[str] = None,
-        api_key: Optional[str] = None,
     ) -> None:
         if max_retries < 0:
             raise ValueError("max_retries must be >= 0")
@@ -63,8 +60,6 @@ class TradersPostClient:
         self.max_retries = max_retries
         self.backoff_factor = backoff_factor
         self.timeout = timeout
-        self.api_base_url = api_base_url.rstrip("/") if api_base_url else None
-        self.api_key = api_key
 
     # ------------------------------------------------------------------
     # Public API
@@ -151,115 +146,6 @@ class TradersPostClient:
 
         raise TradersPostError("Failed to deliver payload to TradersPost webhook") from last_error
 
-    # ------------------------------------------------------------------
-    # REST API helpers
-    # ------------------------------------------------------------------
-
-    def _ensure_api_ready(self) -> None:
-        if not self.api_base_url:
-            raise TradersPostError("TradersPost API base URL not configured")
-
-    def _api_headers(self, extra: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-        headers = {"Accept": "application/json"}
-        if extra:
-            headers.update(extra)
-        if self.api_key:
-            headers.setdefault("Authorization", f"Bearer {self.api_key}")
-        return headers
-
-    def _api_request(
-        self,
-        method: str,
-        path: str,
-        *,
-        allow_404: bool = False,
-        **kwargs: Any,
-    ) -> Optional[requests.Response]:
-        self._ensure_api_ready()
-        url = f"{self.api_base_url}/{path.lstrip('/')}"
-        headers = kwargs.pop("headers", {})
-        if "json" in kwargs:
-            headers.setdefault("Content-Type", "application/json")
-        request_headers = self._api_headers(headers)
-        try:
-            response = self.session.request(
-                method,
-                url,
-                timeout=self.timeout,
-                headers=request_headers,
-                **kwargs,
-            )
-        except requests.RequestException as exc:
-            raise TradersPostError(
-                f"TradersPost API request failed for {method} {url}: {exc}"
-            ) from exc
-        if response.status_code == 404 and allow_404:
-            return None
-        if response.status_code >= 400:
-            try:
-                response.raise_for_status()
-            except requests.HTTPError as exc:
-                raise TradersPostError(
-                    f"TradersPost API request failed for {method} {url} with status "
-                    f"{response.status_code}: {response.text}"
-                ) from exc
-        return response
-
-    # ------------------------------------------------------------------
-    # Portfolio management helpers
-    # ------------------------------------------------------------------
-
-    def get_open_positions(self, symbol: str) -> Optional[dict[str, Any]]:
-        """Return the open position for *symbol* if one exists."""
-
-        response = self._api_request("GET", f"positions/{symbol}", allow_404=True)
-        if response is None:
-            return None
-        try:
-            payload = response.json()
-        except ValueError as exc:
-            raise TradersPostError("Invalid JSON returned from TradersPost get_open_positions") from exc
-        if not isinstance(payload, Mapping):
-            return None
-        size = payload.get("size")
-        if _position_is_flat(size):
-            return None
-        return dict(payload)
-
-    def get_pending_orders(self, symbol: str) -> list[dict[str, Any]]:
-        """Return pending orders for *symbol*."""
-
-        response = self._api_request("GET", f"orders", params={"status": "pending", "symbol": symbol})
-        try:
-            payload = response.json() if response else []
-        except ValueError as exc:
-            raise TradersPostError("Invalid JSON returned from TradersPost get_pending_orders") from exc
-        if not isinstance(payload, list):
-            return []
-        result: list[dict[str, Any]] = []
-        for entry in payload:
-            if isinstance(entry, Mapping):
-                result.append(dict(entry))
-        return result
-
-    def close_position(self, symbol: str, reason: str = "Restart cleanup") -> bool:
-        """Submit a market order to flatten the position for *symbol*."""
-
-        payload = {"symbol": symbol, "reason": reason}
-        response = self._api_request("POST", f"positions/{symbol}/close", json=payload)
-        if not response:
-            return False
-        return response.status_code < 400
-
-    def cancel_order(self, order_id: str) -> bool:
-        """Cancel the pending order identified by *order_id*."""
-
-        response = self._api_request("DELETE", f"orders/{order_id}", allow_404=True)
-        if response is None:
-            return False
-        return response.status_code < 400
-
-
 # ---------------------------------------------------------------------------
 # Notification payload helpers
 # ---------------------------------------------------------------------------
@@ -326,22 +212,6 @@ def _retry_after_seconds(headers: Mapping[str, Any] | None) -> Optional[float]:
             return None
         return max(0.0, seconds)
     return None
-
-
-def _position_is_flat(size: Any) -> bool:
-    if size is None:
-        return True
-    candidate = size
-    if isinstance(size, str):
-        candidate = size.strip()
-        if not candidate:
-            return True
-    try:
-        return Decimal(str(candidate)) == 0
-    except (InvalidOperation, ValueError, TypeError):
-        return False
-
-
 def _format_dt(value: Any) -> Optional[str]:
     if isinstance(value, datetime):
         return value.isoformat()

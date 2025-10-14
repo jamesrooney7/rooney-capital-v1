@@ -87,8 +87,10 @@ Holds the Databento API key, TradersPost secrets, and other runtime credentials.
 - Retries with backoff on failure.
 
 ## 7) Position & Fill Reconciliation
-- `deployment_runtime.notifier` and scheduler tasks poll TradersPost fills every N minutes.
-- Compare local vs broker positions, fix drift.
+- Manual runbook procedure: review TradersPost fills and broker statements at the
+  start of each session.
+- Document expected flat positions for each symbol so operators can verify
+  before enabling the worker.
 
 ## 8) TradersPost Expiry Handling
 - Webhook payloads always use the continuous root symbol (ES, NQ, etc.).

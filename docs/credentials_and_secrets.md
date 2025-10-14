@@ -1,6 +1,6 @@
 # Credentials & Secrets Management Guide
 
-This document explains how to manage credentials for the Databento data feed, TradersPost webhook/API access, and any
+This document explains how to manage credentials for the Databento data feed, TradersPost webhook access, and any
 auxiliary services that the live worker depends on. It supplements the brief notes in the `README.md` and
 `docs/deployment_roadmap.md` files with explicit, actionable procedures.
 
@@ -22,7 +22,7 @@ placeholders (via `os.path.expandvars`) before any other validation occurs.
 2. Point the worker at the runtime config file: `export PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml`.
 3. The loader in `src/runner/live_worker.py` reads secrets in the following priority order:
    - Explicit values inside the runtime config file.
-   - Environment variables (`DATABENTO_API_KEY`, `TRADERSPOST_WEBHOOK_URL`, `TRADERSPOST_API_BASE_URL`, `TRADERSPOST_API_KEY`, etc.).
+   - Environment variables (`DATABENTO_API_KEY`, `TRADERSPOST_WEBHOOK_URL`, etc.).
 
 Prefer the environment-variable path so that configs can remain in Git without hard-coded credentials.
 
@@ -31,7 +31,7 @@ Prefer the environment-variable path so that configs can remain in Git without h
 Maintain **separate credentials** for each environment:
 
 - Databento allows multiple API keys per account; generate one for paper/testing and one for production.
-- TradersPost provides distinct webhook URLs and API keys for paper accounts vs. live brokers.
+- TradersPost provides distinct webhook URLs for paper accounts vs. live brokers.
 - Encode the mapping inside two `.env` files (e.g. `pine-trader.paper.env`, `pine-trader.live.env`) and copy/link the
   appropriate file before launching.
 
@@ -49,8 +49,6 @@ Document which key belongs to which environment in the runbook so operations sta
 
 For Databento keys, confirm connectivity by running the worker's pre-flight checks. For TradersPost webhooks, send a
 manual `curl` health check (identical to what `LiveWorker.run_preflight_checks()` does) before cutting over live trading.
-When reconciliation is enabled, also verify the TradersPost REST API base URL and key by running the pre-flight checks –
-they now hit `get_pending_orders` to ensure portfolio endpoints are reachable.
 
 ## 5. Handling secrets on a terminal server
 
@@ -59,7 +57,7 @@ If you are running the worker manually on a shared terminal server:
 - Store credentials in a user-specific directory (`~/secure/pine.env`) with permissions `600`.
 - Run `set -a; source ~/secure/pine.env; set +a` in each session before launching the worker so the environment variables
   populate without exposing them in your shell history.
-- Clear the environment (`unset DATABENTO_API_KEY TRADERSPOST_WEBHOOK_URL TRADERSPOST_API_KEY`) when done.
+- Clear the environment (`unset DATABENTO_API_KEY TRADERSPOST_WEBHOOK_URL`) when done.
 - Never embed credentials directly in notebooks, scripts committed to Git, or long-running tmux sessions shared between
   operators.
 
