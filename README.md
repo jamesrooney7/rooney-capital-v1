@@ -181,16 +181,17 @@ validation so secrets can remain outside the configuration file.
 - `models_path` – Directory containing ML bundles (defaults to `src/models`).
 - `traderspost_webhook` – URL for order/trade notifications (or set
   `TRADERSPOST_WEBHOOK_URL`).
-- `traderspost.api_base_url` / `TRADERSPOST_API_BASE_URL` – REST endpoint used for
-  reconciliation (required when reconciliation is enabled).
-- `traderspost.api_key` / `TRADERSPOST_API_KEY` – Bearer token for the REST API
-  when reconciliation is enabled.
 - `contracts` – Instrument-level overrides keyed by symbol (size, commission,
   multiplier, optional strategy overrides).
 - Optional tuning knobs: `starting_cash`, `backfill`, `queue_maxsize`,
   `heartbeat_interval`, `heartbeat_file`, `heartbeat_write_interval`,
   `poll_interval`, `preflight.*` toggles for ML and connectivity validation or
   fail-fast behaviour.
+
+> **Operational note:** TradersPost currently exposes only the webhook
+> integration used for order and trade notifications. Portfolio reconciliation
+> must be performed manually via the TradersPost console or broker statements
+> because the REST API is not available.
 
 ### Sample Configuration
 
@@ -200,9 +201,6 @@ models_path: src/models
 symbols: ["ES", "NQ", "RTY"]
 databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
-traderspost:
-  api_base_url: ${TRADERSPOST_API_BASE_URL}
-  api_key: ${TRADERSPOST_API_KEY}
 starting_cash: 250000
 backfill: true
 queue_maxsize: 4096

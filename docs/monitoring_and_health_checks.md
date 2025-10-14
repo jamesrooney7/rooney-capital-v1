@@ -15,9 +15,9 @@ heartbeat_write_interval: 30  # seconds between updates while healthy
 ```
 
 The worker updates the file when it starts, every `heartbeat_write_interval`
-seconds while running, and again when it stops. A failed pre-flight check or
-startup reconciliation will mark the heartbeat with a `failed` status so that an
-external monitor can escalate immediately.
+seconds while running, and again when it stops. A failed pre-flight check will
+mark the heartbeat with a `failed` status so that an external monitor can
+escalate immediately.
 
 ## 2. Add a lightweight heartbeat checker
 
