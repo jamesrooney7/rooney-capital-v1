@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+from dataclasses import replace
 from pathlib import Path
 
 import databento
@@ -49,6 +51,8 @@ def _successful_config(preflight: PreflightConfig | None = None) -> RuntimeConfi
         backfill=True,
         queue_maxsize=64,
         heartbeat_interval=None,
+        heartbeat_file=None,
+        heartbeat_write_interval=30.0,
         poll_interval=0.1,
         traderspost_webhook="https://example.com/webhook",
         traderspost_api_base=None,
@@ -178,3 +182,26 @@ def test_preflight_multiple_failures(monkeypatch: pytest.MonkeyPatch, caplog: py
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: TradersPost Connection, Databento Connection" in caplog.text
+
+
+def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _patch_successful_dependencies(monkeypatch)
+
+    heartbeat_path = tmp_path / "heartbeat.json"
+    config = replace(
+        _successful_config(),
+        heartbeat_file=heartbeat_path,
+        heartbeat_write_interval=0.0,
+    )
+
+    worker = LiveWorker(config)
+    worker._update_heartbeat(status="running", force=True)
+
+    payload = json.loads(heartbeat_path.read_text())
+    assert payload["status"] == "running"
+    assert payload["symbols"] == list(config.symbols)
+
+    worker.stop()
+
+    payload = json.loads(heartbeat_path.read_text())
+    assert payload["status"] == "stopped"

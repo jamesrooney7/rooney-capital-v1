@@ -177,8 +177,9 @@ environment variable before starting the process.
 - `contracts` – Instrument-level overrides keyed by symbol (size, commission,
   multiplier, optional strategy overrides).
 - Optional tuning knobs: `starting_cash`, `backfill`, `queue_maxsize`,
-  `heartbeat_interval`, `poll_interval`, `preflight.*` toggles for ML and
-  connectivity validation or fail-fast behaviour.
+  `heartbeat_interval`, `heartbeat_file`, `heartbeat_write_interval`,
+  `poll_interval`, `preflight.*` toggles for ML and connectivity validation or
+  fail-fast behaviour.
 
 ### Sample Configuration
 
@@ -190,10 +191,12 @@ databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
 starting_cash: 250000
 backfill: true
-queue_maxsize: 4096
-heartbeat_interval: 30
-preflight:
-  enabled: true
+  queue_maxsize: 4096
+  heartbeat_interval: 30
+  heartbeat_file: /var/run/pine/worker_heartbeat.json
+  heartbeat_write_interval: 30
+  preflight:
+    enabled: true
   skip_ml_validation: false
   skip_connection_checks: false
   fail_fast: true
