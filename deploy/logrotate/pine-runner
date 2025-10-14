@@ -1,0 +1,13 @@
+/opt/pine/logs/*.log {
+    daily
+    missingok
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    create 0640 __USER__ __USER__
+    sharedscripts
+    postrotate
+        systemctl reload pine-runner.service > /dev/null 2>&1 || true
+    endscript
+}

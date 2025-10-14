@@ -525,53 +525,16 @@ python scripts/launch_worker.py
 
 ## Sprint 4: Production Deployment
 
-### 4.1 Create systemd Service File
+### 4.1 Install systemd Service File
 
 ```bash
-# Create service file with automatic username detection
-sudo tee /etc/systemd/system/pine-runner.service > /dev/null << EOF
-[Unit]
-Description=Rooney Capital Trading Worker
-After=network-online.target
-Wants=network-online.target
+# Copy the templated service file from the repository
+sudo install -m 0644 deploy/systemd/pine-runner.service /etc/systemd/system/pine-runner.service
 
-[Service]
-Type=simple
-User=$USER
-Group=$USER
-WorkingDirectory=/opt/pine/rooney-capital-v1
+# Replace the placeholder user and group with your current user
+sudo sed -i "s/__USER__/$USER/g" /etc/systemd/system/pine-runner.service
 
-# Environment configuration
-EnvironmentFile=/opt/pine/runtime/.env
-Environment="PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml"
-Environment="PYTHONUNBUFFERED=1"
-
-# Virtual environment
-ExecStart=/opt/pine/rooney-capital-v1/venv/bin/python /opt/pine/rooney-capital-v1/scripts/launch_worker.py
-
-# Restart configuration
-Restart=on-failure
-RestartSec=30
-StartLimitInterval=350
-StartLimitBurst=10
-
-# Logging
-StandardOutput=journal
-StandardError=journal
-SyslogIdentifier=pine-runner
-
-# Process limits
-LimitNOFILE=65536
-
-# Security hardening (optional)
-NoNewPrivileges=true
-PrivateTmp=true
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-echo "✓ Service file created for user: $USER"
+echo "✓ Service file installed for user: $USER"
 ```
 
 ### 4.2 Enable and Configure Service
@@ -587,25 +550,14 @@ sudo systemctl enable pine-runner.service
 sudo systemctl status pine-runner.service
 ```
 
-### 4.3 Create Log Rotation
+### 4.3 Install Log Rotation
 
 ```bash
-# Create logrotate config with automatic username
-sudo tee /etc/logrotate.d/pine-runner > /dev/null << EOF
-/opt/pine/logs/*.log {
-    daily
-    missingok
-    rotate 30
-    compress
-    delaycompress
-    notifempty
-    create 0640 $USER $USER
-    sharedscripts
-    postrotate
-        systemctl reload pine-runner.service > /dev/null 2>&1 || true
-    endscript
-}
-EOF
+# Copy the templated logrotate configuration from the repository
+sudo install -m 0644 deploy/logrotate/pine-runner /etc/logrotate.d/pine-runner
+
+# Replace the placeholder user and group with your current user
+sudo sed -i "s/__USER__/$USER/g" /etc/logrotate.d/pine-runner
 
 echo "✓ Log rotation configured for user: $USER"
 ```
