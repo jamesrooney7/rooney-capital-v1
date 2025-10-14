@@ -57,6 +57,13 @@ FRIENDLY_FILTER_NAMES: dict[str, str] = {
 }
 
 
+FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
+    "enableOpenClose": ("open_close",),
+    "enableDailyATRPercentile": ("daily_atr_percentile",),
+    "enableHourlyATRPercentile": ("hourly_atr_percentile",),
+}
+
+
 CROSS_Z_INSTRUMENTS = [
     "ES",
     "NQ",
@@ -196,6 +203,39 @@ def _is_daily_timeframe(tf: object | None) -> bool:
         return int(tf) == int(bt.TimeFrame.Days)
     except Exception:
         return False
+
+
+def _feature_timeframe_label(timeframe: object | None) -> str:
+    """Return the snake_case label for a metadata timeframe."""
+
+    if timeframe is None:
+        return "timeframe"
+    if isinstance(timeframe, str):
+        tf = timeframe.lower()
+        if tf.startswith("d"):
+            return "daily"
+        if tf.startswith("h"):
+            return "hourly"
+        return normalize_column_name(tf)
+    try:
+        if timeframe == bt.TimeFrame.Days or int(timeframe) == int(bt.TimeFrame.Days):
+            return "daily"
+    except Exception:
+        pass
+    try:
+        if timeframe == bt.TimeFrame.Minutes and int(timeframe) == int(bt.TimeFrame.Minutes):
+            return "hourly"
+    except Exception:
+        pass
+    return normalize_column_name(str(timeframe))
+
+
+def _metadata_feature_key(symbol: str, timeframe: object | None, suffix: str) -> str:
+    """Build a normalised feature key for cross-instrument metrics."""
+
+    label = _feature_timeframe_label(timeframe)
+    base = f"{symbol}_{label}_{suffix}"
+    return normalize_column_name(base)
 
 
 class ExpandingPercentileTracker:
@@ -2215,6 +2255,17 @@ class IbsStrategy(bt.Strategy):
 
         values: dict = {}
 
+        def coerce_float(value):
+            if value is None:
+                return None
+            try:
+                numeric = float(value)
+            except Exception:
+                return None
+            if math.isnan(numeric):
+                return None
+            return numeric
+
         def percentile_marker(
             *,
             data=None,
@@ -2286,6 +2337,10 @@ class IbsStrategy(bt.Strategy):
             alias = FRIENDLY_FILTER_NAMES.get(column_key)
             if alias:
                 values[alias] = value
+            feature_aliases = FEATURE_KEY_ALIASES.get(column_key)
+            if feature_aliases:
+                for alias_key in feature_aliases:
+                    values[alias_key] = value
 
         def record_param(param_key: str, value):
             columns = self.filter_columns_by_param.get(param_key)
@@ -2472,15 +2527,62 @@ class IbsStrategy(bt.Strategy):
                         line,
                         data=meta.get("data"),
                         timeframe=meta.get("timeframe"),
-                    intraday_ago=intraday_ago)
+                        intraday_ago=intraday_ago,
+                    )
                     if line is not None
                     else None
                 )
-                record_param(key, float(val) if val is not None else None)
+                numeric = coerce_float(val)
+                record_param(key, numeric)
+                symbol = meta.get("symbol")
+                if symbol:
+                    timeframe = meta.get("timeframe")
+                    record_value(
+                        _metadata_feature_key(symbol, timeframe, "z_score"),
+                        numeric,
+                    )
+                    denom_line = meta.get("denom")
+                    denom_val = None
+                    if denom_line is not None:
+                        raw_denom = timeframed_line_val(
+                            denom_line,
+                            data=meta.get("data"),
+                            timeframe=meta.get("timeframe"),
+                            intraday_ago=intraday_ago,
+                        )
+                        denom_val = coerce_float(raw_denom)
+                    record_value(
+                        _metadata_feature_key(symbol, timeframe, "z_pipeline"),
+                        denom_val,
+                    )
             elif key in self.return_meta:
                 meta = self.return_meta[key]
                 val = self._calc_return_value(meta)
-                record_param(key, float(val) if val is not None else None)
+                numeric = coerce_float(val)
+                record_param(key, numeric)
+                symbol = meta.get("symbol")
+                if symbol:
+                    timeframe = meta.get("timeframe")
+                    record_value(
+                        _metadata_feature_key(symbol, timeframe, "return"),
+                        numeric,
+                    )
+                    pipeline_line = meta.get("line")
+                    pipeline_val = None
+                    if pipeline_line is not None:
+                        raw_pipeline = timeframed_line_val(
+                            pipeline_line,
+                            data=meta.get("data"),
+                            timeframe=meta.get("timeframe"),
+                            intraday_ago=intraday_ago,
+                        )
+                        pipeline_val = coerce_float(raw_pipeline)
+                    else:
+                        pipeline_val = numeric
+                    record_value(
+                        _metadata_feature_key(symbol, timeframe, "return_pipeline"),
+                        pipeline_val,
+                    )
             elif key == "useValFilter":
                 v = (
                     timeframed_line_val(
@@ -2999,13 +3101,13 @@ class IbsStrategy(bt.Strategy):
                     record_param(key, 0)
             elif key == "enableOpenClose":
                 t = dt.hour * 100 + dt.minute
+                value = 0
                 if 800 <= t < 900:
-                    record_param(key, 1)
+                    value = 1
                 elif 1400 <= t < 1500:
-                    record_param(key, 2)
-                else:
-                    # Outside the designated open/close windows
-                    record_param(key, 0)
+                    value = 2
+                record_param(key, value)
+                record_value("open_close", value)
             elif key == "enableRangeCompressionATR":
                 hi = line_val(self.hourly.high, ago=intraday_ago)
                 lo = line_val(self.hourly.low, ago=intraday_ago)
@@ -3039,10 +3141,14 @@ class IbsStrategy(bt.Strategy):
                     record_param(key, 1 if price > prev else 2)
             elif key == "enableDailyATRPercentile":
                 pct = self.datr_pct_pct
-                record_param(key, float(pct) if pct is not None else None)
+                numeric = coerce_float(pct)
+                record_param(key, numeric)
+                record_value("daily_atr_percentile", numeric)
             elif key == "enableHourlyATRPercentile":
                 pct = self.hatr_pct_pct
-                record_param(key, float(pct) if pct is not None else None)
+                numeric = coerce_float(pct)
+                record_param(key, numeric)
+                record_value("hourly_atr_percentile", numeric)
             elif key == "enableDirDrift":
                 n = int(self.p.driftLen)
                 data = self.hourly
@@ -3274,14 +3380,60 @@ class IbsStrategy(bt.Strategy):
                 if line is not None
                 else None
             )
-            record_param(param_key, float(val) if val is not None else None)
+            numeric = coerce_float(val)
+            record_param(param_key, numeric)
+            symbol = meta.get("symbol")
+            if symbol:
+                timeframe = meta.get("timeframe")
+                record_value(
+                    _metadata_feature_key(symbol, timeframe, "z_score"),
+                    numeric,
+                )
+                denom_line = meta.get("denom")
+                denom_val = None
+                if denom_line is not None:
+                    raw_denom = timeframed_line_val(
+                        denom_line,
+                        data=meta.get("data"),
+                        timeframe=meta.get("timeframe"),
+                        intraday_ago=intraday_ago,
+                    )
+                    denom_val = coerce_float(raw_denom)
+                record_value(
+                    _metadata_feature_key(symbol, timeframe, "z_pipeline"),
+                    denom_val,
+                )
 
         for param_key, meta in self.return_meta.items():
             existing = values.get(param_key)
             if isinstance(existing, (int, float)) and not math.isnan(existing):
                 continue
             val = self._calc_return_value(meta)
-            record_param(param_key, float(val) if val is not None else None)
+            numeric = coerce_float(val)
+            record_param(param_key, numeric)
+            symbol = meta.get("symbol")
+            if symbol:
+                timeframe = meta.get("timeframe")
+                record_value(
+                    _metadata_feature_key(symbol, timeframe, "return"),
+                    numeric,
+                )
+                pipeline_line = meta.get("line")
+                pipeline_val = None
+                if pipeline_line is not None:
+                    raw_pipeline = timeframed_line_val(
+                        pipeline_line,
+                        data=meta.get("data"),
+                        timeframe=meta.get("timeframe"),
+                        intraday_ago=intraday_ago,
+                    )
+                    pipeline_val = coerce_float(raw_pipeline)
+                else:
+                    pipeline_val = numeric
+                record_value(
+                    _metadata_feature_key(symbol, timeframe, "return_pipeline"),
+                    pipeline_val,
+                )
 
         self.ensure_filter_keys(values)
         return values
