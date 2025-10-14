@@ -69,6 +69,8 @@ src/
 tests/            # Integration and unit coverage for live worker & strategy
 Data/             # Contract metadata and roll rules
 docs/             # Deployment notes and historical planning docs
+config.example.yml # Template runtime configuration with environment expansion hints
+.env.example      # Template environment variables (copy to .env with real secrets)
 requirements.txt  # Python dependencies
 ```
 
@@ -81,6 +83,11 @@ Additional context:
   operational reference.
 - **tests/** – Validates the live worker orchestration and strategy behaviour,
   providing integration and unit-level examples contributors can extend.
+- **config.example.yml** – Reference runtime configuration showing required keys
+  and `${VAR}` expansion syntax. Copy to `config.yml` when provisioning a host.
+- **.env.example** – Safe template for Databento and TradersPost credentials
+  plus safety toggles. Duplicate as `.env` and fill with environment-specific
+  secrets.
 
 ## Core Modules
 
