@@ -1,0 +1,41 @@
+{
+  "contracts": [
+    {
+      "symbol": "ES",
+      "tradovate_symbol": "MES",
+      "tradovate_description": "Micro S&P",
+      "optimized": true,
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": "MES",
+        "product_id": "MES.FUT"
+      },
+      "roll": {
+        "stype_in": "product_id"
+      }
+    },
+    {
+      "symbol": "NQ",
+      "tradovate_symbol": "MNQ",
+      "optimized": false,
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": "MNQ",
+        "product_id": "MNQ.FUT"
+      },
+      "roll": {
+        "stype_in": "product_id"
+      }
+    }
+  ],
+  "reference_feeds": [
+    {
+      "symbol": "TLT",
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": "ZB",
+        "product_id": "ZB.FUT"
+      }
+    }
+  ]
+}

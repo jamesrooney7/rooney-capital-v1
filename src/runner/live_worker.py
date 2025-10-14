@@ -17,11 +17,12 @@ import signal
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, MutableMapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 import backtrader as bt
 
 from models import load_model_bundle, strategy_kwargs_from_bundle
+from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
 from runner.traderspost_client import (
     TradersPostClient,
@@ -34,11 +35,9 @@ from strategy.ibs_strategy import IbsStrategy
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "ContractMetadata",
     "InstrumentRuntimeConfig",
     "RuntimeConfig",
     "LiveWorker",
-    "load_contract_metadata",
     "load_runtime_config",
 ]
 
@@ -93,37 +92,6 @@ class NotifyingIbsStrategy(IbsStrategy):
 # ---------------------------------------------------------------------------
 # Configuration dataclasses
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class ContractMetadata:
-    """Metadata describing how to subscribe to a Databento feed for a symbol."""
-
-    symbol: str
-    dataset: str
-    feed_symbol: str
-    product_id: Optional[str] = None
-
-    @property
-    def subscription_codes(self) -> tuple[str, ...]:
-        """Return the subscription codes (product_id/feed_symbol) for Databento."""
-
-        candidates: list[str] = []
-        if self.product_id:
-            candidates.append(self.product_id)
-        if self.feed_symbol and self.feed_symbol != self.product_id:
-            candidates.append(self.feed_symbol)
-        if not candidates:
-            candidates.append(self.symbol)
-        # Preserve order while deduplicating
-        seen: set[str] = set()
-        ordered: list[str] = []
-        for candidate in candidates:
-            if candidate in seen:
-                continue
-            ordered.append(candidate)
-            seen.add(candidate)
-        return tuple(ordered)
 
 
 @dataclass(frozen=True)
@@ -206,30 +174,6 @@ def _load_json_or_yaml(path: Path) -> Mapping[str, Any]:
         return yaml.safe_load(text) or {}
     except Exception as exc:  # pragma: no cover - optional dependency
         raise ValueError(f"Unable to parse configuration file {path}: {exc}") from exc
-
-
-def load_contract_metadata(path: str | Path) -> Mapping[str, ContractMetadata]:
-    """Load Databento contract metadata from the deployment contract map."""
-
-    contract_path = Path(path)
-    payload = _load_json_or_yaml(contract_path)
-    contracts: MutableMapping[str, ContractMetadata] = {}
-    for entry in payload.get("contracts", []) or []:
-        symbol = str(entry.get("symbol") or "").strip().upper()
-        if not symbol:
-            continue
-        databento = entry.get("databento") or {}
-        dataset = str(databento.get("dataset") or "").strip()
-        feed_symbol = str(databento.get("feed_symbol") or symbol).strip()
-        product_id_raw = databento.get("product_id")
-        product_id = str(product_id_raw).strip() if product_id_raw else None
-        contracts[symbol] = ContractMetadata(
-            symbol=symbol,
-            dataset=dataset,
-            feed_symbol=feed_symbol,
-            product_id=product_id,
-        )
-    return contracts
 
 
 def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
@@ -325,37 +269,41 @@ class LiveWorker:
 
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
-        self.contracts = load_contract_metadata(config.contract_map_path)
-        if not self.contracts:
+        try:
+            self.contract_map: ContractMap = load_contract_map(config.contract_map_path)
+        except ContractMapError as exc:
+            raise RuntimeError(f"Failed to load contract metadata: {exc}") from exc
+
+        if not self.contract_map.symbols():
             raise RuntimeError("No contracts loaded from contract map")
 
         # Limit to the configured symbol universe.
         if config.symbols:
-            self.symbols = tuple(sym for sym in config.symbols if sym in self.contracts)
+            self.symbols = tuple(sym for sym in config.symbols if sym in self.contract_map)
         else:
-            self.symbols = tuple(sorted(self.contracts.keys()))
+            self.symbols = self.contract_map.symbols()
         if not self.symbols:
             raise RuntimeError("Runtime configuration did not reference any known symbols")
 
         product_to_root: Dict[str, str] = {}
-        dataset_map: Dict[str, set[str]] = {}
-        for symbol in self.symbols:
-            meta = self.contracts[symbol]
-            for code in meta.subscription_codes:
-                product_to_root[code] = symbol
-            dataset_map.setdefault(meta.dataset, set()).update(meta.subscription_codes)
+        for code, symbol in self.contract_map.product_to_root(self.symbols).items():
+            product_to_root[code] = symbol
+
+        dataset_groups = self.contract_map.dataset_groups(self.symbols)
 
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
-        self.subscribers = [
-            DatabentoSubscriber(
-                dataset=dataset,
-                product_codes=sorted(codes),
-                queue_manager=self.queue_manager,
-                api_key=config.databento_api_key,
-                heartbeat_interval=config.heartbeat_interval,
+        self.subscribers = []
+        for (dataset, stype_in), codes in dataset_groups.items():
+            self.subscribers.append(
+                DatabentoSubscriber(
+                    dataset=dataset,
+                    product_codes=sorted(codes),
+                    queue_manager=self.queue_manager,
+                    api_key=config.databento_api_key,
+                    heartbeat_interval=config.heartbeat_interval,
+                    stype_in=stype_in,
+                )
             )
-            for dataset, codes in dataset_map.items()
-        ]
 
         self.cerebro = bt.Cerebro()
         self.cerebro.broker.setcash(config.starting_cash)
@@ -382,7 +330,7 @@ class LiveWorker:
 
     def _setup_data_and_strategies(self) -> None:
         for symbol in self.symbols:
-            meta = self.contracts[symbol]
+            meta = self.contract_map.active_contract(symbol)
             instrument_cfg = self.config.instrument(symbol)
 
             data = DatabentoLiveData(symbol=symbol, queue_manager=self.queue_manager, backfill=self.config.backfill)
@@ -434,6 +382,9 @@ class LiveWorker:
         payload = order_notification_to_message(strategy, order)
         if not payload:
             return
+        metadata = self._metadata_for_symbol(payload.get("symbol"))
+        if metadata:
+            payload.setdefault("metadata", {}).update(metadata)
         try:
             self.traderspost_client.post_order(payload)
         except TradersPostError as exc:
@@ -465,6 +416,9 @@ class LiveWorker:
         payload = trade_notification_to_message(strategy, trade, exit_snapshot)
         if not payload:
             return
+        metadata = self._metadata_for_symbol(payload.get("symbol"))
+        if metadata:
+            payload.setdefault("metadata", {}).update(metadata)
         try:
             self.traderspost_client.post_trade(payload)
         except TradersPostError as exc:
@@ -565,6 +519,14 @@ class LiveWorker:
     def _wait_for_cerebro(self) -> None:
         if self._cerebro_thread:
             self._cerebro_thread.join()
+
+    def _metadata_for_symbol(self, symbol: Any) -> dict[str, Any]:
+        if not isinstance(symbol, str):
+            return {}
+        sym = symbol.strip().upper()
+        if not sym or sym not in self.contract_map:
+            return {}
+        return self.contract_map.traderspost_metadata(sym)
 
     def run(self) -> None:
         """Synchronous helper that drives :meth:`run_async`."""
