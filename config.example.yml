@@ -1,0 +1,86 @@
+# Rooney Capital live worker configuration template
+# -------------------------------------------------
+# Copy to `config.yml` (or another filename referenced by $PINE_RUNTIME_CONFIG)
+# and customise values for your environment. Comments explain how each section
+# influences the runtime. All secrets can be interpolated from the environment
+# using ${VAR_NAME} syntax so this file may remain in source control.
+
+# ---------------------------------------------------------------------------
+# Core paths and credentials
+# ---------------------------------------------------------------------------
+# Databento contract metadata that drives the subscription list. Keep this file
+# up to date with products enabled for your account.
+contract_map: Data/Databento_contract_map.yml
+
+# Directory containing trained ML bundles. Each symbol's bundle should live in a
+# subdirectory named after the root (see docs/deployment_roadmap.md for details).
+models_path: src/models
+
+# Symbols the worker should trade. If omitted the symbol list defaults to the
+# keys under `contracts:` below. Explicitly listing them keeps intent obvious.
+symbols:
+  - ES
+  - NQ
+  - RTY
+
+# Interpolate secrets via environment variables set in your `.env` file.
+databento_api_key: ${DATABENTO_API_KEY}
+traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
+
+# Emergency circuit breaker. Leave true while validating preflight checks, then
+# disable (false) for production trading once everything passes.
+killswitch: ${POLICY_KILLSWITCH}
+
+# ---------------------------------------------------------------------------
+# Cash management and runtime behaviour
+# ---------------------------------------------------------------------------
+starting_cash: 250000          # Initial cash balance used for risk sizing.
+backfill: true                 # Hydrate recent historical bars before trading.
+queue_maxsize: 4096            # Max internal market data queue depth per feed.
+heartbeat_interval: 30         # Seconds between watchdog heartbeats (None=off).
+heartbeat_file: /var/run/pine/worker_heartbeat.json
+heartbeat_write_interval: 30   # Seconds between heartbeat writes.
+poll_interval: 1.0             # Seconds between Databento poll cycles.
+
+# ---------------------------------------------------------------------------
+# Preflight validation controls
+# ---------------------------------------------------------------------------
+preflight:
+  enabled: true                # Toggle all validation (ML bundle + connectivity).
+  skip_ml_validation: false    # Skip loading ML bundles during preflight when true.
+  skip_connection_checks: false  # Skip Databento / TradersPost connectivity probes.
+  fail_fast: true              # Abort immediately on the first failure when true.
+
+# ---------------------------------------------------------------------------
+# Instrument-specific overrides
+# ---------------------------------------------------------------------------
+# Each symbol inherits defaults from src/runner/live_worker.py:InstrumentRuntimeConfig.
+# Provide contract sizing, commissions, and optional strategy overrides.
+contracts:
+  ES:
+    size: 1                    # Number of contracts per signal.
+    commission: 4.00           # Round-trip commission per contract (USD).
+    margin: 13200              # Exchange/Broker intraday margin requirement.
+    multiplier: 50             # Contract multiplier used for PnL translation.
+    strategy_overrides:
+      pair_symbol: NQ          # Override the default pair map for spread filters.
+      pair_threshold: 0.55     # Custom IBS pair confirmation threshold.
+      ml_model_version: 2024-01-15  # Document which bundle revision is deployed.
+  NQ:
+    size: 1
+    commission: 4.20
+    margin: 15400
+    multiplier: 20
+    strategy_overrides:
+      premarket_window: 30     # Skip entries until N minutes after session open.
+  RTY:
+    size: 2
+    commission: 4.50
+    margin: 8800
+    multiplier: 50
+    strategy_overrides:
+      disable_pair_trading: true  # Only trade standalone signals for RTY.
+      volatility_cap: 1.75        # Exit when realised volatility breaches this cap.
+
+# Optional: override paths for ad-hoc instruments without editing `symbols`.
+# Additional entries can be appended following the structure above.
