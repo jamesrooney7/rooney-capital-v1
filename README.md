@@ -290,6 +290,9 @@ checks during local development while still documenting the bypass in logs.
 
 ## Additional References
 
+- `docs/supporting_assets_assurance.md` – Catalogue of supporting
+  documentation, deployment runbooks, and test coverage that provide operational
+  context beyond the runtime modules.
 - `docs/deployment_roadmap.md` – Historical production roadmap, monitoring
   guidance, and operational checklists.
 - `docs/ml_bundle_review.md` – Deep dive into ML bundle metadata, highlighting
@@ -298,3 +301,5 @@ checks during local development while still documenting the bypass in logs.
 - `docs/monitoring_and_health_checks.md` – Operational playbook for configuring
   heartbeat files, lightweight probes, and staged alert coverage as monitoring
   matures.
+- `tests/README.md` – Overview of the automated test suite that guards the live
+  worker, strategy behaviour, and supporting loaders.
