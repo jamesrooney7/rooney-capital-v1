@@ -176,6 +176,7 @@ class RuntimeConfig:
     reconciliation_max_retries: int = 2
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
+    killswitch: bool = False
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
         cfg = self.instruments.get(symbol)
@@ -337,6 +338,14 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         fail_fast=_coerce_bool(preflight_payload.get("fail_fast"), True),
     )
 
+    killswitch_raw = payload.get("killswitch")
+    if killswitch_raw is None:
+        killswitch_raw = payload.get("policy_killswitch")
+    if killswitch_raw is not None:
+        killswitch = _coerce_bool(killswitch_raw, False)
+    else:
+        killswitch = _coerce_bool(os.environ.get("POLICY_KILLSWITCH"), False)
+
     return RuntimeConfig(
         databento_api_key=payload.get("databento_api_key") or os.environ.get("DATABENTO_API_KEY"),
         contract_map_path=contract_map_path,
@@ -357,6 +366,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         reconciliation_max_retries=reconciliation_max_retries,
         instruments=instruments,
         preflight=preflight_config,
+        killswitch=killswitch,
     )
 
 
@@ -766,6 +776,13 @@ class LiveWorker:
             except NotImplementedError:  # pragma: no cover - Windows
                 signal.signal(sig, lambda *_: _handle_signal(sig))
 
+        if getattr(self.config, "killswitch", False):
+            logger.critical("❌ STARTUP ABORTED: Policy killswitch enabled")
+            self._update_heartbeat(
+                status="failed", force=True, details={"stage": "killswitch"}
+            )
+            raise RuntimeError("Policy killswitch enabled")
+
         if not self.run_preflight_checks():
             logger.critical("❌ STARTUP ABORTED: Pre-flight checks failed")
             self._update_heartbeat(status="failed", force=True, details={"stage": "preflight"})
@@ -1094,6 +1111,16 @@ class LiveWorker:
         logger.info(separator)
 
         preflight_cfg = getattr(self.config, "preflight", PreflightConfig())
+
+        if getattr(self.config, "killswitch", False):
+            logger.info("")
+            logger.error("❌ POLICY KILLSWITCH ENABLED: refusing to start worker")
+            logger.info("")
+            logger.info(separator)
+            logger.error("❌ PRE-FLIGHT CHECKS FAILED")
+            logger.error("Failed checks: Policy Killswitch")
+            logger.info(separator)
+            return False
 
         if not preflight_cfg.enabled:
             logger.info("")
