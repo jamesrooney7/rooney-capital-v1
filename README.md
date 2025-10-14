@@ -50,3 +50,9 @@ cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
 > **Note:** The ``*_rf_model.pkl`` artefacts are stored with Git LFS.  Ensure
 > you have pulled the large files (``git lfs pull``) before attempting to load
 > the models in a fresh clone.
+
+## Documentation
+
+- [Component overview](docs/components_readme.md) – Detailed walk-through of
+  every module, how data flows from Databento into Backtrader, and how
+  executions reach TradersPost.
