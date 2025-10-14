@@ -22,6 +22,7 @@ machine-learning veto models and live order routing through TradersPost.
   - [Local/Paper Trading](#localpaper-trading)
   - [Production via systemd](#production-via-systemd)
 - [Operations & Safety](#operations--safety)
+- [Ubuntu Launch Guide](#ubuntu-launch-guide)
 - [Additional References](#additional-references)
 
 ## System Overview
@@ -300,8 +301,18 @@ failure is detected (unless `preflight.fail_fast` is set to `false`):
 Configuration toggles under `preflight.*` allow skipping ML or connectivity
 checks during local development while still documenting the bypass in logs.
 
+## Ubuntu Launch Guide
+
+Need a step-by-step, copy-and-paste friendly provisioning flow for a fresh
+Ubuntu host? See the dedicated [Ubuntu launch guide](docs/ubuntu_launch_guide.md)
+for four deployment sprints covering dependency installs, credential setup,
+validation, and systemd hardening.
+
 ## Additional References
 
+- `docs/ubuntu_launch_guide.md` – End-to-end Ubuntu provisioning guide covering
+  dependency installation, runtime configuration, validation, and systemd
+  deployment.
 - `docs/supporting_assets_assurance.md` – Catalogue of supporting
   documentation, deployment runbooks, and test coverage that provide operational
   context beyond the runtime modules.
