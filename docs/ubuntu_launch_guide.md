@@ -474,8 +474,9 @@ set -a
 source /opt/pine/runtime/.env
 set +a
 
-# Enable kill switch for testing (no real orders)
-export POLICY_KILLSWITCH=true
+# Temporarily disable the kill switch — the worker refuses to start when it is true
+# (the .env file will keep the safe default of true for future shells)
+export POLICY_KILLSWITCH=false
 
 # Run test
 python scripts/worker_preflight.py
@@ -506,8 +507,8 @@ set -a
 source /opt/pine/runtime/.env
 set +a
 
-# Keep kill switch enabled for testing
-export POLICY_KILLSWITCH=true
+# Keep the kill switch disabled for this manual run (required for the worker to start)
+export POLICY_KILLSWITCH=false
 
 # Launch worker (will run until Ctrl+C)
 python scripts/launch_worker.py
@@ -519,6 +520,10 @@ python scripts/launch_worker.py
 # - No errors in logs
 
 # Press Ctrl+C to stop gracefully
+
+# When you're done testing, re-enable the kill switch so production stays in
+# paper mode until you're ready to go live
+export POLICY_KILLSWITCH=true
 ```
 
 ---
