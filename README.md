@@ -73,9 +73,9 @@ requirements.txt  # Python dependencies
 
 Additional context:
 
-- **Data/** – Static metadata (`Databento_contract_map.yml`,
-  `data_reference_contracts.yml`) that drive subscription choices and audit
-  rolls.
+- **Data/** – Static metadata (`Databento_contract_map.yml`) that drive
+  subscription choices and audit rolls. Reference subscriptions live inside the
+  `reference_feeds` block of this contract map.
 - **docs/** – Includes the deployment roadmap and background notes preserved for
   operational reference.
 
@@ -154,9 +154,9 @@ cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
    `git lfs install` followed by `git lfs pull`.
 2. **Create a virtual environment** (Python 3.10+) and install dependencies:
    `pip install -r requirements.txt`.
-3. **Populate data metadata** as needed in `Data/Databento_contract_map.yml` and
-   `Data/data_reference_contracts.yml` so the worker can subscribe to the desired
-   products and audit reference rolls.
+3. **Populate data metadata** as needed in `Data/Databento_contract_map.yml` so
+   the worker can subscribe to the desired products. Reference subscriptions are
+   defined via the `reference_feeds` block inside this file.
 4. **Ensure credentials** (Databento API key, TradersPost webhook URL) are
    available via environment variables or the runtime configuration file.
 
