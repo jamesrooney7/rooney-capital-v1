@@ -292,3 +292,9 @@ checks during local development while still documenting the bypass in logs.
 
 - `docs/deployment_roadmap.md` – Historical production roadmap, monitoring
   guidance, and operational checklists.
+- `docs/ml_bundle_review.md` – Deep dive into ML bundle metadata, highlighting
+  feature mismatches between saved snapshots and model expectations plus
+  remediation steps.
+- `docs/monitoring_and_health_checks.md` – Operational playbook for configuring
+  heartbeat files, lightweight probes, and staged alert coverage as monitoring
+  matures.
