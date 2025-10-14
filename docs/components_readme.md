@@ -43,13 +43,13 @@ posts resulting executions to TradersPost.
   this component-level overview.
 - **Data/** – Static metadata required for roll decisions and contract
   governance.
-- **Examples/** – Notebooks or scripts demonstrating usage patterns for the
-  strategy (placeholder directory in this repository snapshot).
-- **bin/** – Operational scripts or service helpers (not populated in this
-  snapshot).
-- **tests/** – Pytest suite covering configuration parsing, contract map
-  loaders, Databento bridge behaviour, TradersPost client retries, and strategy
-  integration hooks.
+- **Examples/** – Removed in this snapshot; future walkthroughs can live in ad
+  hoc notebooks alongside feature branches instead of this placeholder.
+- **bin/** – Removed pending a replacement for the former heartbeat helper that
+  depended on an unreleased `deployment_runtime` package.
+- **tests/** – Historical pytest suite (configuration parsing, contract map
+  loaders, TradersPost client retries) that has been retired pending a new test
+  plan aligned with the current runtime.
 
 ### `src/config.py`
 
@@ -154,11 +154,10 @@ The live orchestrator that stitches everything together:
 
 ### `tests/`
 
-Pytest suite verifying critical infrastructure:
-
-- Contract map parsing, symbol lookups, and error handling.
-- TradersPost client retry/backoff logic and error translation.
-- Configuration module defaults and environment override handling.
+This snapshot does not include an active automated test suite.  The previous
+pytest collection covering configuration parsing, contract map lookups, and the
+TradersPost client was removed while the team defines updated coverage targets
+for the live runtime components.
 
 ## Supporting Documentation
 
