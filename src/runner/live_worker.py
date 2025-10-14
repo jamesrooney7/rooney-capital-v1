@@ -23,6 +23,12 @@ import backtrader as bt
 
 from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
+from runner.traderspost_client import (
+    TradersPostClient,
+    TradersPostError,
+    order_notification_to_message,
+    trade_notification_to_message,
+)
 from strategy.ibs_strategy import IbsStrategy
 
 logger = logging.getLogger(__name__)
@@ -35,6 +41,53 @@ __all__ = [
     "load_contract_metadata",
     "load_runtime_config",
 ]
+
+
+# ---------------------------------------------------------------------------
+# Strategy wrapper adding external notification callbacks
+# ---------------------------------------------------------------------------
+
+
+class NotifyingIbsStrategy(IbsStrategy):
+    """`IbsStrategy` wrapper that forwards order/trade notifications."""
+
+    def __init__(
+        self,
+        *args: Any,
+        order_callbacks: Optional[list[Callable[["NotifyingIbsStrategy", Any], None]]] = None,
+        trade_callbacks: Optional[
+            list[Callable[["NotifyingIbsStrategy", Any, Optional[Mapping[str, Any]]], None]]
+        ] = None,
+        **kwargs: Any,
+    ) -> None:
+        self._external_order_callbacks = list(order_callbacks or [])
+        self._external_trade_callbacks = list(trade_callbacks or [])
+        super().__init__(*args, **kwargs)
+
+    def notify_order(self, order: Any) -> None:
+        super().notify_order(order)
+        if not self._external_order_callbacks:
+            return
+        for callback in list(self._external_order_callbacks):
+            try:
+                callback(self, order)
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Order notification callback failed")
+
+    def notify_trade(self, trade: Any) -> None:
+        exit_snapshot: Optional[Mapping[str, Any]] = None
+        if getattr(trade, "isclosed", False):
+            pending_exit = getattr(self, "pending_exit", None)
+            if isinstance(pending_exit, Mapping):
+                exit_snapshot = dict(pending_exit)
+        super().notify_trade(trade)
+        if not self._external_trade_callbacks:
+            return
+        for callback in list(self._external_trade_callbacks):
+            try:
+                callback(self, trade, exit_snapshot)
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Trade notification callback failed")
 
 
 # ---------------------------------------------------------------------------
@@ -126,6 +179,7 @@ class RuntimeConfig:
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     poll_interval: float = 1.0
+    traderspost_webhook: Optional[str] = None
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
@@ -231,6 +285,13 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     except (TypeError, ValueError):
         poll_interval = 1.0
 
+    traderspost_payload = payload.get("traderspost") or {}
+    webhook_url = (
+        payload.get("traderspost_webhook")
+        or traderspost_payload.get("webhook")
+        or os.environ.get("TRADERSPOST_WEBHOOK_URL")
+    )
+
     contracts_payload = payload.get("contracts") or {}
     instruments: Dict[str, InstrumentRuntimeConfig] = {}
     for symbol, cfg_payload in contracts_payload.items():
@@ -249,6 +310,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
         poll_interval=poll_interval,
+        traderspost_webhook=webhook_url,
         instruments=instruments,
     )
 
@@ -301,6 +363,17 @@ class LiveWorker:
         self._stop_event = threading.Event()
         self._loop_callbacks: list[Callable[[], None]] = []
 
+        self.traderspost_client: Optional[TradersPostClient]
+        if config.traderspost_webhook:
+            try:
+                self.traderspost_client = TradersPostClient(config.traderspost_webhook)
+                logger.info("TradersPost client initialised")
+            except Exception:
+                logger.exception("Failed to initialise TradersPost client")
+                self.traderspost_client = None
+        else:
+            self.traderspost_client = None
+
         self._setup_data_and_strategies()
 
     # ------------------------------------------------------------------
@@ -330,7 +403,20 @@ class LiveWorker:
             strategy_kwargs.update(bundle_kwargs)
             strategy_kwargs.update(instrument_cfg.strategy_overrides)
 
-            self.cerebro.addstrategy(IbsStrategy, **strategy_kwargs)
+            order_callbacks: list[Callable[[NotifyingIbsStrategy, Any], None]] = []
+            trade_callbacks: list[
+                Callable[[NotifyingIbsStrategy, Any, Optional[Mapping[str, Any]]], None]
+            ] = []
+            if self.traderspost_client:
+                order_callbacks.append(self._traderspost_order_callback)
+                trade_callbacks.append(self._traderspost_trade_callback)
+
+            self.cerebro.addstrategy(
+                NotifyingIbsStrategy,
+                order_callbacks=order_callbacks,
+                trade_callbacks=trade_callbacks,
+                **strategy_kwargs,
+            )
 
             commission_args: Dict[str, Any] = {"name": symbol, "commission": instrument_cfg.commission}
             if instrument_cfg.margin is not None:
@@ -341,6 +427,63 @@ class LiveWorker:
                 self.cerebro.broker.setcommission(**commission_args)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to apply commission for %s", symbol)
+
+    def _traderspost_order_callback(self, strategy: NotifyingIbsStrategy, order: Any) -> None:
+        if not self.traderspost_client:
+            return
+        payload = order_notification_to_message(strategy, order)
+        if not payload:
+            return
+        try:
+            self.traderspost_client.post_order(payload)
+        except TradersPostError as exc:
+            logger.error(
+                "TradersPost order post failed for %s %s size=%s: %s",
+                payload.get("symbol"),
+                payload.get("side"),
+                payload.get("size"),
+                exc,
+            )
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Unexpected TradersPost order post failure")
+        else:
+            logger.info(
+                "Posted order event to TradersPost: %s %s size=%s",
+                payload.get("symbol"),
+                payload.get("side"),
+                payload.get("size"),
+            )
+
+    def _traderspost_trade_callback(
+        self,
+        strategy: NotifyingIbsStrategy,
+        trade: Any,
+        exit_snapshot: Optional[Mapping[str, Any]],
+    ) -> None:
+        if not self.traderspost_client:
+            return
+        payload = trade_notification_to_message(strategy, trade, exit_snapshot)
+        if not payload:
+            return
+        try:
+            self.traderspost_client.post_trade(payload)
+        except TradersPostError as exc:
+            logger.error(
+                "TradersPost trade post failed for %s %s size=%s: %s",
+                payload.get("symbol"),
+                payload.get("side"),
+                payload.get("size"),
+                exc,
+            )
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Unexpected TradersPost trade post failure")
+        else:
+            logger.info(
+                "Posted trade event to TradersPost: %s %s size=%s",
+                payload.get("symbol"),
+                payload.get("side"),
+                payload.get("size"),
+            )
 
     def _run_cerebro(self) -> None:
         logger.info("Starting Backtrader runtime for symbols: %s", ", ".join(self.symbols))

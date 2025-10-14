@@ -51,8 +51,11 @@ deployment_runtime/
 configs/
 engine/
 tests/
+!tests/
+!tests/test_traderspost_client.py
 Final Strategies/
 requests_local/
 *.py
 !src/**/*.py
 !deployment/**/*.py
+!tests/**/*.py
