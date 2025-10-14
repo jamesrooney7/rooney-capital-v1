@@ -55,8 +55,8 @@ def _successful_config(preflight: PreflightConfig | None = None) -> RuntimeConfi
         heartbeat_write_interval=30.0,
         poll_interval=0.1,
         traderspost_webhook="https://example.com/webhook",
-        traderspost_api_base=None,
-        traderspost_api_key=None,
+        traderspost_api_base="https://api.example.com",
+        traderspost_api_key="secret",
         reconciliation_enabled=False,
         reconciliation_wait_seconds=0.0,
         reconciliation_max_retries=0,
@@ -78,6 +78,11 @@ def _patch_successful_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
         live_worker.requests,
         "post",
         lambda url, json=None, timeout=None: _Response(),
+    )
+    monkeypatch.setattr(
+        live_worker.TradersPostClient,
+        "get_pending_orders",
+        lambda self, symbol: [],
     )
     monkeypatch.setattr(databento, "Live", DummyLive)
 
@@ -119,6 +124,21 @@ def test_preflight_traderspost_failure(monkeypatch: pytest.MonkeyPatch, caplog: 
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: TradersPost Connection" in caplog.text
+
+
+def test_preflight_traderspost_missing_api_base(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    _patch_successful_dependencies(monkeypatch)
+
+    config = replace(
+        _successful_config(),
+        reconciliation_enabled=True,
+        traderspost_api_base=None,
+    )
+    worker = LiveWorker(config)
+
+    caplog.set_level(logging.INFO)
+    assert worker.run_preflight_checks() is False
+    assert "TradersPost API base URL not configured" in caplog.text
 
 
 def test_preflight_databento_invalid_key(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:

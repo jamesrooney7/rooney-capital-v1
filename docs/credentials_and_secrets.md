@@ -22,7 +22,7 @@ placeholders (via `os.path.expandvars`) before any other validation occurs.
 2. Point the worker at the runtime config file: `export PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml`.
 3. The loader in `src/runner/live_worker.py` reads secrets in the following priority order:
    - Explicit values inside the runtime config file.
-   - Environment variables (`DATABENTO_API_KEY`, `TRADERSPOST_WEBHOOK_URL`, `TRADERSPOST_API_KEY`, etc.).
+   - Environment variables (`DATABENTO_API_KEY`, `TRADERSPOST_WEBHOOK_URL`, `TRADERSPOST_API_BASE_URL`, `TRADERSPOST_API_KEY`, etc.).
 
 Prefer the environment-variable path so that configs can remain in Git without hard-coded credentials.
 
@@ -49,6 +49,8 @@ Document which key belongs to which environment in the runbook so operations sta
 
 For Databento keys, confirm connectivity by running the worker's pre-flight checks. For TradersPost webhooks, send a
 manual `curl` health check (identical to what `LiveWorker.run_preflight_checks()` does) before cutting over live trading.
+When reconciliation is enabled, also verify the TradersPost REST API base URL and key by running the pre-flight checks –
+they now hit `get_pending_orders` to ensure portfolio endpoints are reachable.
 
 ## 5. Handling secrets on a terminal server
 
