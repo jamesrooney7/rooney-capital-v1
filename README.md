@@ -158,7 +158,9 @@ cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
    the worker can subscribe to the desired products. Reference subscriptions are
    defined via the `reference_feeds` block inside this file.
 4. **Ensure credentials** (Databento API key, TradersPost webhook URL) are
-   available via environment variables or the runtime configuration file.
+   available via environment variables or the runtime configuration file. See
+   [Credentials & Secrets Management](docs/credentials_and_secrets.md) for
+   detailed guidance on storage, rotation, and environment separation.
 
 ## Runtime Configuration
 

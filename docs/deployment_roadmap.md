@@ -100,7 +100,10 @@ Holds the Databento API key, TradersPost secrets, and other runtime credentials.
 - Heartbeat files for each worker; alert if >90s gap.
 
 ## 10) Security & Secrets
-- Store API keys in env files, chmod 600.
+- Store API keys in env files, chmod 600. Follow the
+  [Credentials & Secrets Management guide](./credentials_and_secrets.md) for
+  environment-specific storage locations, rotation steps, and developer
+  practices.
 - Never log raw secrets.
 
 ## 11) Test Plan (Bring-up → Paper → Live)
