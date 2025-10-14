@@ -108,6 +108,34 @@ SYMBOL_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
 CROSS_FEED_ALIASES: dict[str, str] = {}
 
 
+EXIT_PARAM_DEFAULTS: dict[str, object] = {
+    "enable_stop": True,
+    "stop_type": "Percent",
+    "stop_perc": 1.0,
+    "stop_atr_len": 14,
+    "stop_atr_mult": 1.0,
+    "enable_tp": True,
+    "tp_type": "Percent",
+    "tp_perc": 1.0,
+    "tp_atr_len": 14,
+    "tp_atr_mult": 0.5,
+    "enable_bar_stop": True,
+    "bar_stop_bars": 8,
+    "enable_auto_close": True,
+    "auto_close_time": 1500,
+}
+
+
+IBS_ENTRY_EXIT_DEFAULTS: dict[str, object] = {
+    "enable_ibs_entry": True,
+    "ibs_entry_low": 0.0,
+    "ibs_entry_high": 0.2,
+    "enable_ibs_exit": True,
+    "ibs_exit_low": 0.8,
+    "ibs_exit_high": 1.0,
+}
+
+
 def _param_prefixes(symbol: str) -> tuple[str, ...]:
     aliases = SYMBOL_PARAM_ALIASES.get(symbol)
     if aliases:
@@ -448,20 +476,7 @@ class IbsStrategy(bt.Strategy):
         start_time2="1700",
         end_time2="2400",
         # Exit options
-        enable_stop=True,
-        stop_type="Percent",
-        stop_perc=1.0,
-        stop_atr_len=14,
-        stop_atr_mult=1.0,
-        enable_tp=True,
-        tp_type="Percent",
-        tp_perc=1.0,
-        tp_atr_len=14,
-        tp_atr_mult=0.5,
-        enable_bar_stop=True,
-        bar_stop_bars=8,
-        enable_auto_close=True,
-        auto_close_time=1500,
+        **EXIT_PARAM_DEFAULTS,
         # Calendar filters
         enable_dow=False,
         allowed_dow="1,2,3,4,5",
@@ -480,12 +495,7 @@ class IbsStrategy(bt.Strategy):
         prev_bar_pct_high=1.0,
         prev_bar_pct_tf="Hourly",
         # IBS filters
-        enable_ibs_entry=True,
-        ibs_entry_low=0.0,
-        ibs_entry_high=0.2,
-        enable_ibs_exit=True,
-        ibs_exit_low=0.8,
-        ibs_exit_high=1.0,
+        **IBS_ENTRY_EXIT_DEFAULTS,
         enable_daily_ibs=False,
         daily_ibs_low=0.0,
         daily_ibs_high=0.2,
