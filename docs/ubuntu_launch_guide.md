@@ -453,82 +453,12 @@ echo "Databento key: ${DATABENTO_API_KEY:0:10}..."
 echo "TradersPost webhook: ${TRADERSPOST_WEBHOOK_URL}"
 ```
 
-### 3.2 Create Test Script
+### 3.2 Use the Repository Preflight Script
 
-```bash
-cd /opt/pine/rooney-capital-v1
-
-cat > test_worker.py << 'EOF'
-#!/usr/bin/env python3
-"""Test worker launch with dry-run validation."""
-import sys
-import os
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-from runner import LiveWorker, load_runtime_config
-
-def main():
-    print("=== Rooney Capital Worker Test ===\n")
-    
-    # Load configuration
-    print("Loading runtime configuration...")
-    try:
-        config = load_runtime_config()
-    except Exception as e:
-        print(f"✗ Failed to load configuration: {e}")
-        return 1
-    
-    print(f"✓ Configuration loaded")
-    print(f"  Symbols: {config.symbols}")
-    print(f"  Starting cash: ${config.starting_cash:,.0f}")
-    print(f"  Models path: {config.models_path}")
-    print(f"  Killswitch: {config.killswitch}\n")
-    
-    if config.killswitch:
-        print("✓ Killswitch is ENABLED (paper trading mode)")
-    else:
-        print("⚠️  WARNING: Killswitch is DISABLED (live trading mode)")
-    
-    # Create worker instance
-    print("\nInitializing worker...")
-    try:
-        worker = LiveWorker(config)
-    except Exception as e:
-        print(f"✗ Failed to initialize worker: {e}")
-        return 1
-    
-    print("✓ Worker created")
-    print(f"  Trading symbols: {', '.join(worker.symbols)}")
-    print(f"  Reference feeds: {', '.join(worker.reference_symbols)}")
-    print(f"  Total data feeds: {len(worker.data_symbols)}\n")
-    
-    # Run preflight checks
-    print("Running preflight checks...")
-    try:
-        passed = worker.run_preflight_checks()
-    except Exception as e:
-        print(f"\n✗ Preflight checks failed with error: {e}")
-        return 1
-    
-    if not passed:
-        print("\n✗ Preflight checks failed - see errors above")
-        return 1
-    
-    print("\n=== Test Complete ===")
-    print("✓ Worker is ready for launch.")
-    print("\nTo start live trading:")
-    print("  1. Disable killswitch in /opt/pine/runtime/.env")
-    print("  2. Run: python launch_worker.py")
-    return 0
-
-if __name__ == "__main__":
-    sys.exit(main())
-EOF
-
-chmod +x test_worker.py
-```
+The repository ships with `scripts/worker_preflight.py`, which loads the
+runtime configuration and runs `LiveWorker.run_preflight_checks()` with the
+same logging shown above. There is nothing to create manually—the next step
+shows how to execute it with your paper-trading environment variables.
 
 ### 3.3 Run Test with Paper Trading Configuration
 
@@ -548,7 +478,7 @@ set +a
 export POLICY_KILLSWITCH=true
 
 # Run test
-python test_worker.py
+python scripts/worker_preflight.py
 ```
 
 **Expected output:**
@@ -558,63 +488,9 @@ python test_worker.py
 
 ### 3.4 Create Launch Script
 
-```bash
-cd /opt/pine/rooney-capital-v1
-
-cat > launch_worker.py << 'EOF'
-#!/usr/bin/env python3
-"""Launch the live trading worker."""
-import sys
-import os
-
-# Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
-
-from runner import LiveWorker, load_runtime_config
-
-def main():
-    print("=== Rooney Capital Worker Starting ===\n")
-    
-    # Load configuration
-    config = load_runtime_config()
-    
-    # Check for kill switch
-    if config.killswitch:
-        print("⚠️  POLICY KILLSWITCH IS ENABLED")
-        print("    No orders will be sent - paper trading mode")
-        print("    Set POLICY_KILLSWITCH=false in .env to enable live trading\n")
-    else:
-        print("🚨 LIVE TRADING MODE - Real orders will be sent")
-        print("    Set POLICY_KILLSWITCH=true in .env to enable paper trading\n")
-    
-    print(f"Trading symbols: {', '.join(config.symbols)}")
-    print(f"Starting cash: ${config.starting_cash:,.0f}")
-    if config.heartbeat_file:
-        print(f"Heartbeat file: {config.heartbeat_file}")
-    print()
-    
-    # Create and run worker
-    # Note: run() handles signal handling internally via run_async()
-    worker = LiveWorker(config)
-    
-    print("Starting worker (Ctrl+C to stop gracefully)...\n")
-    worker.run()
-
-if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\n\nShutdown requested by user")
-        sys.exit(0)
-    except Exception as e:
-        print(f"\n\nFATAL ERROR: {e}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
-        sys.exit(1)
-EOF
-
-chmod +x launch_worker.py
-```
+The repository-maintained `scripts/launch_worker.py` takes care of adjusting the
+`PYTHONPATH`, prints the same guardrails about the kill switch, and calls
+`LiveWorker.run()`.
 
 ### 3.5 Test Manual Launch (Paper Mode)
 
@@ -634,7 +510,7 @@ set +a
 export POLICY_KILLSWITCH=true
 
 # Launch worker (will run until Ctrl+C)
-python launch_worker.py
+python scripts/launch_worker.py
 
 # Let it run for 2-3 minutes, watch for:
 # - Successful Databento connection
@@ -671,7 +547,7 @@ Environment="PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml"
 Environment="PYTHONUNBUFFERED=1"
 
 # Virtual environment
-ExecStart=/opt/pine/rooney-capital-v1/venv/bin/python /opt/pine/rooney-capital-v1/launch_worker.py
+ExecStart=/opt/pine/rooney-capital-v1/venv/bin/python /opt/pine/rooney-capital-v1/scripts/launch_worker.py
 
 # Restart configuration
 Restart=on-failure
@@ -736,129 +612,26 @@ echo "✓ Log rotation configured for user: $USER"
 
 ### 4.4 Create Monitoring Script
 
+The monitoring helper now lives in `scripts/monitor_worker.sh`. It reports the
+systemd status, validates the heartbeat freshness, and prints recent logs. You
+can invoke it directly from the repository:
+
 ```bash
-cat > /opt/pine/monitor_worker.sh << 'EOF'
-#!/bin/bash
-# Monitor worker health and heartbeat
-
-HEARTBEAT_FILE="/var/run/pine/worker_heartbeat.json"
-MAX_AGE_SECONDS=120
-
-echo "=== Pine Worker Monitor ==="
-echo
-
-# Check service status
-echo "Service Status:"
-systemctl is-active pine-runner.service
-echo
-
-# Check heartbeat
-if [ -f "$HEARTBEAT_FILE" ]; then
-    echo "Heartbeat file exists: $HEARTBEAT_FILE"
-    
-    # Get file age
-    FILE_AGE=$(($(date +%s) - $(stat -c %Y "$HEARTBEAT_FILE")))
-    echo "Heartbeat age: ${FILE_AGE}s"
-    
-    if [ $FILE_AGE -gt $MAX_AGE_SECONDS ]; then
-        echo "⚠️  WARNING: Heartbeat is stale (>${MAX_AGE_SECONDS}s)"
-    else
-        echo "✓ Heartbeat is fresh"
-    fi
-    
-    echo
-    echo "Latest heartbeat:"
-    cat "$HEARTBEAT_FILE" | python3 -m json.tool 2>/dev/null || cat "$HEARTBEAT_FILE"
-else
-    echo "✗ Heartbeat file not found"
-fi
-
-echo
-echo "Recent logs (last 20 lines):"
-sudo journalctl -u pine-runner.service -n 20 --no-pager
-EOF
-
-chmod +x /opt/pine/monitor_worker.sh
+cd /opt/pine/rooney-capital-v1
+sudo ./scripts/monitor_worker.sh
 ```
 
 ### 4.5 Pre-Production Checklist
 
 Before starting live trading, verify:
 
+`scripts/pre_launch_checklist.sh` now performs the final readiness sweep (models,
+runtime config, env file, systemd service, and kill switch status) without any
+manual file creation. Run it from the repository root:
+
 ```bash
 cd /opt/pine/rooney-capital-v1
-
-# Checklist script
-cat > pre_launch_checklist.sh << 'EOF'
-#!/bin/bash
-
-echo "=== Pre-Launch Checklist ==="
-echo
-
-# Check 1: ML Models
-echo "[1/7] Checking ML models..."
-MODEL_COUNT=$(ls -1 src/models/*_rf_model.pkl 2>/dev/null | wc -l)
-if [ $MODEL_COUNT -gt 0 ]; then
-    echo "✓ Found $MODEL_COUNT ML model(s)"
-else
-    echo "✗ No ML models found"
-fi
-
-# Check 2: Configuration
-echo "[2/7] Checking configuration..."
-if [ -f "/opt/pine/runtime/config.yml" ]; then
-    echo "✓ Runtime config exists"
-else
-    echo "✗ Runtime config missing"
-fi
-
-# Check 3: Environment file
-echo "[3/7] Checking environment file..."
-if [ -f "/opt/pine/runtime/.env" ]; then
-    echo "✓ Environment file exists"
-else
-    echo "✗ Environment file missing"
-fi
-
-# Check 4: Contract map
-echo "[4/7] Checking contract map..."
-if [ -f "Data/Databento_contract_map.yml" ]; then
-    echo "✓ Contract map exists"
-else
-    echo "✗ Contract map missing"
-fi
-
-# Check 5: Virtual environment
-echo "[5/7] Checking virtual environment..."
-if [ -d "venv" ]; then
-    echo "✓ Virtual environment exists"
-else
-    echo "✗ Virtual environment missing"
-fi
-
-# Check 6: Service file
-echo "[6/7] Checking systemd service..."
-if systemctl list-unit-files | grep -q pine-runner.service; then
-    echo "✓ Service file installed"
-else
-    echo "✗ Service file not found"
-fi
-
-# Check 7: Kill switch status
-echo "[7/7] Checking kill switch..."
-source /opt/pine/runtime/.env
-if [ "$POLICY_KILLSWITCH" == "true" ]; then
-    echo "⚠️  Kill switch is ENABLED (safe mode)"
-else
-    echo "✓ Kill switch is disabled (live trading enabled)"
-fi
-
-echo
-echo "=== Checklist Complete ==="
-EOF
-
-chmod +x pre_launch_checklist.sh
-./pre_launch_checklist.sh
+./scripts/pre_launch_checklist.sh
 ```
 
 ### 4.6 Start Production Service (Paper Trading Mode)
@@ -954,7 +727,7 @@ sudo systemctl restart pine-runner.service
 sudo systemctl stop pine-runner.service
 
 # Method 3: Kill process (last resort)
-sudo pkill -f launch_worker.py
+sudo pkill -f scripts/launch_worker.py
 ```
 
 ### Troubleshooting
@@ -975,7 +748,7 @@ ls -la /var/run/pine/
 cd /opt/pine/rooney-capital-v1
 source venv/bin/activate
 export PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml
-python test_worker.py
+python scripts/worker_preflight.py
 
 # Check Databento connectivity
 ping api.databento.com
@@ -1050,7 +823,8 @@ sudo cat /etc/systemd/system/pine-runner.service | grep EnvironmentFile
 
 ```bash
 # Run daily monitoring
-/opt/pine/monitor_worker.sh
+cd /opt/pine/rooney-capital-v1
+./scripts/monitor_worker.sh
 
 # Check for any errors
 sudo journalctl -u pine-runner.service --since today -p err
@@ -1149,7 +923,7 @@ cd /opt/pine/rooney-capital-v1
 source venv/bin/activate
 export PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml
 set -a && source /opt/pine/runtime/.env && set +a
-python test_worker.py
+python scripts/worker_preflight.py
 
 # If successful, restart live service
 sudo systemctl restart pine-runner.service
@@ -1199,7 +973,7 @@ Before enabling live trading (disabling kill switch), verify ALL items:
 - [ ] Service starts automatically: `systemctl is-enabled pine-runner.service`
 - [ ] Sufficient disk space (at least 5GB free)
 - [ ] Log rotation configured
-- [ ] Monitoring script works: `/opt/pine/monitor_worker.sh`
+- [ ] Monitoring script works: `./scripts/monitor_worker.sh`
 - [ ] Emergency stop procedure tested
 
 ### TradersPost Configuration
@@ -1274,7 +1048,7 @@ sudo journalctl -u pine-runner.service -f
 sudo systemctl status pine-runner.service
 
 # Monitor health
-/opt/pine/monitor_worker.sh
+cd /opt/pine/rooney-capital-v1 && ./scripts/monitor_worker.sh
 
 # Emergency stop
 sudo sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/runtime/.env
