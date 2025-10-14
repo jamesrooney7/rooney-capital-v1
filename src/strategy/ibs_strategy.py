@@ -36,7 +36,6 @@ REFERENCE_SYMBOLS: set[str] = {
     "6N",
     "6S",
     "TLT",
-    "DXY",
     "VIX",
 }
 
@@ -78,7 +77,6 @@ CROSS_Z_INSTRUMENTS = [
     "NG",
     "TLT",
     "VIX",
-    "DX",
 ]
 
 CROSS_Z_TIMEFRAMES: list[tuple[str, str, str]] = [
@@ -97,10 +95,9 @@ SYMBOL_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
     "6M": ("sixM", "6m"),
     "6N": ("sixN", "6n"),
     "6S": ("sixS", "6s"),
-    "DX": ("dx", "dxy"),
 }
 
-CROSS_FEED_ALIASES: dict[str, str] = {"DX": "DXY"}
+CROSS_FEED_ALIASES: dict[str, str] = {}
 
 
 def _param_prefixes(symbol: str) -> tuple[str, ...]:
@@ -481,10 +478,6 @@ class IbsStrategy(bt.Strategy):
         vix_mode="Risk On",
         vix_len=100,
         vix_tf="Daily",
-        enable_dxy=False,
-        dxy_mode="Risk On",
-        dxy_len=100,
-        dxy_tf="Daily",
         # RSI filters
         enable_rsi_entry=False,
         rsi_entry_len=5,
@@ -1137,7 +1130,6 @@ class IbsStrategy(bt.Strategy):
             "6S",
             "TLT",
             "VIX",
-            "DX",
         }
         for symbol in preload_symbols:
             for tf_key, feed_suffix, _friendly in CROSS_Z_TIMEFRAMES:
@@ -1230,24 +1222,6 @@ class IbsStrategy(bt.Strategy):
                 period = get_period(self.p.vix_len)
                 median = RollingMedian(data.close, period=period)
                 self.vix_median = bt.Max(median, 1e-12)
-
-        self.dxy_data = None
-        self.dxy_ma = None
-        if self.p.enable_dxy or "enableDXY" in self.filter_keys:
-            tf = str(self.p.dxy_tf).lower()
-            name = "DXY_day" if tf.startswith("d") else "DXY_hour"
-            try:
-                data = self.getdatabyname(name)
-            except KeyError:
-                data = None
-            if data is None or data._name != name:
-                logging.warning("Missing data feed %s for regime filter", name)
-            else:
-                self.dxy_data = data
-                period = get_period(self.p.dxy_len)
-                self.dxy_ma = bt.indicators.SimpleMovingAverage(
-                    data.close, period=period
-                )
 
         self.rsi2 = None
         self.rsi2_data = None
@@ -2535,20 +2509,6 @@ class IbsStrategy(bt.Strategy):
                     intraday_ago=intraday_ago)
                     if vix_med is not None and vval is not None and not math.isnan(vval) and not math.isnan(vix_med):
                         record_param(key, 1 if vval < vix_med else 2)
-            elif key == "enableDXY":
-                if self.dxy_data is not None and self.dxy_ma is not None:
-                    dval = timeframed_line_val(
-                        self.dxy_data.close,
-                        data=self.dxy_data,
-                        timeframe=self.p.dxy_tf,
-                    intraday_ago=intraday_ago)
-                    dma = timeframed_line_val(
-                        self.dxy_ma,
-                        data=self.dxy_data,
-                        timeframe=self.p.dxy_tf,
-                    intraday_ago=intraday_ago)
-                    if dval is not None and dma is not None and not math.isnan(dval) and not math.isnan(dma):
-                        record_param(key, 1 if dval < dma else 2)
             elif key == "enableRSIEntry":
                 v = line_val(self.rsi, ago=intraday_ago)
                 val = float(v) if v is not None else None
@@ -3607,34 +3567,6 @@ class IbsStrategy(bt.Strategy):
                         return False
                 else:
                     if vval <= vmed:
-                        return False
-        if self.p.enable_dxy:
-            dval = (
-                timeframed_line_val(
-                    self.dxy_data.close,
-                    data=self.dxy_data,
-                    timeframe=self.p.dxy_tf,
-                )
-                if self.dxy_data is not None
-                else None
-            )
-            dma = timeframed_line_val(
-                self.dxy_ma,
-                data=self.dxy_data,
-                timeframe=self.p.dxy_tf,
-            )
-            if (
-                dval is not None
-                and dma is not None
-                and not math.isnan(dval)
-                and not math.isnan(dma)
-            ):
-                mode = str(self.p.dxy_mode).lower()
-                if mode.startswith("risk on"):
-                    if dval >= dma:
-                        return False
-                else:
-                    if dval <= dma:
                         return False
         if self.p.enable_rsi_entry:
             val = line_val(self.rsi)

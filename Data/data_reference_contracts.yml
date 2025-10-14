@@ -57,14 +57,6 @@
       }
     },
     {
-      "symbol": "DXY",
-      "databento": {
-        "dataset": "GLBX.MDP3",
-        "feed_symbol": "DX",
-        "product_id": null
-      }
-    },
-    {
       "symbol": "VIX",
       "databento": {
         "dataset": "GLBX.MDP3",
