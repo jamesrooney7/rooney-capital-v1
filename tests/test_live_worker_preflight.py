@@ -62,6 +62,7 @@ def _successful_config(preflight: PreflightConfig | None = None) -> RuntimeConfi
         reconciliation_max_retries=0,
         instruments={},
         preflight=preflight or PreflightConfig(),
+        killswitch=False,
     )
 
 
@@ -182,6 +183,35 @@ def test_preflight_multiple_failures(monkeypatch: pytest.MonkeyPatch, caplog: py
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: TradersPost Connection, Databento Connection" in caplog.text
+
+
+def test_preflight_aborts_when_policy_killswitch_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    _patch_successful_dependencies(monkeypatch)
+
+    config_path = tmp_path / "runtime.json"
+    config_payload = {
+        "contract_map": "Data/Databento_contract_map.yml",
+        "symbols": ["ES"],
+        "databento_api_key": "demo-key",
+        "preflight": {
+            "skip_ml_validation": True,
+            "skip_connection_checks": True,
+        },
+    }
+    config_path.write_text(json.dumps(config_payload), encoding="utf-8")
+
+    monkeypatch.setenv("POLICY_KILLSWITCH", "true")
+
+    config = live_worker.load_runtime_config(config_path)
+    worker = LiveWorker(config)
+
+    caplog.set_level(logging.INFO)
+    assert worker.run_preflight_checks() is False
+    assert "POLICY KILLSWITCH" in caplog.text
 
 
 def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
