@@ -66,6 +66,7 @@ src/
 ├── strategy/     # Trading logic, feature engineering, risk controls
 ├── runner/       # Databento bridge, live worker, TradersPost client
 └── models/       # Instrument-specific Random Forest veto bundles
+tests/            # Integration and unit coverage for live worker & strategy
 Data/             # Contract metadata and roll rules
 docs/             # Deployment notes and historical planning docs
 requirements.txt  # Python dependencies
@@ -78,6 +79,8 @@ Additional context:
   `reference_feeds` block of this contract map.
 - **docs/** – Includes the deployment roadmap and background notes preserved for
   operational reference.
+- **tests/** – Validates the live worker orchestration and strategy behaviour,
+  providing integration and unit-level examples contributors can extend.
 
 ## Core Modules
 
