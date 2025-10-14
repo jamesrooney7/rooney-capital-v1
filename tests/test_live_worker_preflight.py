@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import logging
 from dataclasses import replace
@@ -14,6 +15,7 @@ import requests
 from models.loader import ModelBundle
 from runner import live_worker
 from runner.live_worker import LiveWorker, PreflightConfig, RuntimeConfig
+from runner import contract_map
 
 
 class DummyModel:
@@ -146,17 +148,39 @@ def test_preflight_missing_contract_spec(monkeypatch: pytest.MonkeyPatch, caplog
 
 def test_preflight_missing_reference_feed(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
     _patch_successful_dependencies(monkeypatch)
+    original_loader = contract_map.load_contract_map
+
+    def _load_without_tlt(path: Path | str):
+        cmap = original_loader(path)
+        refs = tuple(sym for sym in cmap.reference_symbols() if sym != "TLT")
+        monkeypatch.setattr(cmap, "reference_symbols", lambda: refs)
+        return cmap
+
+    monkeypatch.setattr(live_worker, "load_contract_map", _load_without_tlt)
+
     worker = LiveWorker(_successful_config())
-    original_reference_symbols = worker.contract_map.reference_symbols()
-    monkeypatch.setattr(
-        worker.contract_map,
-        "reference_symbols",
-        lambda: tuple(sym for sym in original_reference_symbols if sym != "TLT"),
-    )
 
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: Reference Data" in caplog.text
+
+
+def test_preflight_missing_pair_feed(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    _patch_successful_dependencies(monkeypatch)
+    monkeypatch.setattr(live_worker, "PAIR_MAP", {"ES": "ZZ"})
+
+    original_loader = contract_map.load_contract_map
+
+    def _load_contracts(path: Path | str):
+        return original_loader(path)
+
+    monkeypatch.setattr(live_worker, "load_contract_map", _load_contracts)
+
+    worker = LiveWorker(_successful_config())
+
+    caplog.set_level(logging.INFO)
+    assert worker.run_preflight_checks() is False
+    assert "Pair data feed missing" in caplog.text
 
 
 def test_preflight_multiple_failures(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -239,6 +263,23 @@ def test_load_runtime_config_expands_env_placeholders(
         config.instruments["ES"].strategy_overrides["note"]
         == "https://example.test/hook"
     )
+
+
+def test_load_runtime_config_parses_backfill_and_session(tmp_path: Path) -> None:
+    config_path = tmp_path / "runtime.json"
+    config_payload = {
+        "contract_map": "Data/Databento_contract_map.yml",
+        "symbols": ["ES"],
+        "databento_api_key": "demo-key",
+        "backfill_minutes": 90,
+        "resample_session_start": "22:00",
+    }
+    config_path.write_text(json.dumps(config_payload), encoding="utf-8")
+
+    config = live_worker.load_runtime_config(config_path)
+
+    assert config.backfill_lookback == 90
+    assert config.resample_session_start == dt.time(22, 0)
 
 
 def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

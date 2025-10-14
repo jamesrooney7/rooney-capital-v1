@@ -215,6 +215,8 @@ class DatabentoSubscriber:
         self._client: Optional[Live] = None
         self._current_bars: Dict[str, MutableMapping[str, object]] = {}
         self._lock = threading.Lock()
+        self._last_emitted_minute: Dict[str, dt.datetime] = {}
+        self._last_close: Dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -349,6 +351,8 @@ class DatabentoSubscriber:
                 self.queue_manager.publish_reset(root)
                 with self._lock:
                     self._current_bars.pop(root, None)
+                    self._last_emitted_minute.pop(root, None)
+                    self._last_close.pop(root, None)
             return
 
         if isinstance(record, TradeMsg):
@@ -386,7 +390,9 @@ class DatabentoSubscriber:
             bar = self._current_bars.get(root)
             if not bar or bar["minute"] != minute:
                 if bar:
-                    self._emit_bar(root, bar)
+                    emitted = self._emit_bar(root, bar)
+                    if emitted:
+                        self._fill_quiet_minutes(root, emitted.close, minute)
                 bar = {
                     "minute": minute,
                     "open": price,
@@ -422,7 +428,7 @@ class DatabentoSubscriber:
     # ------------------------------------------------------------------
     # Utility helpers
     # ------------------------------------------------------------------
-    def _emit_bar(self, root: str, payload: MutableMapping[str, object]) -> None:
+    def _emit_bar(self, root: str, payload: MutableMapping[str, object]) -> Optional[Bar]:
         bar = Bar(
             symbol=root,
             timestamp=payload["minute"],
@@ -434,6 +440,39 @@ class DatabentoSubscriber:
         )
         logger.debug("Emitting bar %s %s", root, payload["minute"])
         self.queue_manager.publish_bar(bar)
+        self._last_emitted_minute[root] = bar.timestamp
+        self._last_close[root] = bar.close
+        return bar
+
+    def _fill_quiet_minutes(
+        self, root: str, last_close: float, next_minute: dt.datetime
+    ) -> None:
+        last_minute = self._last_emitted_minute.get(root)
+        if last_minute is None:
+            return
+        tzinfo = last_minute.tzinfo
+        if tzinfo is None and next_minute.tzinfo is not None:
+            tzinfo = next_minute.tzinfo
+        current = last_minute + dt.timedelta(minutes=1)
+        if tzinfo is not None and current.tzinfo is None:
+            current = current.replace(tzinfo=tzinfo)
+        while current < next_minute:
+            bar = Bar(
+                symbol=root,
+                timestamp=current,
+                open=last_close,
+                high=last_close,
+                low=last_close,
+                close=last_close,
+                volume=0.0,
+            )
+            logger.debug("Backfilling quiet minute %s %s", root, current)
+            self.queue_manager.publish_bar(bar)
+            self._last_emitted_minute[root] = current
+            self._last_close[root] = last_close
+            current = current + dt.timedelta(minutes=1)
+            if tzinfo is not None and current.tzinfo is None:
+                current = current.replace(tzinfo=tzinfo)
 
     @staticmethod
     def _normalize_timestamp(ts_event: int) -> dt.datetime:

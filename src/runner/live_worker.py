@@ -10,7 +10,7 @@ worker can be used both for documentation and for integration tests.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+import datetime as dt
 import json
 import logging
 import os
@@ -20,7 +20,7 @@ import time
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 import backtrader as bt
 
@@ -163,12 +163,14 @@ class RuntimeConfig:
     symbols: tuple[str, ...]
     starting_cash: float = 0.0
     backfill: bool = True
+    backfill_lookback: int = 0
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     heartbeat_file: Optional[Path] = None
     heartbeat_write_interval: float = 30.0
     poll_interval: float = 1.0
     traderspost_webhook: Optional[str] = None
+    resample_session_start: Optional[dt.time] = dt.time(23, 0)
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
     killswitch: bool = False
@@ -236,6 +238,44 @@ def _coerce_bool(value: Any, default: bool) -> bool:
         return default
 
 
+def _parse_time_of_day(value: Any) -> Optional[dt.time]:
+    """Parse ``value`` into a :class:`datetime.time` if possible."""
+
+    if value is None:
+        return None
+    if isinstance(value, dt.time):
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        for fmt in ("%H:%M:%S", "%H:%M"):
+            try:
+                return dt.datetime.strptime(raw, fmt).time()
+            except ValueError:
+                continue
+        logger.warning("Invalid session start time %r; expected HH:MM or HH:MM:SS", value)
+        return None
+    if isinstance(value, Sequence):
+        try:
+            parts = [int(float(part)) for part in value[:3]]
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid session start sequence %r; expected [hour, minute, second]",
+                value,
+            )
+            return None
+        while len(parts) < 3:
+            parts.append(0)
+        hour, minute, second = parts[:3]
+        try:
+            return dt.time(hour=hour, minute=minute, second=second)
+        except ValueError:
+            logger.warning("Invalid session start sequence %r; ignoring", value)
+            return None
+    return None
+
+
 def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     """Load worker runtime configuration from disk or environment."""
 
@@ -277,6 +317,31 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         starting_cash_val = 0.0
 
     backfill = bool(payload.get("backfill", True))
+    backfill_lookback_minutes = 0
+    for candidate in (
+        payload.get("backfill_lookback_minutes"),
+        payload.get("backfill_minutes"),
+        payload.get("backfill_lookback"),
+    ):
+        if candidate is None:
+            continue
+        try:
+            backfill_lookback_minutes = int(float(candidate))
+        except (TypeError, ValueError):
+            logger.warning("Invalid backfill lookback value %r; ignoring", candidate)
+            backfill_lookback_minutes = 0
+            continue
+        break
+    if backfill_lookback_minutes <= 0:
+        hours_candidate = payload.get("backfill_lookback_hours") or payload.get("backfill_hours")
+        if hours_candidate is not None:
+            try:
+                backfill_lookback_minutes = int(float(hours_candidate) * 60.0)
+            except (TypeError, ValueError):
+                logger.warning("Invalid backfill hours value %r; ignoring", hours_candidate)
+                backfill_lookback_minutes = 0
+    if backfill_lookback_minutes < 0:
+        backfill_lookback_minutes = 0
     queue_maxsize = int(payload.get("queue_maxsize", payload.get("queue_size", 2048)) or 2048)
     heartbeat_interval_raw = payload.get("heartbeat_interval")
     try:
@@ -312,6 +377,12 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         or traderspost_payload.get("webhook")
         or os.environ.get("TRADERSPOST_WEBHOOK_URL")
     )
+    session_start_raw = (
+        payload.get("resample_session_start")
+        or payload.get("session_start")
+        or payload.get("session_anchor")
+    )
+    session_start = _parse_time_of_day(session_start_raw) or dt.time(23, 0)
     contracts_payload = payload.get("contracts") or {}
     instruments: Dict[str, InstrumentRuntimeConfig] = {}
     for symbol, cfg_payload in contracts_payload.items():
@@ -345,12 +416,14 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         symbols=symbols,
         starting_cash=starting_cash_val,
         backfill=backfill,
+        backfill_lookback=backfill_lookback_minutes,
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
         heartbeat_file=heartbeat_file,
         heartbeat_write_interval=heartbeat_write_interval,
         poll_interval=poll_interval,
         traderspost_webhook=webhook_url,
+        resample_session_start=session_start,
         instruments=instruments,
         preflight=preflight_config,
         killswitch=killswitch,
@@ -390,7 +463,16 @@ class LiveWorker:
         }
         contract_symbols = tuple(sorted(set(self.symbols) | pair_symbols))
 
-        self.reference_symbols = self.contract_map.reference_symbols()
+        reference_symbols = set(self.contract_map.reference_symbols())
+        for symbol in self.symbols:
+            pair_symbol = PAIR_MAP.get(symbol)
+            if not pair_symbol:
+                continue
+            if pair_symbol in self.symbols:
+                continue
+            if pair_symbol in self.contract_map or self.contract_map.reference_feed(pair_symbol):
+                reference_symbols.add(pair_symbol)
+        self.reference_symbols = tuple(sorted(reference_symbols))
 
         product_to_root: Dict[str, str] = {}
         for code, symbol in self.contract_map.product_to_root(contract_symbols).items():
@@ -411,6 +493,12 @@ class LiveWorker:
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
         self.subscribers = []
+        backfill_start: Optional[dt.datetime] = None
+        if self.config.backfill and self.config.backfill_lookback > 0:
+            backfill_start = (
+                dt.datetime.now(dt.timezone.utc)
+                - dt.timedelta(minutes=self.config.backfill_lookback)
+            ).replace(second=0, microsecond=0)
         for (dataset, stype_in), codes in dataset_groups.items():
             self.subscribers.append(
                 DatabentoSubscriber(
@@ -420,6 +508,7 @@ class LiveWorker:
                     api_key=config.databento_api_key,
                     heartbeat_interval=config.heartbeat_interval,
                     stype_in=stype_in,
+                    start=backfill_start,
                 )
             )
 
@@ -453,6 +542,23 @@ class LiveWorker:
     # ------------------------------------------------------------------
 
     def _setup_data_and_strategies(self) -> None:
+        session_start = self.config.resample_session_start
+        hour_kwargs: Dict[str, Any] = {
+            "timeframe": bt.TimeFrame.Minutes,
+            "compression": 60,
+            "bar2edge": True,
+            "adjbartime": True,
+            "rightedge": False,
+        }
+        day_kwargs: Dict[str, Any] = {
+            "timeframe": bt.TimeFrame.Days,
+            "compression": 1,
+            "bar2edge": True,
+            "adjbartime": True,
+            "rightedge": False,
+        }
+        if session_start:
+            day_kwargs["sessionend"] = session_start
         for symbol in self.data_symbols:
             if symbol in self._data_feeds:
                 continue
@@ -465,15 +571,13 @@ class LiveWorker:
             self._data_feeds[symbol] = data
             self.cerebro.resampledata(
                 data,
-                timeframe=bt.TimeFrame.Minutes,
-                compression=60,
                 name=f"{symbol}_hour",
+                **hour_kwargs,
             )
             self.cerebro.resampledata(
                 data,
-                timeframe=bt.TimeFrame.Days,
-                compression=1,
                 name=f"{symbol}_day",
+                **day_kwargs,
             )
 
         for symbol in self.symbols:
@@ -581,6 +685,28 @@ class LiveWorker:
                 payload.get("side"),
                 payload.get("size"),
             )
+
+    def _required_reference_feed_names(self) -> set[str]:
+        feeds: set[str] = set()
+        for feed_name in REQUIRED_REFERENCE_FEEDS:
+            feed = str(feed_name or "").strip()
+            if feed:
+                feeds.add(feed)
+        for symbol in self.contract_map.reference_symbols():
+            base = str(symbol or "").strip().upper()
+            if not base:
+                continue
+            feeds.add(f"{base}_day")
+        for symbol in self.symbols:
+            pair_symbol = PAIR_MAP.get(symbol)
+            if not pair_symbol:
+                continue
+            base = str(pair_symbol).strip().upper()
+            if not base:
+                continue
+            feeds.add(f"{base}_day")
+            feeds.add(f"{base}_hour")
+        return feeds
 
     def _run_cerebro(self) -> None:
         logger.info("Starting Backtrader runtime for symbols: %s", ", ".join(self.symbols))
@@ -707,7 +833,7 @@ class LiveWorker:
 
         payload: dict[str, Any] = {
             "status": str(status),
-            "updated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            "updated_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
             "hostname": socket.gethostname(),
             "pid": os.getpid(),
             "symbols": list(self.symbols),
@@ -801,7 +927,7 @@ class LiveWorker:
             logger.error("❌ TradersPost webhook URL not configured")
             return False
 
-        payload = {"type": "health_check", "timestamp": datetime.utcnow().isoformat()}
+        payload = {"type": "health_check", "timestamp": dt.datetime.utcnow().isoformat()}
         try:
             response = requests.post(url, json=payload, timeout=10)
         except requests_exceptions.Timeout:
@@ -892,14 +1018,15 @@ class LiveWorker:
         logger.info("Validating reference data...")
 
         try:
-            reference_symbols = set(self.contract_map.reference_symbols())
+            reference_symbols = {sym.upper() for sym in self.contract_map.reference_symbols()}
         except Exception as exc:
             logger.error("❌ Failed to load contract map: %s", exc)
             return False
 
         failed = False
+        available_symbols = {sym.upper() for sym in self.data_symbols}
 
-        for feed_name in REQUIRED_REFERENCE_FEEDS:
+        for feed_name in sorted(self._required_reference_feed_names()):
             feed = str(feed_name or "").strip()
             if not feed:
                 continue
@@ -908,7 +1035,8 @@ class LiveWorker:
                 base = base[: -len("_day")]
             elif base.endswith("_hour"):
                 base = base[: -len("_hour")]
-            if base.upper() not in reference_symbols:
+            base_upper = base.upper()
+            if base_upper not in reference_symbols and base_upper not in available_symbols:
                 logger.error("❌ Required reference feed missing: %s", feed)
                 failed = True
 
@@ -922,9 +1050,22 @@ class LiveWorker:
             if not pair_symbol:
                 logger.warning("⚠️ Pair symbol not configured for: %s (pair trading disabled)", symbol)
                 continue
-            if pair_symbol not in self.symbols:
+            pair_upper = pair_symbol.upper()
+            if (
+                pair_upper not in reference_symbols
+                and pair_upper not in available_symbols
+            ):
+                logger.error(
+                    "❌ Pair data feed missing for %s (expected %s_day/%s_hour)",
+                    symbol,
+                    pair_upper,
+                    pair_upper,
+                )
+                failed = True
+            elif pair_symbol not in self.symbols:
                 logger.warning(
-                    "⚠️ Pair symbol not configured for: %s (pair trading disabled)", symbol
+                    "⚠️ Pair symbol %s not traded directly; using reference feed only",
+                    pair_symbol,
                 )
 
         if failed:
@@ -956,7 +1097,7 @@ class LiveWorker:
                 logger.error("❌ Daily feed not configured: %s", day_name)
                 failed = True
 
-        for feed_name in REQUIRED_REFERENCE_FEEDS:
+        for feed_name in self._required_reference_feed_names():
             feed = str(feed_name or "").strip()
             if not feed:
                 continue
