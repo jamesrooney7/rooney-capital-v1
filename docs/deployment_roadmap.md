@@ -54,6 +54,11 @@ Provides the canonical mapping between Databento product codes and the continuou
 ### Deployment/reference_contracts.yml
 Defines reference expiries and roll annotations for audits. The helper `deployment_runtime.reference_contracts` reads this file to validate that each root symbol points at the intended front-month when publishing continuous symbols.
 
+> **Legacy note:** The modern stack in this repository now encodes reference
+> subscriptions via the `reference_feeds` block inside
+> `Data/Databento_contract_map.yml`; the previous `Data/data_reference_contracts.yml`
+> file is kept out of tree for historical reference only.
+
 ### deployment_runtime/filter_config.py
 Validates each instrument bundle referenced by the live runtime. `deployment_runtime.hourly_runner` imports this to enforce score thresholds, minimum signals, and other guardrails that mirror the offline evaluation pipeline.
 
