@@ -191,7 +191,8 @@ validation so secrets can remain outside the configuration file.
   `TRADERSPOST_WEBHOOK_URL`).
 - `contracts` – Instrument-level overrides keyed by symbol (size, commission,
   multiplier, optional strategy overrides).
-- Optional tuning knobs: `starting_cash`, `backfill`, `queue_maxsize`,
+- Optional tuning knobs: `starting_cash`, `backfill`, `backfill_minutes`
+  (or `backfill_hours`), `resample_session_start`, `queue_maxsize`,
   `heartbeat_interval`, `heartbeat_file`, `heartbeat_write_interval`,
   `poll_interval`, `preflight.*` toggles for ML and connectivity validation or
   fail-fast behaviour.
@@ -211,6 +212,8 @@ databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
 starting_cash: 250000
 backfill: true
+backfill_minutes: 180
+resample_session_start: "23:00"
 queue_maxsize: 4096
 heartbeat_interval: 30
 heartbeat_file: /var/run/pine/worker_heartbeat.json

@@ -102,6 +102,41 @@ def test_subscriber_builds_minute_bars_and_flushes() -> None:
     assert second_bar.volume == pytest.approx(1.0)
 
 
+def test_subscriber_fills_quiet_minutes_with_flat_bars() -> None:
+    fanout = QueueFanout({"ESH4": "ES"}, maxsize=8)
+    subscriber = DatabentoSubscriber(
+        dataset="TEST",
+        product_codes=("ESH4",),
+        queue_manager=fanout,
+        api_key="demo",
+    )
+
+    fanout.update_mapping(1, "ESH4")
+    symbol_queue = fanout.get_queue("ES")
+
+    first_minute = dt.datetime(2024, 1, 1, 14, 0, tzinfo=dt.timezone.utc)
+    subscriber._apply_trade("ES", _DummyTrade(1, 4200.0, 1.0, first_minute.replace(second=10)))
+
+    with pytest.raises(queue.Empty):
+        symbol_queue.get_nowait()
+
+    gap_trade = first_minute + dt.timedelta(minutes=3, seconds=5)
+    subscriber._apply_trade("ES", _DummyTrade(1, 4201.0, 1.0, gap_trade))
+
+    emitted = [symbol_queue.get_nowait() for _ in range(3)]
+    timestamps = [bar.timestamp for bar in emitted]
+    assert timestamps == [
+        first_minute,
+        first_minute + dt.timedelta(minutes=1),
+        first_minute + dt.timedelta(minutes=2),
+    ]
+    assert emitted[0].volume == pytest.approx(1.0)
+    assert emitted[1].volume == 0.0
+    assert emitted[2].volume == 0.0
+    assert emitted[1].close == pytest.approx(emitted[0].close)
+    assert emitted[2].close == pytest.approx(emitted[0].close)
+
+
 def test_subscriber_handles_symbol_roll_resets() -> None:
     fanout = QueueFanout({"ESH4": "ES", "ESM4": "ES"}, maxsize=8)
     subscriber = DatabentoSubscriber(

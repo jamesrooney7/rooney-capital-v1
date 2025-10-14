@@ -281,6 +281,8 @@ starting_cash: 250000
 
 # Data settings
 backfill: true
+backfill_minutes: 180
+resample_session_start: "23:00"
 queue_maxsize: 4096
 
 # Heartbeat monitoring
