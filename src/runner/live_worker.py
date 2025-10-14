@@ -969,6 +969,41 @@ class LiveWorker:
         text = (response.text or "").strip()
         if 200 <= status < 300:
             logger.info("✓ TradersPost webhook reachable at %s", url)
+            # If reconciliation is disabled we only need webhook connectivity.
+            if not self.config.reconciliation_enabled:
+                return True
+
+            client = self.traderspost_client
+            if client is None:
+                logger.error(
+                    "❌ TradersPost client unavailable while reconciliation is enabled"
+                )
+                return False
+
+            api_base = getattr(client, "api_base_url", None)
+            if not api_base:
+                logger.error(
+                    "❌ TradersPost API base URL not configured (required for reconciliation)"
+                )
+                return False
+
+            probe_symbol = next((sym for sym in self.symbols if sym), None)
+            if not probe_symbol:
+                logger.error(
+                    "❌ TradersPost API validation failed: no symbols configured for probe"
+                )
+                return False
+
+            try:
+                client.get_pending_orders(probe_symbol)
+            except TradersPostError as exc:
+                logger.error("❌ TradersPost API validation failed: %s", exc)
+                return False
+            except Exception as exc:  # pragma: no cover - defensive guard
+                logger.exception("Unexpected error probing TradersPost API", exc_info=exc)
+                return False
+
+            logger.info("✓ TradersPost API reachable at %s", api_base)
             return True
 
         error_text = text or "(no response body)"
