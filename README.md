@@ -216,8 +216,6 @@ contracts:
   ES:
     size: 1
     commission: 4.0
-    strategy_overrides:
-      pair_threshold: 0.6
   NQ:
     size: 1
     commission: 4.0
