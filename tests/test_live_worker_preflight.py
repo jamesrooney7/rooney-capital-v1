@@ -214,6 +214,38 @@ def test_preflight_aborts_when_policy_killswitch_enabled(
     assert "POLICY KILLSWITCH" in caplog.text
 
 
+def test_load_runtime_config_expands_env_placeholders(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("DB_KEY", "interpolated-databento")
+    monkeypatch.setenv("TP_HOOK", "https://example.test/hook")
+
+    config_path = tmp_path / "runtime.json"
+    config_payload = {
+        "contract_map": "Data/Databento_contract_map.yml",
+        "symbols": ["ES"],
+        "databento_api_key": "${DB_KEY}",
+        "traderspost": {"webhook": "${TP_HOOK}"},
+        "contracts": {
+            "ES": {
+                "strategy_overrides": {
+                    "note": "${TP_HOOK}",
+                }
+            }
+        },
+    }
+    config_path.write_text(json.dumps(config_payload), encoding="utf-8")
+
+    config = live_worker.load_runtime_config(config_path)
+
+    assert config.databento_api_key == "interpolated-databento"
+    assert config.traderspost_webhook == "https://example.test/hook"
+    assert (
+        config.instruments["ES"].strategy_overrides["note"]
+        == "https://example.test/hook"
+    )
+
+
 def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     _patch_successful_dependencies(monkeypatch)
 

@@ -13,7 +13,8 @@ auxiliary services that the live worker depends on. It supplements the brief not
 | **CI / automation** | CI secret store (e.g. GitHub Actions secrets, Hashicorp Vault, AWS/GCP secret manager) | Inject into the environment at job runtime; never store in plaintext artifacts. |
 
 Runtime configuration files (`config.yml`) may interpolate environment variables (`${DATABENTO_API_KEY}`) so that the
-plaintext secret never leaves the environment.
+plaintext secret never leaves the environment. The loader in `src/runner/live_worker.py` automatically expands these
+placeholders (via `os.path.expandvars`) before any other validation occurs.
 
 ## 2. Loading secrets at runtime
 

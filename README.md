@@ -169,7 +169,9 @@ cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
 
 Workers load their runtime configuration from a JSON or YAML file. Provide the
 path explicitly to `load_runtime_config()` or set the `PINE_RUNTIME_CONFIG`
-environment variable before starting the process.
+environment variable before starting the process. String-valued entries support
+`${VAR}` placeholders which are expanded from the current environment prior to
+validation so secrets can remain outside the configuration file.
 
 ### Required Fields
 

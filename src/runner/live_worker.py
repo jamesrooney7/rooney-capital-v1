@@ -204,6 +204,23 @@ def _load_json_or_yaml(path: Path) -> Mapping[str, Any]:
         raise ValueError(f"Unable to parse configuration file {path}: {exc}") from exc
 
 
+def _expand_env_placeholders(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Recursively expand ``${VAR}`` placeholders for string values."""
+
+    def _expand(value: Any) -> Any:
+        if isinstance(value, str):
+            return os.path.expandvars(value)
+        if isinstance(value, Mapping):
+            return {key: _expand(nested) for key, nested in value.items()}
+        if isinstance(value, list):
+            return [_expand(item) for item in value]
+        if isinstance(value, tuple):
+            return tuple(_expand(item) for item in value)
+        return value
+
+    return {key: _expand(value) for key, value in payload.items()}
+
+
 def _coerce_bool(value: Any, default: bool) -> bool:
     """Return a best-effort boolean coercion for configuration flags."""
 
@@ -241,7 +258,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     if not config_path.exists():
         raise FileNotFoundError(f"Runtime configuration file does not exist: {config_path}")
 
-    payload = _load_json_or_yaml(config_path)
+    payload = _expand_env_placeholders(_load_json_or_yaml(config_path))
 
     contract_map_path = payload.get("contract_map") or payload.get("contract_map_path")
     if not contract_map_path:
