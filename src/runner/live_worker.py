@@ -10,10 +10,12 @@ worker can be used both for documentation and for integration tests.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import json
 import logging
 import os
 import signal
+import socket
 import time
 import threading
 from dataclasses import dataclass, field
@@ -22,7 +24,10 @@ from typing import Any, Callable, Dict, Mapping, Optional
 
 import backtrader as bt
 
-from config import PAIR_MAP
+import requests
+from requests import exceptions as requests_exceptions
+
+from config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
 from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
@@ -32,12 +37,14 @@ from runner.traderspost_client import (
     order_notification_to_message,
     trade_notification_to_message,
 )
+from strategy.contract_specs import CONTRACT_SPECS
 from strategy.ibs_strategy import IbsStrategy
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "InstrumentRuntimeConfig",
+    "PreflightConfig",
     "RuntimeConfig",
     "LiveWorker",
     "load_runtime_config",
@@ -137,6 +144,16 @@ class InstrumentRuntimeConfig:
 
 
 @dataclass(frozen=True)
+class PreflightConfig:
+    """Configuration flags controlling pre-flight validation."""
+
+    enabled: bool = True
+    skip_ml_validation: bool = False
+    skip_connection_checks: bool = False
+    fail_fast: bool = True
+
+
+@dataclass(frozen=True)
 class RuntimeConfig:
     """Top-level runtime configuration for the live worker."""
 
@@ -156,6 +173,7 @@ class RuntimeConfig:
     reconciliation_wait_seconds: float = 3.0
     reconciliation_max_retries: int = 2
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
+    preflight: PreflightConfig = field(default_factory=PreflightConfig)
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
         cfg = self.instruments.get(symbol)
@@ -181,6 +199,26 @@ def _load_json_or_yaml(path: Path) -> Mapping[str, Any]:
         return yaml.safe_load(text) or {}
     except Exception as exc:  # pragma: no cover - optional dependency
         raise ValueError(f"Unable to parse configuration file {path}: {exc}") from exc
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    """Return a best-effort boolean coercion for configuration flags."""
+
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalised = value.strip().lower()
+        if normalised in {"true", "1", "yes", "on"}:
+            return True
+        if normalised in {"false", "0", "no", "off"}:
+            return False
+        return default
+    try:
+        return bool(int(value))
+    except (TypeError, ValueError):
+        return default
 
 
 def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
@@ -270,6 +308,16 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
             continue
         instruments[sym] = InstrumentRuntimeConfig.from_mapping(sym, cfg_payload or {})
 
+    preflight_payload = payload.get("preflight") or {}
+    preflight_config = PreflightConfig(
+        enabled=_coerce_bool(preflight_payload.get("enabled"), True),
+        skip_ml_validation=_coerce_bool(preflight_payload.get("skip_ml_validation"), False),
+        skip_connection_checks=_coerce_bool(
+            preflight_payload.get("skip_connection_checks"), False
+        ),
+        fail_fast=_coerce_bool(preflight_payload.get("fail_fast"), True),
+    )
+
     return RuntimeConfig(
         databento_api_key=payload.get("databento_api_key") or os.environ.get("DATABENTO_API_KEY"),
         contract_map_path=contract_map_path,
@@ -287,6 +335,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         reconciliation_wait_seconds=reconciliation_wait_seconds,
         reconciliation_max_retries=reconciliation_max_retries,
         instruments=instruments,
+        preflight=preflight_config,
     )
 
 
@@ -689,10 +738,15 @@ class LiveWorker:
             except NotImplementedError:  # pragma: no cover - Windows
                 signal.signal(sig, lambda *_: _handle_signal(sig))
 
+        if not self.run_preflight_checks():
+            logger.critical("❌ STARTUP ABORTED: Pre-flight checks failed")
+            raise RuntimeError("Pre-flight validation failed")
+
         try:
             self.reconcile_on_startup()
         except Exception:
             logger.exception("Unexpected error during startup reconciliation")
+            raise
 
         self.start()
 
@@ -718,6 +772,309 @@ class LiveWorker:
         if not sym or sym not in self.contract_map:
             return {}
         return self.contract_map.traderspost_metadata(sym)
+
+    # ------------------------------------------------------------------
+    # Pre-flight validation
+    # ------------------------------------------------------------------
+
+    def validate_ml_models(self) -> bool:
+        total = len(self.symbols)
+        logger.info("Validating ML models for %s symbols...", total)
+        if not total:
+            logger.info("✓ ML models validated for %s symbols", total)
+            return True
+
+        failed = False
+        for symbol in self.symbols:
+            try:
+                bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
+            except Exception as exc:
+                logger.error("❌ %s: Failed to load model bundle - %s", symbol, exc)
+                failed = True
+                continue
+
+            try:
+                bundle_kwargs = strategy_kwargs_from_bundle(bundle)
+            except Exception as exc:
+                logger.error("❌ %s: Failed to prepare model bundle - %s", symbol, exc)
+                failed = True
+                continue
+
+            model = bundle_kwargs.get("ml_model")
+            ml_features = bundle_kwargs.get("ml_features")
+            ml_threshold = bundle_kwargs.get("ml_threshold")
+
+            if not hasattr(model, "predict_proba"):
+                logger.error("❌ %s: Model missing predict_proba method", symbol)
+                failed = True
+                continue
+
+            if not ml_features or len(ml_features) == 0:
+                logger.error("❌ %s: Model has no features defined", symbol)
+                failed = True
+                continue
+
+            if ml_threshold is None:
+                logger.error("❌ %s: Model has no threshold defined", symbol)
+                failed = True
+                continue
+
+            dummy_vector = [0.0] * len(ml_features)
+            try:
+                model.predict_proba([dummy_vector])
+            except Exception as exc:
+                logger.error("❌ %s: Model failed test prediction - %s", symbol, exc)
+                failed = True
+                continue
+
+            logger.info(
+                "✓ %s: Model loaded, %s features, threshold=%s",
+                symbol,
+                len(ml_features),
+                ml_threshold,
+            )
+
+        if failed:
+            return False
+
+        logger.info("✓ ML models validated for %s symbols", total)
+        return True
+
+    def validate_traderspost_connection(self) -> bool:
+        logger.info("Validating TradersPost connection...")
+        url = (self.config.traderspost_webhook or "").strip()
+        if not url:
+            logger.error("❌ TradersPost webhook URL not configured")
+            return False
+
+        payload = {"type": "health_check", "timestamp": datetime.utcnow().isoformat()}
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+        except requests_exceptions.Timeout:
+            logger.error("❌ TradersPost connection timeout after 10s")
+            return False
+        except requests_exceptions.ConnectionError:
+            logger.error("❌ TradersPost connection refused - check URL: %s", url)
+            return False
+        except requests_exceptions.RequestException as exc:
+            logger.error("❌ TradersPost validation failed: %s", exc)
+            return False
+
+        status = response.status_code
+        text = (response.text or "").strip()
+        if 200 <= status < 300:
+            logger.info("✓ TradersPost webhook reachable at %s", url)
+            return True
+
+        error_text = text or "(no response body)"
+        if 400 <= status < 500:
+            logger.error("❌ TradersPost returned error: %s - %s", status, error_text)
+        elif 500 <= status < 600:
+            logger.error("❌ TradersPost returned error: %s - %s", status, error_text)
+        else:
+            logger.error("❌ TradersPost validation failed: HTTP %s - %s", status, error_text)
+        return False
+
+    def validate_databento_connection(self) -> bool:
+        logger.info("Validating Databento connection...")
+        api_key = (self.config.databento_api_key or "").strip()
+        if not api_key:
+            logger.error("❌ Databento API key not configured")
+            return False
+
+        try:
+            import databento
+        except Exception as exc:
+            logger.error("❌ Databento validation failed: %s", exc)
+            return False
+
+        try:
+            client = databento.Live(key=api_key)
+        except Exception as exc:
+            logger.error("❌ Databento API key invalid or expired")
+            logger.debug("Databento Live initialisation failed", exc_info=exc)
+            return False
+
+        metadata_client = getattr(client, "metadata", None)
+        if metadata_client is None:
+            logger.error("❌ Databento validation failed: metadata interface unavailable")
+            return False
+
+        probe_called = False
+        try:
+            if hasattr(metadata_client, "list_datasets"):
+                probe_called = True
+                try:
+                    metadata_client.list_datasets(timeout=10)
+                except TypeError:
+                    metadata_client.list_datasets()
+            elif hasattr(metadata_client, "list_schemas"):
+                probe_called = True
+                try:
+                    metadata_client.list_schemas(timeout=10)
+                except TypeError:
+                    metadata_client.list_schemas()
+            else:
+                raise RuntimeError("metadata probe unavailable")
+        except (requests_exceptions.Timeout, TimeoutError, socket.timeout):
+            logger.error("❌ Databento connection timeout after 10s")
+            return False
+        except Exception as exc:
+            message = str(exc).lower()
+            if "unauthorized" in message or "invalid" in message or "forbidden" in message:
+                logger.error("❌ Databento API key invalid or expired")
+            else:
+                logger.error("❌ Databento validation failed: %s", exc)
+            return False
+
+        if not probe_called:
+            logger.error("❌ Databento validation failed: metadata probe unavailable")
+            return False
+
+        logger.info("✓ Databento API connection verified")
+        return True
+
+    def validate_reference_data(self) -> bool:
+        logger.info("Validating reference data...")
+
+        try:
+            reference_symbols = set(self.contract_map.reference_symbols())
+        except Exception as exc:
+            logger.error("❌ Failed to load contract map: %s", exc)
+            return False
+
+        failed = False
+
+        for feed_name in REQUIRED_REFERENCE_FEEDS:
+            feed = str(feed_name or "").strip()
+            if not feed:
+                continue
+            base = feed
+            if base.endswith("_day"):
+                base = base[: -len("_day")]
+            elif base.endswith("_hour"):
+                base = base[: -len("_hour")]
+            if base.upper() not in reference_symbols:
+                logger.error("❌ Required reference feed missing: %s", feed)
+                failed = True
+
+        for symbol in self.symbols:
+            if symbol not in CONTRACT_SPECS:
+                logger.error("❌ Contract specs missing for: %s", symbol)
+                failed = True
+
+        for symbol in self.symbols:
+            pair_symbol = PAIR_MAP.get(symbol)
+            if not pair_symbol:
+                logger.warning("⚠️ Pair symbol not configured for: %s (pair trading disabled)", symbol)
+                continue
+            if pair_symbol not in self.symbols:
+                logger.warning(
+                    "⚠️ Pair symbol not configured for: %s (pair trading disabled)", symbol
+                )
+
+        if failed:
+            return False
+
+        logger.info("✓ Reference data validated for %s symbols", len(self.symbols))
+        return True
+
+    def validate_data_feeds(self) -> bool:
+        logger.info("Validating data feed configuration...")
+
+        available_names = {
+            getattr(data, "_name", None)
+            for data in getattr(self.cerebro, "datas", [])
+        }
+        available_names = {
+            name for name in available_names if isinstance(name, str) and name
+        }
+
+        failed = False
+
+        for symbol in self.symbols:
+            hour_name = f"{symbol}_hour"
+            day_name = f"{symbol}_day"
+            if hour_name not in available_names:
+                logger.error("❌ Hourly feed not configured: %s", hour_name)
+                failed = True
+            if day_name not in available_names:
+                logger.error("❌ Daily feed not configured: %s", day_name)
+                failed = True
+
+        for feed_name in REQUIRED_REFERENCE_FEEDS:
+            feed = str(feed_name or "").strip()
+            if not feed:
+                continue
+            if feed not in available_names:
+                logger.error("❌ Reference feed not configured: %s", feed)
+                failed = True
+
+        if failed:
+            return False
+
+        logger.info("✓ Data feeds validated for %s symbols", len(self.symbols))
+        return True
+
+    def run_preflight_checks(self) -> bool:
+        separator = "=" * 60
+        logger.info(separator)
+        logger.info("STARTING PRE-FLIGHT VALIDATION")
+        logger.info(separator)
+
+        preflight_cfg = getattr(self.config, "preflight", PreflightConfig())
+
+        if not preflight_cfg.enabled:
+            logger.info("")
+            logger.info("Pre-flight validation disabled via configuration; skipping checks.")
+            logger.info("")
+            logger.info(separator)
+            logger.info("✅ ALL PRE-FLIGHT CHECKS PASSED")
+            logger.info(separator)
+            return True
+
+        failed_checks: list[str] = []
+        checks: list[tuple[str, Callable[[], bool]]] = []
+
+        if preflight_cfg.skip_ml_validation:
+            logger.info("")
+            logger.info("Skipping ML model validation (disabled via configuration)")
+        else:
+            checks.append(("ML Models", self.validate_ml_models))
+
+        if preflight_cfg.skip_connection_checks:
+            logger.info("")
+            logger.info("Skipping connectivity checks (disabled via configuration)")
+        else:
+            checks.append(("TradersPost Connection", self.validate_traderspost_connection))
+            checks.append(("Databento Connection", self.validate_databento_connection))
+
+        checks.append(("Reference Data", self.validate_reference_data))
+        checks.append(("Data Feeds", self.validate_data_feeds))
+
+        for name, check in checks:
+            logger.info("")
+            result = False
+            try:
+                result = check()
+            except Exception as exc:
+                logger.exception("Unexpected error while running %s check: %s", name, exc)
+            if not result:
+                failed_checks.append(name)
+                if preflight_cfg.fail_fast:
+                    break
+
+        logger.info("")
+        logger.info(separator)
+        if failed_checks:
+            logger.error("❌ PRE-FLIGHT CHECKS FAILED")
+            logger.error("Failed checks: %s", ", ".join(failed_checks))
+            logger.info(separator)
+            return False
+
+        logger.info("✅ ALL PRE-FLIGHT CHECKS PASSED")
+        logger.info(separator)
+        return True
 
     def run(self) -> None:
         """Synchronous helper that drives :meth:`run_async`."""

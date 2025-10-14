@@ -177,7 +177,8 @@ environment variable before starting the process.
 - `contracts` – Instrument-level overrides keyed by symbol (size, commission,
   multiplier, optional strategy overrides).
 - Optional tuning knobs: `starting_cash`, `backfill`, `queue_maxsize`,
-  `heartbeat_interval`, `poll_interval`.
+  `heartbeat_interval`, `poll_interval`, `preflight.*` toggles for ML and
+  connectivity validation or fail-fast behaviour.
 
 ### Sample Configuration
 
@@ -191,6 +192,11 @@ starting_cash: 250000
 backfill: true
 queue_maxsize: 4096
 heartbeat_interval: 30
+preflight:
+  enabled: true
+  skip_ml_validation: false
+  skip_connection_checks: false
+  fail_fast: true
 contracts:
   ES:
     size: 1
@@ -249,6 +255,30 @@ On the production host the workflow is:
 - Watch for data gaps >90 seconds and investigate Databento connectivity.
 - Confirm TradersPost strategies are pointed at the desired contract before
   go-live; expiry handling lives in TradersPost rather than the worker.
+
+### Pre-flight Validation Checks
+
+`LiveWorker.run_preflight_checks()` executes a startup gauntlet before any live
+orders are sent. The checks run in the following order and abort the launch if a
+failure is detected (unless `preflight.fail_fast` is set to `false`):
+
+1. **ML Models** – Ensure each configured symbol has a loadable model bundle,
+   exposes `predict_proba`, defines at least one feature, and includes a veto
+   threshold. A smoke `predict_proba` call guards against serialization drift.
+2. **TradersPost Connection** – POST a health-check payload to the configured
+   webhook and surface HTTP/connection/timeout errors with actionable log
+   messages.
+3. **Databento Connection** – Instantiate the live client and invoke a metadata
+   probe to confirm the API key is valid and the gateway responds within 10
+   seconds.
+4. **Reference Data** – Verify required reference feeds exist in the contract
+   map, confirm `CONTRACT_SPECS` covers every trading symbol, and warn when pair
+   mappings are missing.
+5. **Data Feeds** – Ensure Backtrader registered hourly and daily feeds for each
+   symbol plus mandatory reference feeds such as `TLT_day`.
+
+Configuration toggles under `preflight.*` allow skipping ML or connectivity
+checks during local development while still documenting the bypass in logs.
 
 ## Additional References
 
