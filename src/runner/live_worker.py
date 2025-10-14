@@ -10,6 +10,7 @@ worker can be used both for documentation and for integration tests.
 from __future__ import annotations
 
 import asyncio
+import copy
 import datetime as dt
 import json
 import logging
@@ -518,6 +519,11 @@ class LiveWorker:
         self._stop_event = threading.Event()
         self._loop_callbacks: list[Callable[[], None]] = []
         self._last_heartbeat_update: float = 0.0
+        self._preflight_summary: dict[str, Any] = {"status": "not_run"}
+        self._traderspost_status: dict[str, Any] = {
+            "last_success": None,
+            "last_error": None,
+        }
 
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook:
@@ -635,6 +641,9 @@ class LiveWorker:
         try:
             self.traderspost_client.post_order(payload)
         except TradersPostError as exc:
+            self._record_traderspost_result(
+                "order", payload, success=False, error=str(exc)
+            )
             logger.error(
                 "TradersPost order post failed for %s %s size=%s: %s",
                 payload.get("symbol"),
@@ -643,8 +652,12 @@ class LiveWorker:
                 exc,
             )
         except Exception:  # pragma: no cover - defensive guard
+            self._record_traderspost_result(
+                "order", payload, success=False, error="unexpected error"
+            )
             logger.exception("Unexpected TradersPost order post failure")
         else:
+            self._record_traderspost_result("order", payload, success=True)
             logger.info(
                 "Posted order event to TradersPost: %s %s size=%s",
                 payload.get("symbol"),
@@ -669,6 +682,9 @@ class LiveWorker:
         try:
             self.traderspost_client.post_trade(payload)
         except TradersPostError as exc:
+            self._record_traderspost_result(
+                "trade", payload, success=False, error=str(exc)
+            )
             logger.error(
                 "TradersPost trade post failed for %s %s size=%s: %s",
                 payload.get("symbol"),
@@ -677,8 +693,12 @@ class LiveWorker:
                 exc,
             )
         except Exception:  # pragma: no cover - defensive guard
+            self._record_traderspost_result(
+                "trade", payload, success=False, error="unexpected error"
+            )
             logger.exception("Unexpected TradersPost trade post failure")
         else:
+            self._record_traderspost_result("trade", payload, success=True)
             logger.info(
                 "Posted trade event to TradersPost: %s %s size=%s",
                 payload.get("symbol"),
@@ -838,11 +858,14 @@ class LiveWorker:
             "pid": os.getpid(),
             "symbols": list(self.symbols),
         }
+        heartbeat_details = self._collect_heartbeat_details()
         if details:
             try:
-                payload["details"] = dict(details)
+                heartbeat_details.update(dict(details))
             except Exception:  # pragma: no cover - defensive guard
-                payload["details"] = {"message": str(details)}
+                heartbeat_details["message"] = str(details)
+        if heartbeat_details:
+            payload["details"] = heartbeat_details
 
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -852,6 +875,58 @@ class LiveWorker:
             self._last_heartbeat_update = now
         except Exception:  # pragma: no cover - best effort monitoring
             logger.exception("Failed to write heartbeat file at %s", path)
+
+    def _collect_heartbeat_details(self) -> dict[str, Any]:
+        details: dict[str, Any] = {"preflight": dict(self._preflight_summary)}
+
+        databento_snapshot: dict[str, Any] = {
+            "queue_fanout": {},
+            "subscribers": [],
+        }
+        try:
+            databento_snapshot["queue_fanout"] = self.queue_manager.snapshot()
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Failed to gather queue snapshot")
+        for subscriber in self.subscribers:
+            try:
+                databento_snapshot["subscribers"].append(subscriber.status_snapshot())
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to gather subscriber snapshot")
+        details["databento"] = databento_snapshot
+
+        if self.traderspost_client:
+            details["traderspost"] = copy.deepcopy(self._traderspost_status)
+
+        return details
+
+    @staticmethod
+    def _now_iso() -> str:
+        return dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    def _record_traderspost_result(
+        self,
+        kind: str,
+        payload: Mapping[str, Any],
+        *,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        event = {
+            "kind": kind,
+            "symbol": payload.get("symbol"),
+            "side": payload.get("side"),
+            "size": payload.get("size"),
+        }
+        timestamp = self._now_iso()
+        if success:
+            self._traderspost_status["last_success"] = {"at": timestamp, **event}
+            self._traderspost_status["last_error"] = None
+        else:
+            self._traderspost_status["last_error"] = {
+                "at": timestamp,
+                "message": error,
+                **event,
+            }
 
     # ------------------------------------------------------------------
     # Pre-flight validation
@@ -1119,6 +1194,11 @@ class LiveWorker:
 
         preflight_cfg = getattr(self.config, "preflight", PreflightConfig())
 
+        self._preflight_summary = {
+            "status": "running",
+            "started_at": self._now_iso(),
+        }
+
         if getattr(self.config, "killswitch", False):
             logger.info("")
             logger.error("❌ POLICY KILLSWITCH ENABLED: refusing to start worker")
@@ -1127,6 +1207,11 @@ class LiveWorker:
             logger.error("❌ PRE-FLIGHT CHECKS FAILED")
             logger.error("Failed checks: Policy Killswitch")
             logger.info(separator)
+            self._preflight_summary = {
+                "status": "failed",
+                "checked_at": self._now_iso(),
+                "failed_checks": ["Policy Killswitch"],
+            }
             return False
 
         if not preflight_cfg.enabled:
@@ -1136,6 +1221,11 @@ class LiveWorker:
             logger.info(separator)
             logger.info("✅ ALL PRE-FLIGHT CHECKS PASSED")
             logger.info(separator)
+            self._preflight_summary = {
+                "status": "skipped",
+                "checked_at": self._now_iso(),
+                "failed_checks": [],
+            }
             return True
 
         failed_checks: list[str] = []
@@ -1175,10 +1265,20 @@ class LiveWorker:
             logger.error("❌ PRE-FLIGHT CHECKS FAILED")
             logger.error("Failed checks: %s", ", ".join(failed_checks))
             logger.info(separator)
+            self._preflight_summary = {
+                "status": "failed",
+                "checked_at": self._now_iso(),
+                "failed_checks": failed_checks,
+            }
             return False
 
         logger.info("✅ ALL PRE-FLIGHT CHECKS PASSED")
         logger.info(separator)
+        self._preflight_summary = {
+            "status": "passed",
+            "checked_at": self._now_iso(),
+            "failed_checks": [],
+        }
         return True
 
     def run(self) -> None:

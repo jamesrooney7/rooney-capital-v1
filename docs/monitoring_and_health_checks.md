@@ -55,12 +55,65 @@ monitoring stack.
 
 Once the heartbeat alarm is in place, layer on additional guards:
 
-- **Databento ingest health** – compare the last bar timestamp in logs or the
-  heartbeat `details` field (future extension) to detect stalled market data.
-- **Webhook delivery** – trigger alerts on repeated TradersPost errors or
-  retries exceeding a threshold.
+- **Databento ingest health** – compare the last bar timestamp reported in the
+  heartbeat `details.databento.subscribers[*].last_emitted_minute` field to
+  detect stalled market data.
+- **Webhook delivery** – trigger alerts using
+  `details.traderspost.last_error` when TradersPost returns a failure.
 - **Position drift** – periodically compare TradersPost positions against local
   expectations and alert if they diverge for more than one run interval.
 
 Each enhancement should surface a concise error in the heartbeat `details`
 section so every alert is tied to a machine-readable root cause.
+
+### Heartbeat `details` fields
+
+The worker now records additional telemetry in the heartbeat file:
+
+```json
+{
+  "status": "running",
+  "details": {
+    "preflight": {
+      "status": "passed",
+      "checked_at": "2024-05-12T09:31:00Z",
+      "failed_checks": []
+    },
+    "databento": {
+      "queue_fanout": {
+        "known_symbols": ["ES", "NQ"],
+        "queue_depths": {"ES": 0, "NQ": 0},
+        "mapped_instruments": 2
+      },
+      "subscribers": [
+        {
+          "dataset": "GLBX.MDP3",
+          "product_codes": ["ESH4"],
+          "last_emitted_minute": {"ES": "2024-05-12T09:30:00Z"},
+          "last_error": null
+        }
+      ]
+    },
+    "traderspost": {
+      "last_success": {
+        "at": "2024-05-12T09:32:17Z",
+        "kind": "order",
+        "symbol": "ES",
+        "side": "BUY",
+        "size": 1
+      },
+      "last_error": null
+    }
+  }
+}
+```
+
+With `jq` installed you can extract key indicators quickly:
+
+```bash
+jq -r '.details.preflight.status' /var/run/pine/worker_heartbeat.json
+jq -r '.details.databento.subscribers[].last_emitted_minute | to_entries[] | "\(.key): \(.value)"' \
+  /var/run/pine/worker_heartbeat.json
+jq -r '.details.traderspost.last_error // "(no webhook errors)"' \
+  /var/run/pine/worker_heartbeat.json
+```

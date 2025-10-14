@@ -27,12 +27,42 @@ import logging
 import queue
 import threading
 import time
-from typing import Dict, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
 
 import backtrader as bt
 from databento import Live, SymbolMappingMsg, TradeMsg
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> dt.datetime:
+    """Return a timezone-aware UTC timestamp."""
+
+    return dt.datetime.now(dt.timezone.utc)
+
+
+def _format_datetime(value: Optional[dt.datetime]) -> Optional[str]:
+    """Render ``value`` as an ISO-8601 string if present."""
+
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=dt.timezone.utc)
+    return (
+        value.astimezone(dt.timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+
+
+def _as_float(value: Any) -> Optional[float]:
+    """Attempt to coerce ``value`` into ``float`` returning ``None`` on failure."""
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,6 +211,18 @@ class QueueFanout:
         with self._lock:
             return tuple(self._queues.keys())
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return queue depth and mapping telemetry for monitoring."""
+
+        with self._lock:
+            queue_depths = {symbol: q.qsize() for symbol, q in self._queues.items()}
+            mapped = len(self._instrument_to_product)
+        return {
+            "known_symbols": sorted(queue_depths.keys()),
+            "queue_depths": queue_depths,
+            "mapped_instruments": mapped,
+        }
+
 
 class DatabentoSubscriber:
     """Subscribe to Databento live trades and build minute bars."""
@@ -217,6 +259,10 @@ class DatabentoSubscriber:
         self._lock = threading.Lock()
         self._last_emitted_minute: Dict[str, dt.datetime] = {}
         self._last_close: Dict[str, float] = {}
+        self._last_trade_ts: Dict[str, dt.datetime] = {}
+        self._last_error: Optional[str] = None
+        self._last_connect_time: Optional[dt.datetime] = None
+        self._last_disconnect_time: Optional[dt.datetime] = None
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -242,6 +288,7 @@ class DatabentoSubscriber:
             self._thread.join(timeout=5)
         self.flush()
         self.queue_manager.broadcast_shutdown()
+        self._last_disconnect_time = _utcnow()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -250,10 +297,13 @@ class DatabentoSubscriber:
         backoffs = collections.deque(self.reconnect_backoff)
         while not self._stop_event.is_set():
             try:
+                self._last_error = None
                 self._connect_and_stream()
             except Exception as exc:  # pragma: no cover - network/runtime errors
+                self._last_error = f"{type(exc).__name__}: {exc}"
                 logger.exception("Databento stream error: %s", exc)
             finally:
+                self._last_disconnect_time = _utcnow()
                 if self._stop_event.is_set():
                     break
 
@@ -276,6 +326,7 @@ class DatabentoSubscriber:
             heartbeat_interval_s=self.heartbeat_interval,
         )
         self._client = client
+        self._last_connect_time = _utcnow()
 
         client.subscribe(
             dataset=self.dataset,
@@ -387,6 +438,7 @@ class DatabentoSubscriber:
         minute = ts.replace(second=0, microsecond=0)
 
         with self._lock:
+            self._last_trade_ts[root] = ts
             bar = self._current_bars.get(root)
             if not bar or bar["minute"] != minute:
                 if bar:
@@ -478,6 +530,44 @@ class DatabentoSubscriber:
     def _normalize_timestamp(ts_event: int) -> dt.datetime:
         # Databento timestamps are in nanoseconds.
         return dt.datetime.fromtimestamp(ts_event / 1_000_000_000, tz=dt.timezone.utc)
+
+    # ------------------------------------------------------------------
+    # Monitoring helpers
+    # ------------------------------------------------------------------
+    def status_snapshot(self) -> dict[str, Any]:
+        """Return a JSON-serialisable snapshot for heartbeat reporting."""
+
+        thread_alive = bool(self._thread and self._thread.is_alive())
+        client_connected = self._client is not None
+
+        with self._lock:
+            current_bars = {}
+            for root, payload in self._current_bars.items():
+                current_bars[root] = {
+                    "minute": _format_datetime(payload.get("minute")),
+                    "last_trade_ts": _format_datetime(payload.get("last_ts")),
+                    "close": _as_float(payload.get("close")),
+                    "volume": _as_float(payload.get("volume")),
+                }
+            last_emitted = {
+                root: _format_datetime(ts) for root, ts in self._last_emitted_minute.items()
+            }
+            last_trade = {
+                root: _format_datetime(ts) for root, ts in self._last_trade_ts.items()
+            }
+
+        return {
+            "dataset": self.dataset,
+            "product_codes": list(self.product_codes),
+            "thread_alive": thread_alive,
+            "client_connected": client_connected,
+            "last_connect_time": _format_datetime(self._last_connect_time),
+            "last_disconnect_time": _format_datetime(self._last_disconnect_time),
+            "last_error": self._last_error,
+            "last_emitted_minute": last_emitted,
+            "building_bars": current_bars,
+            "last_trade": last_trade,
+        }
 
 
 class DatabentoLiveData(bt.feeds.DataBase):

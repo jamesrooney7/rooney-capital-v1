@@ -86,6 +86,8 @@ def test_preflight_happy_path(monkeypatch: pytest.MonkeyPatch, caplog: pytest.Lo
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is True
     assert "✅ ALL PRE-FLIGHT CHECKS PASSED" in caplog.text
+    assert worker._preflight_summary["status"] == "passed"
+    assert worker._preflight_summary.get("failed_checks") == []
 
 
 def test_preflight_ml_model_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -101,6 +103,8 @@ def test_preflight_ml_model_missing(monkeypatch: pytest.MonkeyPatch, caplog: pyt
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: ML Models" in caplog.text
+    assert worker._preflight_summary["status"] == "failed"
+    assert worker._preflight_summary.get("failed_checks") == ["ML Models"]
 
 
 def test_preflight_traderspost_failure(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -116,6 +120,8 @@ def test_preflight_traderspost_failure(monkeypatch: pytest.MonkeyPatch, caplog: 
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: TradersPost Connection" in caplog.text
+    assert worker._preflight_summary["status"] == "failed"
+    assert worker._preflight_summary.get("failed_checks") == ["TradersPost Connection"]
 
 
 def test_preflight_databento_invalid_key(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
@@ -202,6 +208,11 @@ def test_preflight_multiple_failures(monkeypatch: pytest.MonkeyPatch, caplog: py
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "Failed checks: TradersPost Connection, Databento Connection" in caplog.text
+    assert worker._preflight_summary["status"] == "failed"
+    assert worker._preflight_summary.get("failed_checks") == [
+        "TradersPost Connection",
+        "Databento Connection",
+    ]
 
 
 def test_preflight_aborts_when_policy_killswitch_enabled(
@@ -231,6 +242,8 @@ def test_preflight_aborts_when_policy_killswitch_enabled(
     caplog.set_level(logging.INFO)
     assert worker.run_preflight_checks() is False
     assert "POLICY KILLSWITCH" in caplog.text
+    assert worker._preflight_summary["status"] == "failed"
+    assert worker._preflight_summary.get("failed_checks") == ["Policy Killswitch"]
 
 
 def test_load_runtime_config_expands_env_placeholders(
@@ -298,8 +311,14 @@ def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     payload = json.loads(heartbeat_path.read_text())
     assert payload["status"] == "running"
     assert payload["symbols"] == list(config.symbols)
+    details = payload["details"]
+    assert details["preflight"]["status"] == "not_run"
+    assert "queue_fanout" in details["databento"]
+    assert "subscribers" in details["databento"]
+    assert details.get("traderspost", {}).get("last_success") is None
 
     worker.stop()
 
     payload = json.loads(heartbeat_path.read_text())
     assert payload["status"] == "stopped"
+    assert "databento" in payload["details"]
