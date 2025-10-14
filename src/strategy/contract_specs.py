@@ -1,4 +1,4 @@
-from safe_div import safe_div
+from .safe_div import safe_div
 
 CONTRACT_SPECS = {
     "ES": {"tick_size": 0.25, "tick_value": 12.50},

@@ -12,9 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
-STRATEGY_SRC = SRC / "strategy"
-if str(STRATEGY_SRC) not in sys.path:
-    sys.path.insert(0, str(STRATEGY_SRC))
 
 from models import loader as loader_module  # noqa: E402
 from models.loader import load_model_bundle  # noqa: E402
