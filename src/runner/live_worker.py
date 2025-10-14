@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import signal
+import time
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -149,6 +150,11 @@ class RuntimeConfig:
     heartbeat_interval: Optional[int] = None
     poll_interval: float = 1.0
     traderspost_webhook: Optional[str] = None
+    traderspost_api_base: Optional[str] = None
+    traderspost_api_key: Optional[str] = None
+    reconciliation_enabled: bool = True
+    reconciliation_wait_seconds: float = 3.0
+    reconciliation_max_retries: int = 2
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
@@ -236,6 +242,25 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         or traderspost_payload.get("webhook")
         or os.environ.get("TRADERSPOST_WEBHOOK_URL")
     )
+    api_base = (
+        traderspost_payload.get("api_base_url")
+        or traderspost_payload.get("api_base")
+        or os.environ.get("TRADERSPOST_API_BASE_URL")
+    )
+    api_key = traderspost_payload.get("api_key") or os.environ.get("TRADERSPOST_API_KEY")
+
+    reconciliation_payload = payload.get("reconciliation") or {}
+    reconciliation_enabled = bool(reconciliation_payload.get("enabled", True))
+    wait_seconds_raw = reconciliation_payload.get("verification_wait_seconds", 3)
+    try:
+        reconciliation_wait_seconds = float(wait_seconds_raw)
+    except (TypeError, ValueError):
+        reconciliation_wait_seconds = 3.0
+    max_retries_raw = reconciliation_payload.get("max_retries", 2)
+    try:
+        reconciliation_max_retries = int(max_retries_raw)
+    except (TypeError, ValueError):
+        reconciliation_max_retries = 2
 
     contracts_payload = payload.get("contracts") or {}
     instruments: Dict[str, InstrumentRuntimeConfig] = {}
@@ -256,6 +281,11 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         heartbeat_interval=heartbeat_interval,
         poll_interval=poll_interval,
         traderspost_webhook=webhook_url,
+        traderspost_api_base=api_base,
+        traderspost_api_key=api_key,
+        reconciliation_enabled=reconciliation_enabled,
+        reconciliation_wait_seconds=reconciliation_wait_seconds,
+        reconciliation_max_retries=reconciliation_max_retries,
         instruments=instruments,
     )
 
@@ -333,9 +363,13 @@ class LiveWorker:
         self._loop_callbacks: list[Callable[[], None]] = []
 
         self.traderspost_client: Optional[TradersPostClient]
-        if config.traderspost_webhook:
+        if config.traderspost_webhook or config.traderspost_api_base:
             try:
-                self.traderspost_client = TradersPostClient(config.traderspost_webhook)
+                self.traderspost_client = TradersPostClient(
+                    config.traderspost_webhook,
+                    api_base_url=config.traderspost_api_base,
+                    api_key=config.traderspost_api_key,
+                )
                 logger.info("TradersPost client initialised")
             except Exception:
                 logger.exception("Failed to initialise TradersPost client")
@@ -479,6 +513,118 @@ class LiveWorker:
                 payload.get("size"),
             )
 
+    # ------------------------------------------------------------------
+    # Startup reconciliation
+    # ------------------------------------------------------------------
+
+    def reconcile_on_startup(self) -> None:
+        """Flatten existing positions and cancel pending orders before trading."""
+
+        if not self.config.reconciliation_enabled:
+            logger.info("Position reconciliation skipped (disabled)")
+            return
+        if not self.traderspost_client:
+            logger.info("Position reconciliation skipped - TradersPost client unavailable")
+            return
+
+        symbols = tuple(self.symbols)
+        logger.info("Starting position reconciliation for %s symbols", len(symbols))
+
+        wait_seconds = max(float(self.config.reconciliation_wait_seconds), 0.0)
+        max_retries = max(int(self.config.reconciliation_max_retries), 0)
+        errors_detected = False
+
+        for symbol in symbols:
+            try:
+                position = self.traderspost_client.get_open_positions(symbol)
+            except Exception:
+                errors_detected = True
+                logger.exception("Failed to query open position for %s", symbol)
+                position = None
+
+            last_check: Optional[Mapping[str, Any]] = position if isinstance(position, Mapping) else None
+
+            if position:
+                size = position.get("size") if isinstance(position, Mapping) else None
+                entry_price = position.get("entry_price") if isinstance(position, Mapping) else None
+                logger.warning("⚠️ Found existing position: %s size=%s @ %s", symbol, size, entry_price)
+
+                closed = False
+                attempts = max_retries + 1
+                for _ in range(max(1, attempts)):
+                    try:
+                        logger.info("Closing position: %s", symbol)
+                        success = self.traderspost_client.close_position(symbol)
+                        if not success:
+                            errors_detected = True
+                    except Exception:
+                        errors_detected = True
+                        logger.exception("Failed to submit close order for %s", symbol)
+                    if wait_seconds:
+                        time.sleep(wait_seconds)
+                    try:
+                        check_position = self.traderspost_client.get_open_positions(symbol)
+                    except Exception:
+                        errors_detected = True
+                        logger.exception("Failed to verify position close for %s", symbol)
+                        check_position = None
+                    if not check_position:
+                        logger.info("✓ Position closed: %s", symbol)
+                        closed = True
+                        last_check = None
+                        break
+                    last_check = check_position if isinstance(check_position, Mapping) else None
+                if not closed:
+                    remaining = last_check.get("size") if isinstance(last_check, Mapping) else None
+                    logger.error("❌ Failed to close position: %s - still shows size=%s", symbol, remaining)
+                    errors_detected = True
+
+            try:
+                pending_orders = self.traderspost_client.get_pending_orders(symbol)
+            except Exception:
+                errors_detected = True
+                logger.exception("Failed to query pending orders for %s", symbol)
+                pending_orders = []
+
+            for order in pending_orders:
+                order_id_raw = None
+                if isinstance(order, Mapping):
+                    order_id_raw = order.get("id") or order.get("order_id")
+                order_id = str(order_id_raw).strip() if order_id_raw is not None else ""
+                if not order_id:
+                    continue
+                logger.info("Found pending order: %s for %s", order_id, symbol)
+                logger.info("Canceling order: %s", order_id)
+                try:
+                    cancelled = self.traderspost_client.cancel_order(order_id)
+                except Exception:
+                    errors_detected = True
+                    logger.exception("Failed to cancel order %s", order_id)
+                    continue
+                if cancelled:
+                    logger.info("✓ Order canceled: %s", order_id)
+                else:
+                    logger.error("❌ Failed to cancel order: %s", order_id)
+                    errors_detected = True
+
+            try:
+                final_position = self.traderspost_client.get_open_positions(symbol)
+            except Exception:
+                errors_detected = True
+                logger.exception("Failed to perform final reconciliation check for %s", symbol)
+                continue
+
+            if final_position:
+                errors_detected = True
+                size = final_position.get("size") if isinstance(final_position, Mapping) else None
+                entry_price = final_position.get("entry_price") if isinstance(final_position, Mapping) else None
+                logger.warning("⚠️ Found existing position: %s size=%s @ %s", symbol, size, entry_price)
+
+        if errors_detected:
+            logger.warning("⚠️ Reconciliation completed with errors - manual verification recommended")
+        else:
+            logger.info("Position reconciliation complete - all symbols flat")
+
     def _run_cerebro(self) -> None:
         logger.info("Starting Backtrader runtime for symbols: %s", ", ".join(self.symbols))
         try:
@@ -542,6 +688,11 @@ class LiveWorker:
                 loop.add_signal_handler(sig, _handle_signal, sig)
             except NotImplementedError:  # pragma: no cover - Windows
                 signal.signal(sig, lambda *_: _handle_signal(sig))
+
+        try:
+            self.reconcile_on_startup()
+        except Exception:
+            logger.exception("Unexpected error during startup reconciliation")
 
         self.start()
 
