@@ -16,6 +16,8 @@ STRATEGY_SRC = SRC / "strategy"
 if str(STRATEGY_SRC) not in sys.path:
     sys.path.insert(0, str(STRATEGY_SRC))
 
+from models import loader as loader_module  # noqa: E402
+from models.loader import load_model_bundle  # noqa: E402
 from strategy.ibs_strategy import IbsStrategy  # noqa: E402
 from strategy.filter_column import FilterColumn  # noqa: E402
 from strategy.feature_utils import normalize_column_name  # noqa: E402
@@ -168,3 +170,118 @@ def test_collect_filter_values_emits_metadata_keys():
     }
 
     assert expected <= set(normalized.keys())
+
+
+def test_collect_filter_values_matches_model_bundle(monkeypatch):
+    symbol = "6A"
+
+    monkeypatch.setattr(loader_module, "_is_git_lfs_pointer", lambda path: False)
+    monkeypatch.setattr(
+        loader_module.joblib,
+        "load",
+        lambda path: {"model": DummyModel([0.1, 0.9]), "features": ()},
+    )
+
+    bundle = load_model_bundle(symbol)
+    feature_order = []
+    seen_features = set()
+    for feature in bundle.features:
+        normalized_feature = normalize_column_name(feature)
+        if normalized_feature not in seen_features:
+            feature_order.append(normalized_feature)
+            seen_features.add(normalized_feature)
+
+    class DummyLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.value
+
+    class DummyPercentileTracker:
+        def update(self, *args, **kwargs):
+            return 0.0
+
+    timeframe_lookup = {"daily": "Day", "hourly": "Hour"}
+
+    cross_meta: dict[str, dict[str, object]] = {}
+    return_meta: dict[str, dict[str, object]] = {}
+    for feature in feature_order:
+        parts = feature.rsplit("_", 2)
+        if len(parts) != 3:
+            continue
+        base, timeframe, suffix = parts
+        timeframe_key = timeframe_lookup.get(timeframe)
+        if timeframe_key is None:
+            continue
+        symbol_key = base.upper()
+        if suffix in {"z_score", "z_pipeline"}:
+            param_key = f"enable{symbol_key}ZScore{timeframe_key}"
+            cross_meta.setdefault(
+                param_key,
+                {
+                    "symbol": symbol_key,
+                    "timeframe": timeframe_key,
+                    "data": None,
+                    "line": DummyLine(0.5),
+                    "denom": DummyLine(1.25),
+                },
+            )
+        elif suffix in {"return", "return_pipeline"}:
+            param_key = f"enable{symbol_key}Return{timeframe_key}"
+            return_meta.setdefault(
+                param_key,
+                {
+                    "symbol": symbol_key,
+                    "timeframe": timeframe_key,
+                    "data": None,
+                    "line": DummyLine(0.25),
+                    "lookback": 1,
+                    "last_dt": None,
+                    "last_value": None,
+                },
+            )
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = DummyPercentileTracker()
+
+    dt_num = bt.date2num(datetime(2024, 1, 2, 8, 30))
+    strategy.hourly = SimpleNamespace(datetime=DummyLine(dt_num))
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.vix_median = DummyLine(None)
+    strategy.dom_threshold = None
+    strategy.datr_pct_pct = 55.0
+    strategy.hatr_pct_pct = 45.0
+
+    filter_columns = [
+        FilterColumn(feature, "", "", f"feature_{feature}") for feature in feature_order
+    ]
+    strategy.filter_columns = filter_columns
+    strategy.filter_keys = {column.parameter for column in filter_columns}
+    strategy.filter_column_keys = {column.column_key for column in filter_columns}
+    strategy.filter_columns_by_param = {
+        column.parameter: [column] for column in filter_columns
+    }
+    strategy.column_to_param = {
+        column.column_key: column.parameter for column in filter_columns
+    }
+
+    strategy.cross_zscore_meta = cross_meta
+    strategy.return_meta = return_meta
+
+    snapshot = strategy.collect_filter_values()
+    normalized_snapshot = {
+        normalize_column_name(key): value for key, value in snapshot.items()
+    }
+
+    normalized_keys = set(normalized_snapshot.keys())
+    missing = seen_features - normalized_keys
+
+    assert not missing, f"Missing features in snapshot: {sorted(missing)}"
