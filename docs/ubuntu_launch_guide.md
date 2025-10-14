@@ -109,7 +109,7 @@ cd /opt/pine
 # Create runtime directories
 mkdir -p /opt/pine/runtime
 mkdir -p /opt/pine/logs
-mkdir -p /var/run/pine
+sudo mkdir -p /var/run/pine
 sudo chown $USER:$USER /var/run/pine
 ```
 
