@@ -11,6 +11,7 @@ from config import COMMISSION_PER_SIDE, PAIR_MAP
 from filter_column import FilterColumn
 from safe_div import safe_div
 from contract_specs import CONTRACT_SPECS, point_value
+from strategy.feature_utils import normalize_column_name
 
 
 EXECUTION_SYMBOLS: set[str] = {
@@ -3326,9 +3327,12 @@ class IbsStrategy(bt.Strategy):
             return None
 
         snapshot = self.collect_filter_values(intraday_ago=0)
+        normalized_snapshot = {
+            normalize_column_name(key): value for key, value in snapshot.items()
+        }
         ordered: list[float] = []
         for feature in self.ml_features:
-            value = snapshot.get(feature)
+            value = normalized_snapshot.get(feature)
             if isinstance(value, float) and math.isnan(value):
                 value = None
             if value is None:
