@@ -22,7 +22,6 @@ CONTRACT_SPECS = {
     "MBT": {"tick_size": 5.00, "tick_value": 0.50},
     "TLT": {"tick_size": 0.01, "tick_value": 0.01},
     "VIX": {"tick_size": 0.05, "tick_value": 50.00},
-    "DXY": {"tick_size": 0.005, "tick_value": 5.00},
 }
 
 

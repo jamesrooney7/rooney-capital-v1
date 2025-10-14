@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 
 import backtrader as bt
 
+from config import PAIR_MAP
 from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
@@ -285,13 +286,33 @@ class LiveWorker:
         if not self.symbols:
             raise RuntimeError("Runtime configuration did not reference any known symbols")
 
-        product_to_root: Dict[str, str] = {}
-        for code, symbol in self.contract_map.product_to_root(self.symbols).items():
-            product_to_root[code] = symbol
+        pair_symbols = {
+            sym
+            for sym in set(PAIR_MAP.keys()) | set(PAIR_MAP.values())
+            if sym in self.contract_map
+        }
+        contract_symbols = tuple(sorted(set(self.symbols) | pair_symbols))
 
-        dataset_groups = self.contract_map.dataset_groups(self.symbols)
+        self.reference_symbols = self.contract_map.reference_symbols()
+
+        product_to_root: Dict[str, str] = {}
+        for code, symbol in self.contract_map.product_to_root(contract_symbols).items():
+            product_to_root[code] = symbol
+        for code, symbol in self.contract_map.reference_product_to_root(
+            self.reference_symbols
+        ).items():
+            product_to_root.setdefault(code, symbol)
+
+        dataset_groups = self.contract_map.dataset_groups(contract_symbols)
+        for key, codes in self.contract_map.reference_dataset_groups(self.reference_symbols).items():
+            existing = set(dataset_groups.get(key, ()))
+            existing.update(codes)
+            dataset_groups[key] = tuple(sorted(existing))
+
+        self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
+        self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
         self.subscribers = []
         for (dataset, stype_in), codes in dataset_groups.items():
             self.subscribers.append(
@@ -329,12 +350,31 @@ class LiveWorker:
     # ------------------------------------------------------------------
 
     def _setup_data_and_strategies(self) -> None:
-        for symbol in self.symbols:
-            meta = self.contract_map.active_contract(symbol)
-            instrument_cfg = self.config.instrument(symbol)
-
-            data = DatabentoLiveData(symbol=symbol, queue_manager=self.queue_manager, backfill=self.config.backfill)
+        for symbol in self.data_symbols:
+            if symbol in self._data_feeds:
+                continue
+            data = DatabentoLiveData(
+                symbol=symbol,
+                queue_manager=self.queue_manager,
+                backfill=self.config.backfill,
+            )
             self.cerebro.adddata(data, name=symbol)
+            self._data_feeds[symbol] = data
+            self.cerebro.resampledata(
+                data,
+                timeframe=bt.TimeFrame.Minutes,
+                compression=60,
+                name=f"{symbol}_hour",
+            )
+            self.cerebro.resampledata(
+                data,
+                timeframe=bt.TimeFrame.Days,
+                compression=1,
+                name=f"{symbol}_day",
+            )
+
+        for symbol in self.symbols:
+            instrument_cfg = self.config.instrument(symbol)
 
             try:
                 bundle = load_model_bundle(symbol, base_dir=self.config.models_path)

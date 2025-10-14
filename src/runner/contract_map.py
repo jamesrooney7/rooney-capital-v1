@@ -119,6 +119,33 @@ class ContractRoot:
         return {key: value for key, value in payload.items() if value is not None}
 
 
+def _subscription_from_feed(symbol: str, feed: DatabentoFeed) -> DatabentoSubscription:
+    """Return a :class:`DatabentoSubscription` built from a reference feed."""
+
+    codes: list[str] = []
+    if feed.product_id:
+        codes.append(feed.product_id)
+    if feed.feed_symbol:
+        codes.append(feed.feed_symbol)
+    if symbol not in codes:
+        codes.append(symbol)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for code in codes:
+        norm = code.strip()
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        deduped.append(norm)
+
+    return DatabentoSubscription(
+        dataset=feed.dataset,
+        stype_in="product_id",
+        codes=tuple(deduped),
+    )
+
+
 class ContractMap:
     """Container exposing lookup helpers for contract metadata."""
 
@@ -169,11 +196,27 @@ class ContractMap:
 
         return tuple(sorted(self._contracts.keys()))
 
+    def reference_symbols(self) -> Tuple[str, ...]:
+        """Return all reference feed symbols."""
+
+        return tuple(sorted(self._reference_feeds.keys()))
+
     def product_to_root(self, symbols: Optional[Sequence[str]] = None) -> Dict[str, str]:
         """Return a mapping of subscription codes to their root symbol."""
 
         mapping: Dict[str, str] = {}
         for symbol, subscription in self._iter_subscriptions(symbols):
+            for code in subscription.codes:
+                mapping[code] = symbol
+        return mapping
+
+    def reference_product_to_root(
+        self, symbols: Optional[Sequence[str]] = None
+    ) -> Dict[str, str]:
+        """Return a mapping of reference subscription codes to their root symbol."""
+
+        mapping: Dict[str, str] = {}
+        for symbol, subscription in self._iter_reference_subscriptions(symbols):
             for code in subscription.codes:
                 mapping[code] = symbol
         return mapping
@@ -185,6 +228,17 @@ class ContractMap:
 
         grouped: Dict[Tuple[str, str], set[str]] = {}
         for _, subscription in self._iter_subscriptions(symbols):
+            key = (subscription.dataset, subscription.stype_in)
+            grouped.setdefault(key, set()).update(subscription.codes)
+        return {key: tuple(sorted(values)) for key, values in grouped.items()}
+
+    def reference_dataset_groups(
+        self, symbols: Optional[Sequence[str]] = None
+    ) -> Dict[Tuple[str, str], Tuple[str, ...]]:
+        """Group reference subscription codes by dataset and ``stype_in``."""
+
+        grouped: Dict[Tuple[str, str], set[str]] = {}
+        for _, subscription in self._iter_reference_subscriptions(symbols):
             key = (subscription.dataset, subscription.stype_in)
             grouped.setdefault(key, set()).update(subscription.codes)
         return {key: tuple(sorted(values)) for key, values in grouped.items()}
@@ -203,6 +257,24 @@ class ContractMap:
             items = ((sym.upper(), self.active_contract(sym)) for sym in symbols)
         for symbol, contract in items:
             yield symbol, contract.subscription()
+
+    def _iter_reference_subscriptions(
+        self, symbols: Optional[Sequence[str]] = None
+    ) -> Iterable[tuple[str, DatabentoSubscription]]:
+        if symbols is None:
+            items = self._reference_feeds.items()
+        else:
+            pairs: list[tuple[str, DatabentoFeed]] = []
+            for sym in symbols:
+                feed = self.reference_feed(sym)
+                if not feed:
+                    continue
+                pairs.append((sym.upper(), feed))
+            items = pairs
+        for symbol, feed in items:
+            if not feed:
+                continue
+            yield symbol, _subscription_from_feed(symbol, feed)
 
 
 def load_contract_map(path: str | Path) -> ContractMap:
