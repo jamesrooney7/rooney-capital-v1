@@ -239,7 +239,17 @@ with `PINE_RUNTIME_CONFIG=/opt/pine/runtime/config.yml` when launching.
 
 ### Local/Paper Trading
 
-Run the live worker from a shell once the configuration file is in place:
+Run the live worker from a shell once the configuration file is in place. The
+repository includes `scripts/launch_worker.py`, which adjusts `PYTHONPATH`
+automatically and prints safety warnings around the kill switch:
+
+```bash
+export PINE_RUNTIME_CONFIG=/path/to/config.yml
+python scripts/launch_worker.py
+```
+
+If you prefer to inline the command (for example on ephemeral hosts) the
+following snippet is equivalent:
 
 ```bash
 export PINE_RUNTIME_CONFIG=/path/to/config.yml
@@ -250,6 +260,14 @@ config = load_runtime_config()
 worker = LiveWorker(config)
 worker.run()
 PY
+```
+
+To verify configuration and connectivity without running the live loop, use the
+bundled preflight helper:
+
+```bash
+export PINE_RUNTIME_CONFIG=/path/to/config.yml
+python scripts/worker_preflight.py
 ```
 
 This launches the Databento subscribers, hydrates ML bundles, and begins routing

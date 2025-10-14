@@ -61,3 +61,4 @@ requests_local/
 !src/**/*.py
 !deployment/**/*.py
 !tests/**/*.py
+!scripts/*.py
