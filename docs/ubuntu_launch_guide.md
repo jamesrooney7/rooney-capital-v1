@@ -653,8 +653,8 @@ sudo systemctl status pine-runner.service
 # View heartbeat
 cat /var/run/pine/worker_heartbeat.json | python3 -m json.tool
 
-# Emergency stop (enable kill switch without restart)
-echo "POLICY_KILLSWITCH=true" | sudo tee /opt/pine/runtime/.env
+# Emergency stop (enable kill switch and restart service)
+sudo sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/runtime/.env
 sudo systemctl restart pine-runner.service
 
 # Update code
