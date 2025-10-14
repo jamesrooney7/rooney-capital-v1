@@ -165,6 +165,8 @@ class RuntimeConfig:
     backfill: bool = True
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
+    heartbeat_file: Optional[Path] = None
+    heartbeat_write_interval: float = 30.0
     poll_interval: float = 1.0
     traderspost_webhook: Optional[str] = None
     traderspost_api_base: Optional[str] = None
@@ -268,6 +270,23 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         heartbeat_interval = int(heartbeat_interval_raw) if heartbeat_interval_raw is not None else None
     except (TypeError, ValueError):
         heartbeat_interval = None
+    heartbeat_file_raw = (
+        payload.get("heartbeat_file")
+        or os.environ.get("PINE_HEARTBEAT_FILE")
+    )
+    heartbeat_file = Path(heartbeat_file_raw).expanduser() if heartbeat_file_raw else None
+    heartbeat_write_interval_raw = (
+        payload.get("heartbeat_write_interval")
+        or os.environ.get("PINE_HEARTBEAT_WRITE_INTERVAL")
+    )
+    try:
+        heartbeat_write_interval = (
+            float(heartbeat_write_interval_raw)
+            if heartbeat_write_interval_raw is not None
+            else 30.0
+        )
+    except (TypeError, ValueError):
+        heartbeat_write_interval = 30.0
     poll_interval_raw = payload.get("poll_interval", 1.0)
     try:
         poll_interval = float(poll_interval_raw)
@@ -327,6 +346,8 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         backfill=backfill,
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
+        heartbeat_file=heartbeat_file,
+        heartbeat_write_interval=heartbeat_write_interval,
         poll_interval=poll_interval,
         traderspost_webhook=webhook_url,
         traderspost_api_base=api_base,
@@ -410,6 +431,7 @@ class LiveWorker:
         self._cerebro_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._loop_callbacks: list[Callable[[], None]] = []
+        self._last_heartbeat_update: float = 0.0
 
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook or config.traderspost_api_base:
@@ -427,6 +449,9 @@ class LiveWorker:
             self.traderspost_client = None
 
         self._setup_data_and_strategies()
+
+        if self.config.heartbeat_file:
+            logger.info("Heartbeat file configured at %s", self.config.heartbeat_file)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -698,6 +723,7 @@ class LiveWorker:
         self._stop_event.clear()
         self._cerebro_thread = threading.Thread(target=self._run_cerebro, name="cerebro-runner", daemon=True)
         self._cerebro_thread.start()
+        self._update_heartbeat(status="running", force=True)
 
     def stop(self) -> None:
         logger.info("Stopping LiveWorker")
@@ -707,6 +733,7 @@ class LiveWorker:
         if self._cerebro_thread:
             self._cerebro_thread.join(timeout=10)
         logger.info("LiveWorker stopped")
+        self._update_heartbeat(status="stopped", force=True)
 
     def request_stop(self) -> None:
         logger.info("Stop requested")
@@ -716,6 +743,7 @@ class LiveWorker:
                 callback()
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Loop callback failed")
+        self._update_heartbeat(status="stopping", force=True)
 
     # ------------------------------------------------------------------
     # Event loop helpers
@@ -740,14 +768,17 @@ class LiveWorker:
 
         if not self.run_preflight_checks():
             logger.critical("❌ STARTUP ABORTED: Pre-flight checks failed")
+            self._update_heartbeat(status="failed", force=True, details={"stage": "preflight"})
             raise RuntimeError("Pre-flight validation failed")
 
         try:
             self.reconcile_on_startup()
         except Exception:
             logger.exception("Unexpected error during startup reconciliation")
+            self._update_heartbeat(status="failed", force=True, details={"stage": "reconciliation"})
             raise
 
+        self._update_heartbeat(status="starting", force=True)
         self.start()
 
         cerebro_future = loop.run_in_executor(None, self._wait_for_cerebro)
@@ -756,8 +787,10 @@ class LiveWorker:
             while not self._stop_event.is_set():
                 if stop_event.is_set():
                     break
+                self._update_heartbeat(status="running")
                 await asyncio.sleep(self.config.poll_interval)
         finally:
+            self._update_heartbeat(status="stopping", force=True)
             self.stop()
             await cerebro_future
 
@@ -772,6 +805,44 @@ class LiveWorker:
         if not sym or sym not in self.contract_map:
             return {}
         return self.contract_map.traderspost_metadata(sym)
+
+    def _update_heartbeat(
+        self,
+        status: str,
+        *,
+        force: bool = False,
+        details: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        path = self.config.heartbeat_file
+        if path is None:
+            return
+
+        interval = max(float(self.config.heartbeat_write_interval), 0.0)
+        now = time.monotonic()
+        if not force and interval and now - self._last_heartbeat_update < interval:
+            return
+
+        payload: dict[str, Any] = {
+            "status": str(status),
+            "updated_at": datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
+            "hostname": socket.gethostname(),
+            "pid": os.getpid(),
+            "symbols": list(self.symbols),
+        }
+        if details:
+            try:
+                payload["details"] = dict(details)
+            except Exception:  # pragma: no cover - defensive guard
+                payload["details"] = {"message": str(details)}
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(path.name + ".tmp")
+            tmp_path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+            tmp_path.replace(path)
+            self._last_heartbeat_update = now
+        except Exception:  # pragma: no cover - best effort monitoring
+            logger.exception("Failed to write heartbeat file at %s", path)
 
     # ------------------------------------------------------------------
     # Pre-flight validation
