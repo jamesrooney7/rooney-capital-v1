@@ -55,32 +55,23 @@ preflight:
 # Instrument-specific overrides
 # ---------------------------------------------------------------------------
 # Each symbol inherits defaults from src/runner/live_worker.py:InstrumentRuntimeConfig.
-# Provide contract sizing, commissions, and optional strategy overrides.
+# Provide contract sizing, commissions, and other per-instrument settings.
 contracts:
   ES:
     size: 1                    # Number of contracts per signal.
     commission: 4.00           # Round-trip commission per contract (USD).
     margin: 13200              # Exchange/Broker intraday margin requirement.
     multiplier: 50             # Contract multiplier used for PnL translation.
-    strategy_overrides:
-      pair_symbol: NQ          # Override the default pair map for spread filters.
-      pair_threshold: 0.55     # Custom IBS pair confirmation threshold.
-      ml_model_version: 2024-01-15  # Document which bundle revision is deployed.
   NQ:
     size: 1
     commission: 4.20
     margin: 15400
     multiplier: 20
-    strategy_overrides:
-      premarket_window: 30     # Skip entries until N minutes after session open.
   RTY:
     size: 2
     commission: 4.50
     margin: 8800
     multiplier: 50
-    strategy_overrides:
-      disable_pair_trading: true  # Only trade standalone signals for RTY.
-      volatility_cap: 1.75        # Exit when realised volatility breaches this cap.
 
 # Optional: override paths for ad-hoc instruments without editing `symbols`.
 # Additional entries can be appended following the structure above.
