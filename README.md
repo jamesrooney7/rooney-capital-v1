@@ -35,3 +35,19 @@ Each instrument has a dedicated Random Forest model trained on instrument-specif
 - ES_rf_model.pkl (2B) - E-mini S&P 500
 - NQ_rf_model.pkl (1.9MB) - E-mini Nasdaq-100
 - ... (12 models total)
+
+Use ``src.models.load_model_bundle`` to hydrate the trained model and
+probability threshold when wiring the strategy (see `docs/ml_bundles.md` for a
+full rundown of the exported files):
+
+```python
+from models import load_model_bundle
+from strategy.ibs_strategy import IbsStrategy
+
+bundle = load_model_bundle("ES")
+cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
+```
+
+> **Note:** The ``*_rf_model.pkl`` artefacts are stored with Git LFS.  Ensure
+> you have pulled the large files (``git lfs pull``) before attempting to load
+> the models in a fresh clone.
