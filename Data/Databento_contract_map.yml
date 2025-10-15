@@ -136,43 +136,59 @@
   "reference_feeds": [
     {
       "symbol": "PL",
-      "dataset": "GLBX.MDP3",
-      "product_id": "PL.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "PL.FUT"
+      }
     },
     {
       "symbol": "6C",
-      "dataset": "GLBX.MDP3",
-      "product_id": "6C.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "6C.FUT"
+      }
     },
     {
       "symbol": "6J",
-      "dataset": "GLBX.MDP3",
-      "product_id": "6J.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "6J.FUT"
+      }
     },
     {
       "symbol": "6M",
-      "dataset": "GLBX.MDP3",
-      "product_id": "6M.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "6M.FUT"
+      }
     },
     {
       "symbol": "6N",
-      "dataset": "GLBX.MDP3",
-      "product_id": "6N.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "6N.FUT"
+      }
     },
     {
       "symbol": "6S",
-      "dataset": "GLBX.MDP3",
-      "product_id": "6S.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "6S.FUT"
+      }
     },
     {
       "symbol": "TLT",
-      "dataset": "GLBX.MDP3",
-      "product_id": "ZB.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "ZB.FUT"
+      }
     },
     {
       "symbol": "VIX",
-      "dataset": "GLBX.MDP3",
-      "product_id": "VX.FUT"
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "product_id": "VX.FUT"
+      }
     }
   ]
 }
