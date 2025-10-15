@@ -82,7 +82,7 @@ echo "export REPO_URL=\"$REPO_URL\"" >> ~/.bashrc
 sudo apt update && sudo apt upgrade -y
 
 # Install required system packages
-sudo apt install -y python3.10 python3.10-venv python3-pip git git-lfs curl
+sudo apt install -y python3.10 python3.10-venv python3-pip git git-lfs curl jq
 
 # Verify Python version (should be 3.10+)
 python3.10 --version
@@ -488,14 +488,41 @@ python scripts/worker_preflight.py
 - Configuration loads successfully
 - Worker initializes
 - Preflight checks pass (ML models, connections, reference data)
+- Telemetry snapshot saved to `/var/run/pine/worker_heartbeat.json` containing
+  merged `preflight`, `databento`, and `traderspost` details
 
-### 3.4 Create Launch Script
+### 3.4 Validate Heartbeat Telemetry (New)
+
+With the worker still running from the previous step (or immediately after it
+exits), confirm the enriched heartbeat payload is being written. The commands
+below surface queue fanout depth, Databento subscriber cadence, and the most
+recent TradersPost delivery result.
+
+```bash
+# Pretty-print the entire heartbeat for manual inspection
+cat /var/run/pine/worker_heartbeat.json | jq '.'
+
+# Verify queue fanout telemetry is present and review queue depths
+jq -r '.details.databento.queue_fanout' /var/run/pine/worker_heartbeat.json
+
+# Confirm each Databento subscriber is reporting the last emitted minute
+jq -r '.details.databento.subscribers[] | "\(.dataset): \(.last_emitted_minute)"' \
+  /var/run/pine/worker_heartbeat.json
+
+# Check the most recent TradersPost webhook outcome (success or error)
+jq -r '.details.traderspost' /var/run/pine/worker_heartbeat.json
+```
+
+If any field is missing, rerun the preflight script and review
+`pine-runner.service` logs for errors before proceeding.
+
+### 3.5 Create Launch Script
 
 The repository-maintained `scripts/launch_worker.py` takes care of adjusting the
 `PYTHONPATH`, prints the same guardrails about the kill switch, and calls
 `LiveWorker.run()`.
 
-### 3.5 Test Manual Launch (Paper Mode)
+### 3.6 Test Manual Launch (Paper Mode)
 
 ```bash
 cd /opt/pine/rooney-capital-v1
@@ -518,7 +545,7 @@ python scripts/launch_worker.py
 # Let it run for 2-3 minutes, watch for:
 # - Successful Databento connection
 # - Market data flowing
-# - Heartbeat updates
+# - Heartbeat details refreshing (queue depths, subscriber cadence, TradersPost delivery)
 # - No errors in logs
 
 # Press Ctrl+C to stop gracefully
@@ -659,6 +686,16 @@ sudo systemctl status pine-runner.service
 
 # View heartbeat
 cat /var/run/pine/worker_heartbeat.json | python3 -m json.tool
+
+# Inspect queue fanout depth / instrument mapping telemetry
+jq -r '.details.databento.queue_fanout' /var/run/pine/worker_heartbeat.json
+
+# Confirm Databento subscriber cadence
+jq -r '.details.databento.subscribers[] | "\(.dataset): \(.last_emitted_minute)"' \
+  /var/run/pine/worker_heartbeat.json
+
+# Check most recent TradersPost webhook success/error
+jq -r '.details.traderspost' /var/run/pine/worker_heartbeat.json
 
 # Emergency stop (enable kill switch and restart service)
 sudo sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/runtime/.env
