@@ -88,7 +88,7 @@ class ContractRoot:
         feed_symbol = self.feed_symbol
         if feed_symbol and feed_symbol not in codes:
             codes.append(feed_symbol)
-        if self.symbol not in codes:
+        if not codes:
             codes.append(self.symbol)
         deduped: list[str] = []
         seen: set[str] = set()
@@ -127,7 +127,7 @@ def _subscription_from_feed(symbol: str, feed: DatabentoFeed) -> DatabentoSubscr
         codes.append(feed.product_id)
     if feed.feed_symbol:
         codes.append(feed.feed_symbol)
-    if symbol not in codes:
+    if not codes:
         codes.append(symbol)
 
     deduped: list[str] = []

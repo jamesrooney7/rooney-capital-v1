@@ -19,7 +19,7 @@ def test_contract_map_subscriptions_are_consistent() -> None:
     assert subscription.dataset == "GLBX.MDP3"
     assert subscription.stype_in == es_root.roll.stype_in == "product_id"
     assert subscription.codes[0] == "MES.FUT"
-    assert {"MES.FUT", "MES", "ES"}.issubset(set(subscription.codes))
+    assert set(subscription.codes) == {"MES.FUT", "MES"}
 
     # TradersPost metadata should surface the tradovate and Databento details.
     metadata = es_root.traderspost_metadata()
