@@ -250,7 +250,7 @@ class DatabentoSubscriber:
         self.api_key = api_key
         self.schema = schema
         self.stype_in = stype_in
-        self.start = start
+        self.start_time = start
         self.heartbeat_interval = heartbeat_interval
         self.reconnect_backoff = tuple(reconnect_backoff)
 
@@ -335,7 +335,7 @@ class DatabentoSubscriber:
             schema=self.schema,
             symbols=self.product_codes,
             stype_in=self.stype_in,
-            start=self.start,
+            start=self.start_time,
         )
 
         # Pull metadata (if present) to seed the instrument roll map.
