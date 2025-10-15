@@ -138,7 +138,7 @@
       "symbol": "PL",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "PL",
+        "feed_symbol": null,
         "product_id": "PL.FUT"
       }
     },
@@ -146,7 +146,7 @@
       "symbol": "6C",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "6C",
+        "feed_symbol": null,
         "product_id": "6C.FUT"
       }
     },
@@ -154,7 +154,7 @@
       "symbol": "6J",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "6J",
+        "feed_symbol": null,
         "product_id": "6J.FUT"
       }
     },
@@ -162,7 +162,7 @@
       "symbol": "6M",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "6M",
+        "feed_symbol": null,
         "product_id": "6M.FUT"
       }
     },
@@ -170,7 +170,7 @@
       "symbol": "6N",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "6N",
+        "feed_symbol": null,
         "product_id": "6N.FUT"
       }
     },
@@ -178,7 +178,7 @@
       "symbol": "6S",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "6S",
+        "feed_symbol": null,
         "product_id": "6S.FUT"
       }
     },
@@ -186,7 +186,7 @@
       "symbol": "TLT",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "ZB",
+        "feed_symbol": null,
         "product_id": "ZB.FUT"
       }
     },
@@ -194,7 +194,7 @@
       "symbol": "VIX",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "feed_symbol": "VXN",
+        "feed_symbol": null,
         "product_id": "VXN.FUT"
       }
     }
