@@ -137,8 +137,10 @@ class QueueFanout:
             q.put_nowait(bar)
         except queue.Full:
             logger.warning(
-                "Queue for symbol %s is full; dropping bar at %s",
+                "Queue for symbol %s is full (%d/%d); dropping bar at %s",
                 bar.symbol,
+                q.qsize(),
+                self._maxsize,
                 bar.timestamp,
             )
 
