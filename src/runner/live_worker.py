@@ -770,21 +770,30 @@ class LiveWorker:
         # Wait for initial data to begin streaming so Cerebro has initial bars
         logger.info("Waiting for initial data from Databento feeds...")
 
-        required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
-        for feed_name in self._required_reference_feed_names():
-            feed = str(feed_name or "").strip()
-            if not feed:
-                continue
-            if feed.endswith("_day"):
-                feed = feed[: -len("_day")]
-            elif feed.endswith("_hour"):
-                feed = feed[: -len("_hour")]
-            if feed:
-                required_queues.add(feed)
-
         max_wait_seconds = 60
         missing_queues: set[str] = set()
         try:
+            if not self._data_feeds and not getattr(self.cerebro, "datas", []):
+                logger.error("❌ STARTUP ABORTED: No data feeds configured; aborting Cerebro run")
+                self._update_heartbeat(
+                    status="failed",
+                    force=True,
+                    details={"stage": "cerebro", "reason": "no_data_feeds"},
+                )
+                return
+
+            required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
+            for feed_name in self._required_reference_feed_names():
+                feed = str(feed_name or "").strip()
+                if not feed:
+                    continue
+                if feed.endswith("_day"):
+                    feed = feed[: -len("_day")]
+                elif feed.endswith("_hour"):
+                    feed = feed[: -len("_hour")]
+                if feed:
+                    required_queues.add(feed)
+
             for waited in range(max_wait_seconds):
                 missing_queues = {
                     queue_name
