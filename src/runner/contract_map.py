@@ -31,7 +31,7 @@ class DatabentoFeed:
     """Metadata describing how to subscribe to a Databento dataset."""
 
     dataset: str
-    feed_symbol: str
+    feed_symbol: Optional[str] = None
     product_id: Optional[str] = None
 
 
@@ -358,6 +358,8 @@ def _parse_contract_entry(payload: Any) -> ContractRoot:
     feed_symbol = _normalize_symbol(databento_payload.get("feed_symbol") or symbol)
     product_id_raw = databento_payload.get("product_id")
     product_id = _normalize_str(product_id_raw) if product_id_raw is not None else None
+    if feed_symbol is None and product_id:
+        feed_symbol = product_id
 
     if not dataset:
         raise ContractMapError(f"Contract {symbol} missing Databento dataset")
@@ -396,17 +398,17 @@ def _parse_reference_entry(payload: Any) -> tuple[str, DatabentoFeed]:
 
     symbol = _normalize_symbol(payload.get("symbol") or databento_payload.get("feed_symbol"))
     dataset = _normalize_str(databento_payload.get("dataset"))
-    feed_symbol = _normalize_symbol(databento_payload.get("feed_symbol") or symbol)
+    feed_symbol_raw = databento_payload.get("feed_symbol")
+    feed_symbol = _normalize_symbol(feed_symbol_raw) if feed_symbol_raw is not None else None
     product_id_raw = databento_payload.get("product_id")
     product_id = _normalize_str(product_id_raw) if product_id_raw is not None else None
+    if feed_symbol is None and product_id:
+        feed_symbol = product_id
 
     if not symbol:
         raise ContractMapError("Reference feed missing symbol")
     if not dataset:
         raise ContractMapError(f"Reference feed {symbol} missing Databento dataset")
-    if not feed_symbol:
-        raise ContractMapError(f"Reference feed {symbol} missing Databento feed_symbol")
-
     return symbol, DatabentoFeed(dataset=dataset, feed_symbol=feed_symbol, product_id=product_id)
 
 
