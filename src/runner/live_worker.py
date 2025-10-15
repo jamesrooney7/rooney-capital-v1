@@ -767,9 +767,16 @@ class LiveWorker:
 
     def _run_cerebro(self) -> None:
         logger.info("Starting Backtrader runtime for symbols: %s", ", ".join(self.symbols))
-        # Wait briefly for data to begin streaming so Cerebro has initial bars
+        # Wait for initial data to begin streaming so Cerebro has initial bars
         logger.info("Waiting for initial data from Databento feeds...")
-        time.sleep(10)
+        max_wait_seconds = 60
+        for waited in range(max_wait_seconds):
+            if all(self.queue_manager.get_queue(symbol).qsize() > 0 for symbol in self.symbols):
+                logger.info("Initial data received after %s seconds", waited + 1)
+                break
+            time.sleep(1)
+        else:
+            logger.warning("Timeout waiting for initial data after %s seconds", max_wait_seconds)
         try:
             self.cerebro.run(runonce=False, stdstats=False, maxcpus=1)
         except Exception as exc:  # pragma: no cover - unexpected runtime error
