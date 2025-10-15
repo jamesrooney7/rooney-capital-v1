@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 import queue
 
+import backtrader as bt
 import pytest
 
 from databento import SType, SymbolMappingMsg
@@ -176,6 +177,9 @@ def test_subscriber_handles_symbol_roll_resets() -> None:
 def test_live_data_consumes_queue_signals_and_bars() -> None:
     fanout = QueueFanout({"ESH4": "ES"}, maxsize=8)
     data = DatabentoLiveData(symbol="ES", queue_manager=fanout, backfill=False, qcheck=0.01)
+
+    assert data._timeframe == bt.TimeFrame.Minutes
+    assert data._compression == 1
 
     data.start()
     symbol_queue = fanout.get_queue("ES")

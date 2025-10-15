@@ -1,10 +1,12 @@
 import json
 import sys
+import warnings
 from datetime import datetime
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
 import backtrader as bt
+import pandas as pd
 import pytest
 
 # Ensure the project "src" directory is on the import path
@@ -47,7 +49,31 @@ def test_evaluate_ml_score_uses_normalised_feature_names():
     score = strategy._evaluate_ml_score()
 
     assert score == pytest.approx(0.8)
-    assert strategy.ml_model.seen == [[0.42]]
+    assert isinstance(strategy.ml_model.seen, pd.DataFrame)
+    assert list(strategy.ml_model.seen.columns) == ["prev_bar"]
+    assert strategy.ml_model.seen.iloc[0, 0] == pytest.approx(0.42)
+
+
+def test_evaluate_ml_score_preserves_feature_names(monkeypatch):
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.ml_features = ["prev_bar"]
+    strategy.ml_model = DummyModel([0.3, 0.7])
+    strategy.ml_model.feature_names_in_ = ["prev_bar"]
+    strategy.cross_zscore_meta = set()
+    strategy.return_meta = set()
+
+    def fake_collect(self, intraday_ago=0):
+        assert intraday_ago == 0
+        return {"Prev Bar %": 0.24}
+
+    strategy.collect_filter_values = MethodType(fake_collect, strategy)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        score = strategy._evaluate_ml_score()
+
+    assert score == pytest.approx(0.7)
+    assert not any("feature names" in str(w.message).lower() for w in caught)
 
 
 def test_collect_filter_values_emits_metadata_keys():
