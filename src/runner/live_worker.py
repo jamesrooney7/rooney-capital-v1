@@ -536,6 +536,9 @@ class LiveWorker:
                 logger.exception("Failed to initialise TradersPost client")
                 self.traderspost_client = None
         else:
+            logger.info(
+                "TradersPost client disabled: no webhook URL configured"
+            )
             self.traderspost_client = None
 
         self._setup_data_and_strategies()
