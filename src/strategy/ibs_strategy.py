@@ -7,6 +7,11 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from typing import Optional
 
+try:  # pragma: no cover - optional dependency guard
+    import pandas as pd  # type: ignore
+except Exception:  # pragma: no cover - pandas is optional at runtime
+    pd = None
+
 from config import COMMISSION_PER_SIDE, PAIR_MAP
 from .filter_column import FilterColumn
 from .safe_div import safe_div
@@ -3555,8 +3560,16 @@ class IbsStrategy(bt.Strategy):
             except (TypeError, ValueError):
                 ordered.append(float(self._ml_default_for_feature(feature)))
 
+        ml_input: object = [ordered]
+        if pd is not None:
+            try:
+                ml_input = pd.DataFrame([ordered], columns=self.ml_features)
+            except Exception:  # pragma: no cover - fallback to list input
+                logging.exception("Failed to build DataFrame for ML features")
+                ml_input = [ordered]
+
         try:
-            probabilities = self.ml_model.predict_proba([ordered])
+            probabilities = self.ml_model.predict_proba(ml_input)
         except Exception:
             logging.exception("ml_model.predict_proba failed")
             return None

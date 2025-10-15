@@ -583,7 +583,16 @@ class DatabentoLiveData(bt.feeds.DataBase):
     )
 
     def __init__(self, **kwargs) -> None:
+        timeframe = kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
+        compression = kwargs.setdefault("compression", 1)
         super().__init__(**kwargs)
+        try:
+            self.p.timeframe = timeframe
+            self.p.compression = compression
+        except Exception:  # pragma: no cover - Params may be immutable in older bt
+            pass
+        self._timeframe = timeframe
+        self._compression = compression
         if not self.p.symbol:
             raise ValueError("symbol parameter is required")
         if not self.p.queue_manager:
