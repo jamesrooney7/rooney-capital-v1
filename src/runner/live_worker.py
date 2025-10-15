@@ -637,6 +637,30 @@ class LiveWorker:
             return
         payload = order_notification_to_message(strategy, order)
         if not payload:
+            status = getattr(order, "status", None)
+            if status != bt.Order.Completed:
+                logger.debug(
+                    "Skipping TradersPost order payload for %s: status %s not completed",
+                    getattr(order, "ref", None),
+                    status,
+                )
+            else:
+                executed = getattr(order, "executed", None)
+                if executed is None:
+                    logger.debug(
+                        "Skipping TradersPost order payload for %s: missing execution snapshot",
+                        getattr(order, "ref", None),
+                    )
+                elif getattr(executed, "size", None) is None:
+                    logger.debug(
+                        "Skipping TradersPost order payload for %s: executed size unavailable",
+                        getattr(order, "ref", None),
+                    )
+                else:
+                    logger.debug(
+                        "Skipping TradersPost order payload for %s: helper returned no payload",
+                        getattr(order, "ref", None),
+                    )
             return
         metadata = self._metadata_for_symbol(payload.get("symbol"))
         if metadata:
@@ -678,6 +702,16 @@ class LiveWorker:
             return
         payload = trade_notification_to_message(strategy, trade, exit_snapshot)
         if not payload:
+            if not getattr(trade, "isclosed", False):
+                logger.debug(
+                    "Skipping TradersPost trade payload for %s: trade not closed",
+                    getattr(trade, "ref", None),
+                )
+            else:
+                logger.debug(
+                    "Skipping TradersPost trade payload for %s: helper returned no payload",
+                    getattr(trade, "ref", None),
+                )
             return
         metadata = self._metadata_for_symbol(payload.get("symbol"))
         if metadata:
