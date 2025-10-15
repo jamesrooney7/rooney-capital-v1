@@ -85,9 +85,9 @@ class ContractRoot:
         product_id = self.product_id
         if product_id:
             codes.append(product_id)
-        feed_symbol = self.feed_symbol
-        if feed_symbol and feed_symbol not in codes:
-            codes.append(feed_symbol)
+        # Only add feed_symbol if explicitly set (not falling back to the root symbol)
+        if self.databento.feed_symbol and self.databento.feed_symbol not in codes:
+            codes.append(self.databento.feed_symbol)
         if not codes:
             # Fallback to the internal symbol only when no Databento mapping exists
             codes.append(self.symbol)
