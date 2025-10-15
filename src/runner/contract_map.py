@@ -357,7 +357,8 @@ def _parse_contract_entry(payload: Any) -> ContractRoot:
         raise ContractMapError(f"Contract {symbol} missing 'databento' mapping")
 
     dataset = _normalize_str(databento_payload.get("dataset"))
-    feed_symbol = _normalize_symbol(databento_payload.get("feed_symbol") or symbol)
+    feed_symbol_raw = databento_payload.get("feed_symbol")
+    feed_symbol = _normalize_symbol(feed_symbol_raw) if feed_symbol_raw is not None else None
     product_id_raw = databento_payload.get("product_id")
     product_id = _normalize_str(product_id_raw) if product_id_raw is not None else None
     if feed_symbol is None and product_id:
