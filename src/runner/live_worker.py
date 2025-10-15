@@ -769,15 +769,47 @@ class LiveWorker:
         logger.info("Starting Backtrader runtime for symbols: %s", ", ".join(self.symbols))
         # Wait for initial data to begin streaming so Cerebro has initial bars
         logger.info("Waiting for initial data from Databento feeds...")
+
+        required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
+        for feed_name in self._required_reference_feed_names():
+            feed = str(feed_name or "").strip()
+            if not feed:
+                continue
+            if feed.endswith("_day"):
+                feed = feed[: -len("_day")]
+            elif feed.endswith("_hour"):
+                feed = feed[: -len("_hour")]
+            if feed:
+                required_queues.add(feed)
+
         max_wait_seconds = 60
-        for waited in range(max_wait_seconds):
-            if all(self.queue_manager.get_queue(symbol).qsize() > 0 for symbol in self.symbols):
-                logger.info("Initial data received after %s seconds", waited + 1)
-                break
-            time.sleep(1)
-        else:
-            logger.warning("Timeout waiting for initial data after %s seconds", max_wait_seconds)
+        missing_queues: set[str] = set()
         try:
+            for waited in range(max_wait_seconds):
+                missing_queues = {
+                    queue_name
+                    for queue_name in required_queues
+                    if self.queue_manager.get_queue(queue_name).qsize() == 0
+                }
+                if not missing_queues:
+                    logger.info("Initial data received after %s seconds", waited + 1)
+                    break
+                time.sleep(1)
+            else:
+                missing_queues = {
+                    queue_name
+                    for queue_name in required_queues
+                    if self.queue_manager.get_queue(queue_name).qsize() == 0
+                }
+
+            if missing_queues:
+                logger.error(
+                    "Timeout waiting for initial data after %s seconds; missing queues: %s",
+                    max_wait_seconds,
+                    ", ".join(sorted(missing_queues)),
+                )
+                return
+
             self.cerebro.run(runonce=False, stdstats=False, maxcpus=1)
         except Exception as exc:  # pragma: no cover - unexpected runtime error
             logger.exception("Cerebro execution failed: %s", exc)

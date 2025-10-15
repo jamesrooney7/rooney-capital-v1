@@ -322,3 +322,61 @@ def test_heartbeat_file_updates(monkeypatch: pytest.MonkeyPatch, tmp_path: Path)
     payload = json.loads(heartbeat_path.read_text())
     assert payload["status"] == "stopped"
     assert "databento" in payload["details"]
+
+
+def test_run_cerebro_aborts_until_all_queues_ready(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _patch_successful_dependencies(monkeypatch)
+    worker = LiveWorker(_successful_config())
+
+    required_queues = {str(symbol) for symbol in worker.data_symbols}
+    for feed_name in worker._required_reference_feed_names():
+        base = str(feed_name or "").strip()
+        if base.endswith("_day"):
+            base = base[: -len("_day")]
+        elif base.endswith("_hour"):
+            base = base[: -len("_hour")]
+        if base:
+            required_queues.add(base)
+
+    queue_sizes: dict[str, int] = {name: 0 for name in required_queues}
+    queues: dict[str, object] = {}
+
+    class _Queue:
+        def __init__(self, name: str) -> None:
+            self._name = name
+
+        def qsize(self) -> int:
+            return queue_sizes.get(self._name, 0)
+
+    def _get_queue(name: str):  # pragma: no cover - helper stub
+        queue = queues.get(name)
+        if queue is None:
+            queue = _Queue(name)
+            queues[name] = queue
+        return queue
+
+    monkeypatch.setattr(worker.queue_manager, "get_queue", _get_queue)
+
+    run_called = False
+
+    def _fake_run(*args, **kwargs):  # pragma: no cover - helper stub
+        nonlocal run_called
+        run_called = True
+        return []
+
+    monkeypatch.setattr(worker.cerebro, "run", _fake_run)
+    monkeypatch.setattr(live_worker.time, "sleep", lambda _: None)
+
+    caplog.set_level(logging.INFO)
+    worker._run_cerebro()
+
+    assert worker._stop_event.is_set()
+    assert run_called is False
+
+    error_messages = [record.getMessage() for record in caplog.records if record.levelno >= logging.ERROR]
+    assert any("Timeout waiting for initial data" in message for message in error_messages)
+
+    expected_missing = ", ".join(sorted(required_queues))
+    assert any(expected_missing in message for message in error_messages)
