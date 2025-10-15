@@ -141,7 +141,7 @@ def _subscription_from_feed(symbol: str, feed: DatabentoFeed) -> DatabentoSubscr
 
     return DatabentoSubscription(
         dataset=feed.dataset,
-        stype_in="product_id",
+        stype_in="parent",
         codes=tuple(deduped),
     )
 
