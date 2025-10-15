@@ -101,7 +101,7 @@ class ContractRoot:
             deduped.append(norm)
         return DatabentoSubscription(
             dataset=self.databento.dataset,
-            stype_in=self.roll.stype_in or "product_id",
+            stype_in=self.roll.stype_in or "parent",
             codes=tuple(deduped),
         )
 
