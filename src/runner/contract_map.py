@@ -89,6 +89,7 @@ class ContractRoot:
         if feed_symbol and feed_symbol not in codes:
             codes.append(feed_symbol)
         if not codes:
+            # Fallback to the internal symbol only when no Databento mapping exists
             codes.append(self.symbol)
         deduped: list[str] = []
         seen: set[str] = set()
@@ -128,6 +129,7 @@ def _subscription_from_feed(symbol: str, feed: DatabentoFeed) -> DatabentoSubscr
     if feed.feed_symbol:
         codes.append(feed.feed_symbol)
     if not codes:
+        # Fallback to the internal symbol only when no Databento mapping exists
         codes.append(symbol)
 
     deduped: list[str] = []
