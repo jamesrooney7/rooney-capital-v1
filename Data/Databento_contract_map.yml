@@ -223,7 +223,7 @@
       "symbol": "VIX",
       "databento": {
         "dataset": "GLBX.MDP3",
-        "product_id": "VX.FUT"
+        "product_id": "VXN.FUT"
       }
     }
   ]
