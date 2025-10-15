@@ -843,6 +843,22 @@ class IbsStrategy(bt.Strategy):
         if self.tlt is None or self.tlt._name != tlt_name:
             raise ValueError(f"Missing data feed {tlt_name}")
 
+        self.available_data_names: set[str] = {
+            data._name
+            for data in getattr(self, "datas", [])
+            if getattr(data, "_name", None)
+        }
+        self._available_vix_suffixes: set[str] = {
+            name.split("_", 1)[1]
+            for name in self.available_data_names
+            if name.startswith("VIX_")
+        }
+        self.has_vix: bool = bool(self._available_vix_suffixes)
+        if not self.has_vix:
+            logging.info(
+                "VIX reference feeds are unavailable; falling back to neutral defaults"
+            )
+
         def select_base_data(tf_param):
             tf = str(tf_param).lower()
             return self.daily if tf.startswith("d") else self.hourly
@@ -1180,8 +1196,9 @@ class IbsStrategy(bt.Strategy):
             "6N",
             "6S",
             "TLT",
-            "VIX",
         }
+        if self.has_vix:
+            preload_symbols.add("VIX")
         for symbol in preload_symbols:
             for tf_key, feed_suffix, _friendly in CROSS_Z_TIMEFRAMES:
                 enable_param = f"enable{symbol}ZScore{tf_key}"
@@ -1260,19 +1277,27 @@ class IbsStrategy(bt.Strategy):
         self.vix_data = None
         self.vix_median = None
         if self.p.enable_vix_reg or "enableVixReg" in self.filter_keys:
-            tf = str(self.p.vix_tf).lower()
-            name = "VIX_day" if tf.startswith("d") else "VIX_hour"
-            try:
-                data = self.getdatabyname(name)
-            except KeyError:
-                data = None
-            if data is None or data._name != name:
-                logging.warning("Missing data feed %s for regime filter", name)
+            if not self.has_vix:
+                logging.info(
+                    "VIX regime filter enabled but no VIX data is available; "
+                    "trades will not be gated by VIX"
+                )
             else:
-                self.vix_data = data
-                period = get_period(self.p.vix_len)
-                median = RollingMedian(data.close, period=period)
-                self.vix_median = bt.Max(median, 1e-12)
+                tf = str(self.p.vix_tf).lower()
+                name = "VIX_day" if tf.startswith("d") else "VIX_hour"
+                try:
+                    data = self.getdatabyname(name)
+                except KeyError:
+                    data = None
+                if data is None or data._name != name:
+                    logging.warning(
+                        "Missing data feed %s for regime filter", name
+                    )
+                else:
+                    self.vix_data = data
+                    period = get_period(self.p.vix_len)
+                    median = RollingMedian(data.close, period=period)
+                    self.vix_median = bt.Max(median, 1e-12)
 
         self.rsi2 = None
         self.rsi2_data = None
@@ -2012,15 +2037,22 @@ class IbsStrategy(bt.Strategy):
         meta["last_value"] = pct
         return pct
 
+    def _has_feed_name(self, symbol: str, feed_suffix: str) -> bool:
+        names_to_try = [f"{symbol}_{feed_suffix}"]
+        alt_symbol = CROSS_FEED_ALIASES.get(symbol)
+        if alt_symbol:
+            names_to_try.append(f"{alt_symbol}_{feed_suffix}")
+        available = getattr(self, "available_data_names", set())
+        return any(name in available for name in names_to_try)
+
     def _get_cross_feed(
         self, symbol: str, feed_suffix: str, enable_param: str
     ) -> bt.LineSeries | None:
         """Return and cache the requested cross-instrument data feed."""
 
         key = (symbol, feed_suffix)
-        cached = self.cross_data_cache.get(key)
-        if cached is not None:
-            return cached
+        if key in self.cross_data_cache:
+            return self.cross_data_cache[key]
         feed_name = f"{symbol}_{feed_suffix}"
         alt_symbol = CROSS_FEED_ALIASES.get(symbol)
         names_to_try = [feed_name]
@@ -2040,13 +2072,26 @@ class IbsStrategy(bt.Strategy):
                 actual_name = name
                 break
         if data_feed is None:
+            optional_vix = symbol == "VIX" and not self._has_feed_name(
+                symbol, feed_suffix
+            )
+            if optional_vix:
+                logging.info(
+                    "Optional VIX feed %s is unavailable; using neutral defaults",
+                    feed_name,
+                )
+                self.cross_data_cache[key] = None
+                return None
             message = f"Missing data feed {feed_name} for {symbol} {feed_suffix} data"
             if alt_symbol:
                 message += f" (also tried {alt_symbol}_{feed_suffix})"
             if getattr(self.p, enable_param, False):
                 raise ValueError(message)
             logging.warning(message)
+            self.cross_data_cache[key] = None
             return None
+        if actual_name and hasattr(self, "available_data_names"):
+            self.available_data_names.add(actual_name)
         self.cross_data_cache[key] = data_feed
         return data_feed
 
@@ -2399,7 +2444,11 @@ class IbsStrategy(bt.Strategy):
                 sig_close,
             ),
         )
-        vix_med = line_val(self.vix_median, ago=intraday_ago)
+        if self.has_vix and self.vix_median is not None:
+            raw_vix_med = line_val(self.vix_median, ago=intraday_ago)
+            vix_med = float(raw_vix_med) if raw_vix_med is not None else 0.0
+        else:
+            vix_med = 0.0
         values["vix_med"] = vix_med
         if not self.filter_columns:
             self.ensure_filter_keys(values)
@@ -2614,14 +2663,16 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key == "enableVixReg":
-                if self.vix_data is not None:
+                if self.has_vix and self.vix_data is not None:
                     vval = timeframed_line_val(
                         self.vix_data.close,
                         data=self.vix_data,
                         timeframe=self.p.vix_tf,
                     intraday_ago=intraday_ago)
-                    if vix_med is not None and vval is not None and not math.isnan(vval) and not math.isnan(vix_med):
+                    if vval is not None and not math.isnan(vval):
                         record_param(key, 1 if vval < vix_med else 2)
+                else:
+                    record_param(key, 1)
             elif key == "enableRSIEntry":
                 v = line_val(self.rsi, ago=intraday_ago)
                 val = float(v) if v is not None else None
@@ -3710,15 +3761,16 @@ class IbsStrategy(bt.Strategy):
             if val_price is not None and not math.isnan(val_price):
                 if not (self.p.val_low <= val_price <= self.p.val_high):
                     return False
-        if self.p.enable_vix_reg:
-            vval = (
-                timeframed_line_val(
-                    self.vix_data.close,
-                    data=self.vix_data,
-                    timeframe=self.p.vix_tf,
-                )
-                if self.vix_data is not None
-                else None
+        if (
+            self.p.enable_vix_reg
+            and self.has_vix
+            and self.vix_data is not None
+            and self.vix_median is not None
+        ):
+            vval = timeframed_line_val(
+                self.vix_data.close,
+                data=self.vix_data,
+                timeframe=self.p.vix_tf,
             )
             vmed = line_val(self.vix_median)
             if (
