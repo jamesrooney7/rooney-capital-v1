@@ -398,14 +398,7 @@ class DatabentoSubscriber:
                 record, "stype_out_symbol", None
             )
             self.queue_manager.update_mapping(record.instrument_id, symbol)
-            # Reset the current bar to avoid mixing contracts during rolls.
-            root = self.queue_manager.resolve_root(record.instrument_id)
-            if root:
-                self.queue_manager.publish_reset(root)
-                with self._lock:
-                    self._current_bars.pop(root, None)
-                    self._last_emitted_minute.pop(root, None)
-                    self._last_close.pop(root, None)
+            # No reset needed - we trade continuous contracts and close intraday.
             return
 
         if isinstance(record, TradeMsg):
