@@ -74,6 +74,8 @@ def test_collect_filter_values_emits_metadata_keys():
     strategy.last_pivot_low = None
     strategy.prev_pivot_high = None
     strategy.prev_pivot_low = None
+    strategy.has_vix = True
+    strategy.vix_data = None
     strategy.vix_median = DummyLine(None)
     strategy.dom_threshold = None
     strategy.datr_pct_pct = 55.0
@@ -252,6 +254,8 @@ def test_collect_filter_values_matches_model_bundle(monkeypatch):
     strategy.last_pivot_low = None
     strategy.prev_pivot_high = None
     strategy.prev_pivot_low = None
+    strategy.has_vix = True
+    strategy.vix_data = None
     strategy.vix_median = DummyLine(None)
     strategy.dom_threshold = None
     strategy.datr_pct_pct = 55.0
