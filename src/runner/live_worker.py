@@ -1279,21 +1279,6 @@ class LiveWorker:
             "started_at": self._now_iso(),
         }
 
-        if getattr(self.config, "killswitch", False):
-            logger.info("")
-            logger.error("❌ POLICY KILLSWITCH ENABLED: refusing to start worker")
-            logger.info("")
-            logger.info(separator)
-            logger.error("❌ PRE-FLIGHT CHECKS FAILED")
-            logger.error("Failed checks: Policy Killswitch")
-            logger.info(separator)
-            self._preflight_summary = {
-                "status": "failed",
-                "checked_at": self._now_iso(),
-                "failed_checks": ["Policy Killswitch"],
-            }
-            return False
-
         if not preflight_cfg.enabled:
             logger.info("")
             logger.info("Pre-flight validation disabled via configuration; skipping checks.")
