@@ -36,7 +36,8 @@ killswitch: ${POLICY_KILLSWITCH}
 # ---------------------------------------------------------------------------
 starting_cash: 250000          # Initial cash balance used for risk sizing.
 backfill: true                 # Hydrate recent historical bars before trading.
-backfill_minutes: 180          # Request 3 hours of historical trades on startup.
+backfill_days: 252             # Request 252 trading days for IBS strategy indicators
+# backfill_minutes: 180        # Alternative: request historical window in minutes
 resample_session_start: "23:00"  # Align daily bars to the 17:00 CT settlement.
 queue_maxsize: 4096            # Max internal market data queue depth per feed.
 heartbeat_interval: 30         # Seconds between watchdog heartbeats (None=off).
