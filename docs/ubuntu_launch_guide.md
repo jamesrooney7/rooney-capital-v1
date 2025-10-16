@@ -555,6 +555,47 @@ python scripts/launch_worker.py
 export POLICY_KILLSWITCH=true
 ```
 
+### 3.7 Verify Hourly Bar Processing
+
+After confirming the worker can launch manually, let it continue running to
+validate the new hourly pulse. These checks confirm the strategy is consuming
+bars on schedule and surfacing the expected telemetry.
+
+**Timing expectations**
+
+- Hourly bar logs arrive at the top of each hour (e.g., 14:00, 15:00, 16:00) as
+  soon as a bar completes.
+- Allow at least two or three hour rollovers to build confidence before moving
+  to Sprint 4.
+
+**What you should see**
+
+```bash
+INFO:strategy.ibs_strategy:ES | Bar 100 | IBS: 0.342 | Price: 5847.25 | Time: 2025-10-16 14:00:00
+INFO:strategy.ibs_strategy:NQ | Bar 100 | IBS: 0.567 | Price: 20145.50 | Time: 2025-10-16 14:00:00
+INFO:strategy.ibs_strategy:RTY | Bar 100 | IBS: 0.789 | Price: 2234.75 | Time: 2025-10-16 14:00:00
+... (all 12 symbols)
+```
+
+In addition to the hourly pulses, watch for supplementary telemetry:
+
+- `📊 {SYMBOL} ENTRY SIGNAL | IBS: ... | Price: ...`
+- `🤖 {SYMBOL} ML FILTER | Score: ... | Passed: ...`
+- `✅ {SYMBOL} BUY/SELL FILLED | Size: ... | Price: ...`
+- `🚪 {SYMBOL} EXIT SIGNAL | Reason: ...`
+
+**Troubleshooting tips**
+
+- If it is currently 14:37 and no bars have appeared, wait for the next top of
+  the hour (15:00 in this example).
+- Confirm logging is set to INFO: `grep "logging.basicConfig" src/strategy/ibs_strategy.py`
+  should show `level=logging.INFO`.
+- Scan the console for `ERROR` or `WARNING` messages that could interrupt bar
+  generation.
+
+Only advance once the worker has produced consistent hourly bar completions for
+at least two cycles without errors.
+
 ---
 
 ## Sprint 4: Production Deployment
@@ -636,13 +677,79 @@ sudo systemctl status pine-runner.service
 
 # Monitor logs in real-time
 sudo journalctl -u pine-runner.service -f
+```
 
-# Let it run for several hours, monitoring:
-# - Market data connectivity
-# - ML model predictions
-# - Strategy signals (no actual orders due to kill switch)
-# - Heartbeat updates
-# - No crashes or errors
+**What to monitor**
+
+**Immediate startup (first 30 seconds)**
+
+- Market data connectivity established with Databento.
+- ML models load for all 12 symbols without errors.
+- Worker reports the strategy initialization banner.
+- No `ERROR` or `CRITICAL` messages in the service logs.
+
+**First hour of operation**
+
+- Wait for the next top of the hour (e.g., 15:00) and confirm each symbol emits
+  its hourly bar log line.
+- Run `cat /var/run/pine/worker_heartbeat.json | python3 -m json.tool` to verify
+  the heartbeat is updating in under 30 seconds.
+- Confirm there are no disconnect/reconnect loops or stack traces.
+
+**Extended validation (minimum 2-4 hours)**
+
+- Observe multiple hourly bar completions for all 12 symbols.
+- Watch for ML filter evaluations, entry/exit signals, and fill messages when
+  market conditions trigger trades (kill switch prevents live orders).
+- Confirm the heartbeat file continues updating every 30 seconds.
+- Review `sudo systemctl status pine-runner.service` periodically to ensure
+  memory usage remains stable.
+
+**Monitoring commands**
+
+```bash
+# Follow live logs (Ctrl+C stops the viewer only)
+sudo journalctl -u pine-runner.service -f
+
+# View the last 100 log lines
+sudo journalctl -u pine-runner.service -n 100
+
+# Review logs from the last hour
+sudo journalctl -u pine-runner.service --since "1 hour ago"
+
+# Filter for hourly bar logs only
+sudo journalctl -u pine-runner.service -f | grep "Bar.*IBS"
+
+# Filter for signals and trades
+sudo journalctl -u pine-runner.service -f | grep -E "ENTRY SIGNAL|EXIT SIGNAL|FILLED"
+
+# Check for errors
+sudo journalctl -u pine-runner.service -p err
+
+# Inspect heartbeat contents
+cat /var/run/pine/worker_heartbeat.json | python3 -m json.tool
+
+# Confirm service status
+sudo systemctl status pine-runner.service
+```
+
+**Success indicators**
+
+- ✓ `systemctl status` shows `active (running)`.
+- ✓ Hourly bar logs appear for all 12 symbols at the top of each hour.
+- ✓ Heartbeat file freshness remains under 30 seconds.
+- ✓ ML predictions surface when setups occur.
+- ✓ No `ERROR` or `CRITICAL` log lines, and memory footprint stays flat.
+
+**If the service stops or crashes**
+
+```bash
+# Inspect why it stopped
+sudo systemctl status pine-runner.service
+sudo journalctl -u pine-runner.service -n 50
+
+# Restart after resolving the issue
+sudo systemctl restart pine-runner.service
 ```
 
 ### 4.7 Enable Live Trading (When Ready)
@@ -1050,6 +1157,41 @@ cd /opt/pine/rooney-capital-v1 && ./scripts/monitor_worker.sh
 sudo sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/runtime/.env
 sudo systemctl restart pine-runner.service
 ```
+
+### Monitoring Commands
+```bash
+# Follow live logs
+sudo journalctl -u pine-runner.service -f
+
+# Check service status
+sudo systemctl status pine-runner.service
+
+# View last hour of logs
+sudo journalctl -u pine-runner.service --since "1 hour ago"
+
+# Filter for hourly heartbeats
+sudo journalctl -u pine-runner.service | grep "Bar.*IBS"
+
+# Check for errors only
+sudo journalctl -u pine-runner.service -p err
+
+# View heartbeat file
+cat /var/run/pine/worker_heartbeat.json | python3 -m json.tool
+
+# Restart service (after config changes)
+sudo systemctl restart pine-runner.service
+
+# Stop service
+sudo systemctl stop pine-runner.service
+```
+
+### What to Watch For
+- Hourly bar logs at :00 minutes for all 12 symbols
+- Entry/exit signals when market conditions align
+- ML filter evaluations showing pass/fail
+- Heartbeat age < 120 seconds
+- No memory growth over time
+- No connection errors to Databento or TradersPost
 
 ### Environment Variables
 ```bash
