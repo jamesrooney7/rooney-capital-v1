@@ -375,7 +375,7 @@ def timeframe_ago(
 # - "TLT_day": TLT daily bars (shared filter)
 #
 # CSV inputs are expected to follow the `<SYMBOL>_bt.csv` naming convention.
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.INFO)
 
 
 def clamp_period(period):
