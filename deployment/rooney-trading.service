@@ -1,0 +1,31 @@
+[Unit]
+Description=Rooney Capital Live Trading Worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=linuxuser
+Group=linuxuser
+WorkingDirectory=/opt/pine/rooney-capital-v1
+
+# Load environment from .env file
+EnvironmentFile=/opt/pine/rooney-capital-v1/.env
+
+# Set runtime config path
+Environment="PINE_RUNTIME_CONFIG=/opt/pine/rooney-capital-v1/config.yml"
+Environment="PYTHONUNBUFFERED=1"
+
+# Run the application
+ExecStart=/opt/pine/rooney-capital-v1/venv/bin/python -m src.runner.main
+
+# Restart policy
+Restart=on-failure
+RestartSec=10
+
+# Logging
+StandardOutput=append:/var/log/rooney/rooney-trading.log
+StandardError=append:/var/log/rooney/rooney-trading.log
+
+[Install]
+WantedBy=multi-user.target
