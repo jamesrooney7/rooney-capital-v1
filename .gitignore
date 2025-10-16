@@ -33,6 +33,7 @@ data/bars/
 # Logs
 *.log
 logs/
+/var/log/
 
 # OS
 .DS_Store

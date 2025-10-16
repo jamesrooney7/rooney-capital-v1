@@ -14,7 +14,10 @@ machine-learning veto models and live order routing through TradersPost.
   - [`src/strategy`](#srcstrategy)
   - [`src/runner`](#srcrunner)
 - [Machine Learning Artefacts](#machine-learning-artefacts)
-- [Setup](#setup)
+- [Setup and Configuration](#setup-and-configuration)
+  - [Initial Setup](#initial-setup)
+  - [Running the Application](#running-the-application)
+  - [Startup Script](#startup-script)
 - [Runtime Configuration](#runtime-configuration)
   - [Required Fields](#required-fields)
   - [Sample Configuration](#sample-configuration)
@@ -159,16 +162,75 @@ cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
 > **Note:** Model artefacts are stored with Git LFS. Run `git lfs pull` after
 > cloning to ensure large files are available before attempting to load them.
 
-## Setup
+## Setup and Configuration
+
+### Initial Setup
+
+1. **Create configuration file**:
+
+   ```bash
+   cp config.example.yml config.yml
+   ```
+
+2. **Create environment file**:
+
+   ```bash
+   cat > .env << 'EOF'
+   DATABENTO_API_KEY=your_databento_api_key_here
+   TRADERSPOST_WEBHOOK_URL=your_traderspost_webhook_url_here
+   POLICY_KILLSWITCH=true
+   EOF
+   ```
+
+3. **Verify contract map exists**:
+   Ensure `Data/Databento_contract_map.yml` exists and is up to date with your
+   Databento account products.
+
+4. **Install dependencies**:
+
+   ```bash
+   python -m venv venv
+   source venv/bin/activate
+   pip install -r requirements.txt
+   ```
+
+### Running the Application
+
+**Important**: Run from the project root directory with `PYTHONPATH` set:
+
+```bash
+cd /path/to/rooney-capital-v1
+source venv/bin/activate
+PYTHONPATH=/path/to/rooney-capital-v1/src python -m runner.main
+```
+
+Or create a startup script (see below).
+
+### Startup Script
+
+The repository includes `scripts/start.sh`, which enforces the required
+configuration files, activates the local virtual environment, sets
+`PYTHONPATH`, and launches `python -m runner.main` from the project root. Make
+it executable after cloning:
+
+```bash
+chmod +x scripts/start.sh
+```
+
+Run the script directly to start the worker:
+
+```bash
+./scripts/start.sh
+```
+
+### Additional Setup Notes
 
 1. **Clone** the repository and install Git LFS if it is not already present:
    `git lfs install` followed by `git lfs pull`.
-2. **Create a virtual environment** (Python 3.10+) and install dependencies:
-   `pip install -r requirements.txt`.
-3. **Populate data metadata** as needed in `Data/Databento_contract_map.yml` so
+2. **Populate data metadata** as needed in `Data/Databento_contract_map.yml` so
    the worker can subscribe to the desired products. Reference subscriptions are
    defined via the `reference_feeds` block inside this file.
-4. **Ensure credentials** (Databento API key, TradersPost webhook URL) are
+3. **Ensure credentials** (Databento API key, TradersPost webhook URL) are
    available via environment variables or the runtime configuration file. See
    [Credentials & Secrets Management](docs/credentials_and_secrets.md) for
    detailed guidance on storage, rotation, and environment separation.
