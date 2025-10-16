@@ -4650,6 +4650,50 @@ class IbsStrategy(bt.Strategy):
             f"Price: {price_val:.2f} | Time: {dt}"
         )
 
+        # Log ML filter status every hour for monitoring
+        try:
+            filter_snapshot = self._with_ml_score(
+                self.collect_filter_values(intraday_ago=0)
+            )
+            ml_score = filter_snapshot.get("ml_score")
+            ml_passed = filter_snapshot.get("ml_passed", False)
+            ml_threshold = self.p.ml_threshold
+
+            # Count how many features were calculated (non-None values)
+            if hasattr(self.p, "ml_features") and self.p.ml_features:
+                features = self.p.ml_features
+            else:
+                features = []
+            total_features = len(features)
+            calculated_features = sum(
+                1 for feat in features if filter_snapshot.get(feat) is not None
+            )
+
+            if ml_score is not None:
+                score_display = f"{ml_score:.3f}"
+            else:
+                score_display = "nan"
+            if ml_threshold is not None:
+                threshold_display = f"{ml_threshold:.3f}"
+            else:
+                threshold_display = "nan"
+
+            logger.info(
+                f"🤖 {self.p.symbol} ML HOURLY | Score: {score_display} | "
+                f"Passed: {ml_passed} | Threshold: {threshold_display} | "
+                f"Features: {calculated_features}/{total_features}"
+            )
+
+            # If many features are missing, log a warning
+            if total_features > 0 and calculated_features < total_features * 0.8:
+                logger.warning(
+                    f"⚠️ {self.p.symbol} ML INCOMPLETE | Only {calculated_features}/{total_features} "
+                    f"features calculated ({100 * calculated_features / total_features:.1f}%)"
+                )
+
+        except Exception as e:
+            logger.error(f"❌ {self.p.symbol} ML FILTER ERROR | {e}")
+
         self.prev_daily_ibs_val = self.prev_daily_ibs()
 
         if (
