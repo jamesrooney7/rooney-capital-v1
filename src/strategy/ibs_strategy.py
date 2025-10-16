@@ -19,6 +19,9 @@ from .contract_specs import CONTRACT_SPECS, point_value
 from .feature_utils import normalize_column_name
 
 
+logger = logging.getLogger(__name__)
+
+
 EXECUTION_SYMBOLS: set[str] = {
     "ES",
     "NQ",
@@ -4635,6 +4638,13 @@ class IbsStrategy(bt.Strategy):
             return
         dt = self.hourly.datetime.datetime()
         ibs_val = self.ibs()
+        price = line_val(self.hourly.close)
+        if ibs_val is not None:
+            price_str = f"{price:.2f}" if price is not None else "n/a"
+            logger.info(
+                f"{self.p.symbol} | Bar {len(self.hourly)} | IBS: {ibs_val:.3f} | "
+                f"Price: {price_str} | Time: {dt}"
+            )
         if ibs_val is None:
             self.prev_ibs_val = None
             self.prev_daily_ibs_val = None
@@ -4707,9 +4717,25 @@ class IbsStrategy(bt.Strategy):
                 if ibs_val is not None and self.entry_allowed(dt, ibs_val):
                     signal = "IBS entry"
                     price0 = line_val(self.hourly.close)
+                    price0_str = f"{price0:.2f}" if price0 is not None else "n/a"
+                    logger.info(
+                        f"📊 {self.p.symbol} ENTRY SIGNAL | IBS: {ibs_val:.3f} | "
+                        f"Price: {price0_str} | Time: {dt}"
+                    )
                     if price0 is not None:
                         filter_snapshot = self._with_ml_score(
                             self.collect_filter_values(intraday_ago=0)
+                        )
+                        ml_score = filter_snapshot.get("ml_score")
+                        ml_passed = filter_snapshot.get("ml_passed", False)
+                        ml_score_str = (
+                            f"{ml_score:.3f}"
+                            if isinstance(ml_score, (int, float)) and not math.isnan(ml_score)
+                            else "n/a"
+                        )
+                        logger.info(
+                            f"🤖 {self.p.symbol} ML FILTER | Score: {ml_score_str} | "
+                            f"Passed: {ml_passed} | Threshold: {self.p.ml_threshold}"
                         )
                         order = self.buy(
                             data=self.hourly,
@@ -4784,6 +4810,10 @@ class IbsStrategy(bt.Strategy):
                         self.last_auto_close_date = dt.date()
 
                 if exit_signal:
+                    logger.info(
+                        f"🚪 {self.p.symbol} EXIT SIGNAL | Reason: {exit_signal} | "
+                        f"IBS: {ibs_val:.3f} | Price: {price:.2f}"
+                    )
                     filter_snapshot = self._with_ml_score(
                         self.collect_filter_values(intraday_ago=0)
                     )
@@ -4807,9 +4837,17 @@ class IbsStrategy(bt.Strategy):
         if order.status in [bt.Order.Completed, bt.Order.Canceled, bt.Order.Rejected]:
             if order.status == bt.Order.Completed:
                 action = "BUY" if order.isbuy() else "SELL"
-                # self.log(
-                #     f"{action} FILLED size={order.executed.size} price={order.executed.price:.2f}"
-                # )
+                ibs_val = order.info.get("ibs", self.ibs())
+                ibs_str = (
+                    f"{ibs_val:.3f}"
+                    if isinstance(ibs_val, (int, float)) and not math.isnan(ibs_val)
+                    else "n/a"
+                )
+                logger.info(
+                    f"✅ {self.p.symbol} {action} FILLED | "
+                    f"Size: {order.executed.size} | Price: {order.executed.price:.2f} | "
+                    f"IBS: {ibs_str}"
+                )
                 sma200_ready = self.sma200 is not None and len(self.sma200) > 0
                 if sma200_ready:
                     dclose = timeframed_line_val(
@@ -4885,8 +4923,7 @@ class IbsStrategy(bt.Strategy):
                         ),
                     }
             else:
-                # self.log(f"ORDER {order.getstatusname()}")
-                pass
+                logger.info(f"ℹ️ {self.p.symbol} ORDER {order.getstatusname()}")
             self.order = None
 
     def notify_trade(self, trade):
