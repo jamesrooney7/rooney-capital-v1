@@ -319,20 +319,27 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
 
     backfill = bool(payload.get("backfill", True))
     backfill_lookback_minutes = 0
-    for candidate in (
-        payload.get("backfill_lookback_minutes"),
-        payload.get("backfill_minutes"),
-        payload.get("backfill_lookback"),
-    ):
-        if candidate is None:
-            continue
+    backfill_days = payload.get("backfill_days")
+    if backfill_days is not None:
         try:
-            backfill_lookback_minutes = int(float(candidate))
+            backfill_lookback_minutes = int(backfill_days) * 24 * 60
         except (TypeError, ValueError):
-            logger.warning("Invalid backfill lookback value %r; ignoring", candidate)
-            backfill_lookback_minutes = 0
-            continue
-        break
+            pass
+    if backfill_lookback_minutes == 0:
+        for candidate in (
+            payload.get("backfill_lookback_minutes"),
+            payload.get("backfill_minutes"),
+            payload.get("backfill_lookback"),
+        ):
+            if candidate is None:
+                continue
+            try:
+                backfill_lookback_minutes = int(float(candidate))
+            except (TypeError, ValueError):
+                logger.warning("Invalid backfill lookback value %r; ignoring", candidate)
+                backfill_lookback_minutes = 0
+                continue
+            break
     if backfill_lookback_minutes <= 0:
         hours_candidate = payload.get("backfill_lookback_hours") or payload.get("backfill_hours")
         if hours_candidate is not None:
