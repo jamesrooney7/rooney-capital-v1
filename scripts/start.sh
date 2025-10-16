@@ -35,5 +35,5 @@ source venv/bin/activate
 
 # Set PYTHONPATH and run
 export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
-python -m runner.main
+python -m src.runner.main
 
