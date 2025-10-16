@@ -398,7 +398,19 @@ class DatabentoSubscriber:
                 record, "stype_out_symbol", None
             )
             self.queue_manager.update_mapping(record.instrument_id, symbol)
-            # No reset needed - we trade continuous contracts and close intraday.
+            root = self.queue_manager.resolve_root(record.instrument_id)
+            if root:
+                logger.info(
+                    "Received symbol mapping for instrument %s; resetting state for %s",
+                    record.instrument_id,
+                    root,
+                )
+                with self._lock:
+                    self._current_bars.pop(root, None)
+                    self._last_emitted_minute.pop(root, None)
+                    self._last_close.pop(root, None)
+                    self._last_trade_ts.pop(root, None)
+                self.queue_manager.publish_reset(root)
             return
 
         if isinstance(record, TradeMsg):

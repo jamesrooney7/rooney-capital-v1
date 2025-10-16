@@ -35,8 +35,13 @@ killswitch: ${POLICY_KILLSWITCH}
 # Cash management and runtime behaviour
 # ---------------------------------------------------------------------------
 starting_cash: 250000          # Initial cash balance used for risk sizing.
+# Historical data loading (uses Historical API)
+load_historical_warmup: true
+historical_lookback_days: 252
+
+# Live streaming backfill (uses Live API - max 4 days)
 backfill: true                 # Hydrate recent historical bars before trading.
-backfill_days: 252             # Request 252 trading days for IBS strategy indicators
+backfill_days: 4               # Live API only supports ~4 days of intraday replay
 # backfill_minutes: 180        # Alternative: request historical window in minutes
 resample_session_start: "23:00"  # Align daily bars to the 17:00 CT settlement.
 queue_maxsize: 4096            # Max internal market data queue depth per feed.
