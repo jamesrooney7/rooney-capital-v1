@@ -13,6 +13,7 @@ WorkingDirectory=/opt/pine/rooney-capital-v1
 EnvironmentFile=/opt/pine/rooney-capital-v1/.env
 
 # Set runtime config path
+Environment="PYTHONPATH=/opt/pine/rooney-capital-v1/src"
 Environment="PINE_RUNTIME_CONFIG=/opt/pine/rooney-capital-v1/config.yml"
 Environment="PYTHONUNBUFFERED=1"
 
