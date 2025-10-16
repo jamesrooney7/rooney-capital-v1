@@ -1,0 +1,90 @@
+# Rooney Capital live worker configuration
+# ---------------------------------------------------------------------------
+# Copy to `config.yml` (or another filename referenced by $PINE_RUNTIME_CONFIG)
+# and customise values for your environment. Secrets can be interpolated from
+# environment variables using ${VAR_NAME} syntax.
+
+# ---------------------------------------------------------------------------
+# Core paths and credentials
+# ---------------------------------------------------------------------------
+contract_map: Data/Databento_contract_map.yml
+models_path: src/models
+
+symbols:
+  - ES
+  - NQ
+  - RTY
+  - YM
+  - GC
+  - SI
+  - HG
+  - CL
+  - NG
+  - 6A
+  - 6B
+  - 6E
+
+databento_api_key: ${DATABENTO_API_KEY}
+traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
+
+killswitch: ${POLICY_KILLSWITCH}
+
+# ---------------------------------------------------------------------------
+# Cash management and runtime behaviour
+# ---------------------------------------------------------------------------
+starting_cash: 250000
+backfill: true
+backfill_minutes: 180
+resample_session_start: "23:00"
+queue_maxsize: 4096
+heartbeat_interval: 30
+heartbeat_file: /var/run/pine/worker_heartbeat.json
+heartbeat_write_interval: 30
+poll_interval: 1.0
+
+# ---------------------------------------------------------------------------
+# Preflight validation controls
+# ---------------------------------------------------------------------------
+preflight:
+  enabled: true
+  skip_ml_validation: false
+  skip_connection_checks: true
+  fail_fast: true
+
+# ---------------------------------------------------------------------------
+# Instrument-specific overrides
+# ---------------------------------------------------------------------------
+contracts:
+  ES:
+    size: 1
+    commission: 4.00
+    margin: 13200
+    multiplier: 50
+  NQ:
+    size: 1
+    commission: 4.20
+    margin: 15400
+    multiplier: 20
+  RTY:
+    size: 2
+    commission: 4.50
+    margin: 8800
+    multiplier: 50
+  YM:
+    size: 1
+  GC:
+    size: 1
+  SI:
+    size: 1
+  HG:
+    size: 1
+  CL:
+    size: 1
+  NG:
+    size: 1
+  6A:
+    size: 1
+  6B:
+    size: 1
+  6E:
+    size: 1
