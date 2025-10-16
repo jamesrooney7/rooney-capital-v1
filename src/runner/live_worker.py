@@ -666,6 +666,14 @@ class LiveWorker:
         if metadata:
             payload.setdefault("metadata", {}).update(metadata)
         try:
+            if getattr(self.config, "killswitch", False):
+                logger.warning(
+                    "🛑 KILLSWITCH: Would have posted order to TradersPost: %s %s size=%s",
+                    payload.get("symbol"),
+                    payload.get("side"),
+                    payload.get("size"),
+                )
+                return
             self.traderspost_client.post_order(payload)
         except TradersPostError as exc:
             self._record_traderspost_result(
@@ -873,13 +881,6 @@ class LiveWorker:
                 loop.add_signal_handler(sig, _handle_signal, sig)
             except NotImplementedError:  # pragma: no cover - Windows
                 signal.signal(sig, lambda *_: _handle_signal(sig))
-
-        if getattr(self.config, "killswitch", False):
-            logger.critical("❌ STARTUP ABORTED: Policy killswitch enabled")
-            self._update_heartbeat(
-                status="failed", force=True, details={"stage": "killswitch"}
-            )
-            raise RuntimeError("Policy killswitch enabled")
 
         if not self.run_preflight_checks():
             logger.critical("❌ STARTUP ABORTED: Pre-flight checks failed")
