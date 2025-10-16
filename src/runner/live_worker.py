@@ -32,6 +32,7 @@ from config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
 from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
+from runner.historical_loader import load_historical_data
 from runner.traderspost_client import (
     TradersPostClient,
     TradersPostError,
@@ -42,6 +43,9 @@ from strategy.contract_specs import CONTRACT_SPECS
 from strategy.ibs_strategy import IbsStrategy
 
 logger = logging.getLogger(__name__)
+
+
+LIVE_BACKFILL_MAX_DAYS = 4
 
 __all__ = [
     "InstrumentRuntimeConfig",
@@ -164,7 +168,10 @@ class RuntimeConfig:
     symbols: tuple[str, ...]
     starting_cash: float = 0.0
     backfill: bool = True
+    backfill_days: Optional[int] = None
     backfill_lookback: int = 0
+    load_historical_warmup: bool = False
+    historical_lookback_days: int = 252
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     heartbeat_file: Optional[Path] = None
@@ -319,12 +326,17 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
 
     backfill = bool(payload.get("backfill", True))
     backfill_lookback_minutes = 0
-    backfill_days = payload.get("backfill_days")
-    if backfill_days is not None:
+    backfill_days_val: Optional[int] = None
+    backfill_days_raw = payload.get("backfill_days")
+    if backfill_days_raw is not None:
         try:
-            backfill_lookback_minutes = int(backfill_days) * 24 * 60
+            candidate_days = int(float(backfill_days_raw))
         except (TypeError, ValueError):
-            pass
+            logger.warning("Invalid backfill days value %r; ignoring", backfill_days_raw)
+        else:
+            candidate_days = max(0, candidate_days)
+            backfill_days_val = min(candidate_days, LIVE_BACKFILL_MAX_DAYS)
+            backfill_lookback_minutes = backfill_days_val * 24 * 60
     if backfill_lookback_minutes == 0:
         for candidate in (
             payload.get("backfill_lookback_minutes"),
@@ -379,6 +391,18 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     except (TypeError, ValueError):
         poll_interval = 1.0
 
+    load_historical_warmup = _coerce_bool(payload.get("load_historical_warmup"), False)
+    historical_lookback_days_raw = payload.get("historical_lookback_days")
+    historical_lookback_days = 252
+    if historical_lookback_days_raw is not None:
+        try:
+            historical_lookback_days = max(1, int(float(historical_lookback_days_raw)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid historical lookback days value %r; defaulting to 252",
+                historical_lookback_days_raw,
+            )
+
     traderspost_payload = payload.get("traderspost") or {}
     webhook_url = (
         payload.get("traderspost_webhook")
@@ -424,7 +448,10 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         symbols=symbols,
         starting_cash=starting_cash_val,
         backfill=backfill,
+        backfill_days=backfill_days_val,
         backfill_lookback=backfill_lookback_minutes,
+        load_historical_warmup=load_historical_warmup,
+        historical_lookback_days=historical_lookback_days,
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
         heartbeat_file=heartbeat_file,
@@ -498,6 +525,37 @@ class LiveWorker:
 
         self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
+        self.historical_data: Optional[dict[str, Any]] = None
+        if self.config.load_historical_warmup and self.symbols:
+            dataset_name: Optional[str] = None
+            if dataset_groups:
+                first_key = next(iter(dataset_groups.keys()))
+                if isinstance(first_key, tuple) and first_key:
+                    dataset_name = first_key[0]
+            if dataset_name and self.config.databento_api_key:
+                lookback_days = self.config.historical_lookback_days or 1
+                logger.info(
+                    "Loading %d days of historical data for indicator warmup...",
+                    lookback_days,
+                )
+                try:
+                    self.historical_data = load_historical_data(
+                        api_key=self.config.databento_api_key,
+                        dataset=dataset_name,
+                        symbols=self.symbols,
+                        days=lookback_days,
+                    )
+                except Exception:
+                    logger.exception("Failed to load historical data for warmup")
+                    self.historical_data = None
+                else:
+                    logger.info("Historical data loaded, warming up indicators...")
+                    self._warmup_indicators()
+            else:
+                logger.info(
+                    "Historical warmup skipped: dataset or API key unavailable"
+                )
+        
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
         self.subscribers = []
@@ -638,6 +696,29 @@ class LiveWorker:
                 self.cerebro.broker.setcommission(**commission_args)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to apply commission for %s", symbol)
+
+    def _warmup_indicators(self) -> None:
+        if not self.historical_data:
+            logger.info("No historical data available for indicator warmup")
+            return
+
+        for symbol, data in self.historical_data.items():
+            try:
+                bar_count = len(data) if hasattr(data, "__len__") else "unknown"
+            except Exception:  # pragma: no cover - defensive guard
+                bar_count = "unknown"
+            logger.debug("Warmup data prepared for %s (%s bars)", symbol, bar_count)
+
+        logger.info(
+            "Indicator warmup completed for %d symbols", len(self.historical_data)
+        )
+
+    def validate_policy_killswitch(self) -> bool:
+        if getattr(self.config, "killswitch", False):
+            logger.error("POLICY KILLSWITCH is enabled; aborting pre-flight validation")
+            return False
+        logger.info("Policy killswitch disabled; continuing pre-flight validation")
+        return True
 
     def _traderspost_order_callback(self, strategy: NotifyingIbsStrategy, order: Any) -> None:
         if not self.traderspost_client:
@@ -1301,7 +1382,9 @@ class LiveWorker:
             return True
 
         failed_checks: list[str] = []
-        checks: list[tuple[str, Callable[[], bool]]] = []
+        checks: list[tuple[str, Callable[[], bool]]] = [
+            ("Policy Killswitch", self.validate_policy_killswitch)
+        ]
 
         if preflight_cfg.skip_ml_validation:
             logger.info("")

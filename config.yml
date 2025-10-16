@@ -33,9 +33,14 @@ killswitch: ${POLICY_KILLSWITCH}
 # Cash management and runtime behaviour
 # ---------------------------------------------------------------------------
 starting_cash: 250000
+# Historical data loading (uses Historical API)
+load_historical_warmup: true
+historical_lookback_days: 252
+
+# Live streaming backfill (uses Live API - max 4 days)
 backfill: true
-backfill_days: 252
-# backfill_days: 252
+backfill_days: 4
+# backfill_days: 4
 resample_session_start: "23:00"
 queue_maxsize: 4096
 heartbeat_interval: 30
