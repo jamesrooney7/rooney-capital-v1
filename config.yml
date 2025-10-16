@@ -35,7 +35,7 @@ killswitch: ${POLICY_KILLSWITCH}
 starting_cash: 250000
 backfill: true
 backfill_days: 252
-# backfill_minutes: 180
+# backfill_days: 252
 resample_session_start: "23:00"
 queue_maxsize: 4096
 heartbeat_interval: 30
