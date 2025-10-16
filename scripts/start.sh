@@ -35,6 +35,12 @@ source venv/bin/activate
 
 # Set PYTHONPATH and run
 export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"
+
+# Load environment variables from .env file
+if [ -f "$PROJECT_ROOT/.env" ]; then
+    export $(cat "$PROJECT_ROOT/.env" | grep -v '^#' | xargs)
+fi
+
 export PINE_RUNTIME_CONFIG="$PROJECT_ROOT/config.yml"
 python -m src.runner.main
 
