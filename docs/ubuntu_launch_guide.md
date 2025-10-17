@@ -464,6 +464,74 @@ shows how to execute it with your paper-trading environment variables.
 
 ### 3.3 Run Test with Paper Trading Configuration
 
+#### 3.3.5 Understand the Historical Load Requirement
+
+The preflight worker loads **252 trading days** of minute bars when
+`load_historical_warmup` is enabled. This mirrors a full trading year and
+guarantees every indicator and ML feature receives its maximum lookback
+window (e.g., 200-day trend, 63-day volatility, and cross-asset reference
+signals). Skipping or shortening this span causes the ML bundles to fall
+back to default coefficients because required features cannot be derived.
+
+#### 3.3.6 Monitor Historical Load Progression
+
+When you launch `worker_preflight.py`, expect the historical bootstrap to
+produce the following log cadence:
+
+1. `Loading 252 days of historical data for indicator warmup...`
+2. `Requesting historical data for <SYMBOL> from <START> to <END>` (DEBUG)
+3. `Loaded historical data for <N> symbols spanning 252 days`
+4. `Historical data loaded, warming up indicators...`
+5. `Warmup data prepared for <SYMBOL> (<COUNT> bars)` (DEBUG)
+6. `Indicator warmup completed for <N> symbols`
+
+If you do not see steps 3–6, the warmup did not finish—review the failure
+modes below before proceeding.
+
+#### 3.3.7 Common Failure Modes & Remedies
+
+* **Dataset or API key unavailable** – Logged as `Historical warmup
+  skipped: dataset or API key unavailable`. Re-run the preflight after
+  confirming `DATABENTO_API_KEY` in `/opt/pine/runtime/.env` and that the
+  configured symbols exist in `Data/Databento_contract_map.yml`.
+* **Databento entitlement or network issue** – Logged as `Failed to load
+  historical data for warmup`. Test connectivity with
+  `python -c "import databento; databento.Historical('${DATABENTO_API_KEY}').metadata.list_datasets()"`
+  (replace with your key) and verify the account is entitled to the
+  requested dataset.
+* **Queue pressure during warmup** – Warnings such as `Queue for symbol
+  ES is full ... dropping bar` indicate the fanout queue cannot keep up.
+  Increase `queue_maxsize` in `config.yml` or reduce the number of active
+  symbols before repeating the test.
+
+#### 3.3.8 Verify Post-Warmup Data & Strategies
+
+Use the saved preflight log to validate three critical checkpoints:
+
+```bash
+python scripts/worker_preflight.py 2>&1 | tee /tmp/preflight.log
+```
+
+* **Bar emission** – Confirm minute bars flow by scanning for
+  `Emitting bar` entries:
+
+  ```bash
+  rg "Emitting bar" /tmp/preflight.log
+  ```
+
+* **Hourly strategy feeds** – Ensure each configured instrument has an
+  hourly resample feed by verifying there are no
+  `❌ Hourly feed not configured` errors:
+
+  ```bash
+  rg "Hourly feed" /tmp/preflight.log
+  ```
+
+* **ML feature completeness** – Check every traded symbol reports its ML
+  bundle feature list (e.g., `Loaded ML bundle for ES with
+  features=['vix_ratio', ...]`). Missing lines imply the bundle is absent
+  or incomplete; re-run `git lfs pull` to restore the models.
+
 ```bash
 cd /opt/pine/rooney-capital-v1
 
