@@ -544,6 +544,7 @@ class LiveWorker:
                         dataset=dataset_name,
                         symbols=self.symbols,
                         days=lookback_days,
+                        contract_map=self.contract_map,
                     )
                 except Exception:
                     logger.exception("Failed to load historical data for warmup")

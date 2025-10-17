@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable
+from typing import Any, Iterable, Optional
 
 import databento as db
+
+from runner.contract_map import ContractMap
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +18,7 @@ def load_historical_data(
     dataset: str,
     symbols: Iterable[str],
     days: int = 252,
+    contract_map: Optional[ContractMap] = None,
 ) -> dict[str, Any]:
     """Load historical L1 data for indicator warmup."""
 
@@ -30,10 +33,20 @@ def load_historical_data(
         logger.debug(
             "Requesting historical data for %s from %s to %s", symbol, start, end
         )
+        product_id: Optional[str] = None
+        if contract_map is not None:
+            try:
+                contract = contract_map.active_contract(symbol)
+            except KeyError:
+                contract = None
+            if contract is not None:
+                product_id = contract.databento.product_id
+
+        request_symbols = [product_id] if product_id else [f"{symbol}.FUT"]
         data = client.timeseries.get_range(
             dataset=dataset,
             schema="mbp-1",  # L1 top-of-book
-            symbols=[symbol],
+            symbols=request_symbols,
             start=start,
             end=end,
             stype_in="parent",
