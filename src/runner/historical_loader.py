@@ -24,7 +24,7 @@ def load_historical_data(
 
     client = db.Historical(api_key)
 
-    end = datetime.now(tz=timezone.utc)
+    end = datetime.now(tz=timezone.utc) - timedelta(hours=1)
     start = end - timedelta(days=max(days, 1))
 
     historical_data: dict[str, Any] = {}
