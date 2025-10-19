@@ -40,6 +40,12 @@ def load_historical_data(
     historical_data: dict[str, Any] = {}
     processed_symbols = 0
 
+    schema_preferences: tuple[str, ...] = (
+        "ohlcv-1min",
+        "ohlcv-1s",
+        "mbp-1",
+    )
+
     for symbol in symbols:
         logger.debug(
             "Requesting historical data for %s from %s to %s", symbol, start, end
@@ -63,14 +69,37 @@ def load_historical_data(
             else:
                 request_symbols = [symbol]
 
-        data = client.timeseries.get_range(
-            dataset=dataset,
-            schema="mbp-1",  # L1 top-of-book
-            symbols=request_symbols,
-            start=start,
-            end=end,
-            stype_in=stype_in,
-        )
+        data = None
+        errors: list[Exception] = []
+        for schema in schema_preferences:
+            try:
+                data = client.timeseries.get_range(
+                    dataset=dataset,
+                    schema=schema,
+                    symbols=request_symbols,
+                    start=start,
+                    end=end,
+                    stype_in=stype_in,
+                )
+                if data is not None:
+                    if schema != "mbp-1":
+                        logger.debug(
+                            "Using lightweight schema %s for %s", schema, symbol
+                        )
+                    break
+            except Exception as exc:  # pragma: no cover - depends on SDK errors
+                errors.append(exc)
+                logger.debug(
+                    "Historical request for %s failed with schema %s: %s",
+                    symbol,
+                    schema,
+                    exc,
+                )
+                data = None
+
+        if data is None and errors:
+            raise errors[-1]
+
         if on_symbol_loaded is not None:
             on_symbol_loaded(str(symbol), data)
             processed_symbols += 1
