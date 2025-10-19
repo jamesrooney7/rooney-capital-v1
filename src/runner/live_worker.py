@@ -802,26 +802,52 @@ class LiveWorker:
         if frame.empty:
             return []
 
-        ohlcv = (
-            frame.resample("1T")
-            .agg({"price": ["first", "max", "min", "last"], "volume": "sum"})
-            .dropna(subset=[("price", "first"), ("price", "last")])
+        ohlcv = frame.resample("1min").agg(
+            {"price": ["first", "max", "min", "last"], "volume": "sum"}
         )
 
+        if ohlcv.empty:
+            return []
+
         ohlcv.columns = ["open", "high", "low", "close", "volume"]
-        ohlcv = ohlcv.dropna(subset=["open", "close"])
+        ohlcv = ohlcv.sort_index()
+
+        start = ohlcv.index.min()
+        end = ohlcv.index.max()
+        full_index = pd.date_range(start=start, end=end, freq="1min", tz=ohlcv.index.tz)
+        ohlcv = ohlcv.reindex(full_index)
 
         bars: list[Bar] = []
+        last_close: Optional[float] = None
         for timestamp, row in ohlcv.iterrows():
+            open_price = row.open
+            close_price = row.close
+            high_price = row.high
+            low_price = row.low
+            volume = row.volume
+
+            if pd.notna(open_price) and pd.notna(close_price):
+                open_value = float(open_price)
+                close_value = float(close_price)
+                high_value = float(high_price) if pd.notna(high_price) else close_value
+                low_value = float(low_price) if pd.notna(low_price) else close_value
+                volume_value = float(volume) if pd.notna(volume) else 0.0
+                last_close = close_value
+            elif last_close is not None:
+                open_value = high_value = low_value = close_value = float(last_close)
+                volume_value = 0.0
+            else:
+                continue
+
             bars.append(
                 Bar(
                     symbol=symbol,
                     timestamp=timestamp.to_pydatetime(),
-                    open=float(row.open),
-                    high=float(row.high),
-                    low=float(row.low),
-                    close=float(row.close),
-                    volume=float(row.volume or 0.0),
+                    open=open_value,
+                    high=high_value,
+                    low=low_value,
+                    close=close_value,
+                    volume=volume_value,
                 )
             )
         return bars
