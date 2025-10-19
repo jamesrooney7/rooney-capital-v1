@@ -1225,6 +1225,18 @@ class LiveWorker:
         # Wait for initial data to begin streaming so Cerebro has initial bars
         logger.info("Waiting for initial data from Databento feeds...")
 
+        if not self._wait_for_initial_data():
+            return
+
+        try:
+            self.cerebro.run(runonce=False, stdstats=False, maxcpus=1)
+        except Exception as exc:  # pragma: no cover - unexpected runtime error
+            logger.exception("Cerebro execution failed: %s", exc)
+        finally:
+            self._stop_event.set()
+            logger.info("Cerebro runtime stopped")
+
+    def _wait_for_initial_data(self, max_wait_seconds: int = 60) -> bool:
         required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
         for feed_name in self._required_reference_feed_names():
             feed = str(feed_name or "").strip()
@@ -1237,40 +1249,58 @@ class LiveWorker:
             if feed:
                 required_queues.add(feed)
 
-        max_wait_seconds = 60
-        missing_queues: set[str] = set()
-        try:
-            for waited in range(max_wait_seconds):
-                missing_queues = {
-                    queue_name
-                    for queue_name in required_queues
-                    if self.queue_manager.get_queue(queue_name).qsize() == 0
-                }
-                if not missing_queues:
-                    logger.info("Initial data received after %s seconds", waited + 1)
-                    break
-                time.sleep(1)
-            else:
-                missing_queues = {
-                    queue_name
-                    for queue_name in required_queues
-                    if self.queue_manager.get_queue(queue_name).qsize() == 0
-                }
+        start_time = time.monotonic()
+        countdown_start: Optional[float] = None
+        live_seen = False
 
-            if missing_queues:
+        def _has_warmup(symbol: str) -> bool:
+            feed = self._data_feeds.get(symbol)
+            if not isinstance(feed, DatabentoLiveData):
+                return False
+            try:
+                backlog = feed.warmup_backlog_size()
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("Failed to query warmup backlog size for %s", symbol, exc_info=True)
+                return False
+            return backlog > 0
+
+        while True:
+            warmup_pending = False
+            missing_queues: set[str] = set()
+
+            for queue_name in required_queues:
+                queue_obj = self.queue_manager.get_queue(queue_name)
+                if queue_obj.qsize() > 0:
+                    live_seen = True
+                    continue
+
+                if _has_warmup(queue_name):
+                    warmup_pending = True
+                    continue
+
+                missing_queues.add(queue_name)
+
+            if not missing_queues:
+                elapsed = int(time.monotonic() - start_time) + 1
+                logger.info("Initial data received after %s seconds", max(elapsed, 1))
+                return True
+
+            now = time.monotonic()
+
+            if warmup_pending and not live_seen:
+                countdown_start = None
+            elif countdown_start is None:
+                countdown_start = now
+
+            if countdown_start is not None and now - countdown_start >= max_wait_seconds:
                 logger.error(
                     "Timeout waiting for initial data after %s seconds; missing queues: %s",
                     max_wait_seconds,
                     ", ".join(sorted(missing_queues)),
                 )
-                return
+                return False
 
-            self.cerebro.run(runonce=False, stdstats=False, maxcpus=1)
-        except Exception as exc:  # pragma: no cover - unexpected runtime error
-            logger.exception("Cerebro execution failed: %s", exc)
-        finally:
-            self._stop_event.set()
-            logger.info("Cerebro runtime stopped")
+            time.sleep(1)
 
     # ------------------------------------------------------------------
     # Public lifecycle
