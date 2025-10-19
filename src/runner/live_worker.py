@@ -773,44 +773,81 @@ class LiveWorker:
             timestamps = pd.to_datetime(df["ts_event"], unit="ns", utc=True)
         elif df.index.name == "ts_event":
             timestamps = pd.to_datetime(df.index, unit="ns", utc=True)
+        elif isinstance(df.index, pd.DatetimeIndex):
+            timestamps = pd.to_datetime(df.index, utc=True)
         else:
             raise ValueError("Historical payload missing ts_event column")
 
-        price_column = next(
-            (col for col in ("price", "px", "close", "trade_px") if col in df.columns),
-            None,
-        )
-        if price_column is None:
-            raise ValueError("Historical payload missing price column")
+        timestamps = pd.DatetimeIndex(timestamps)
+
+        column_aliases: dict[str, tuple[str, ...]] = {
+            "open": ("open", "open_px", "open_price"),
+            "high": ("high", "high_px", "high_price"),
+            "low": ("low", "low_px", "low_price"),
+            "close": ("close", "close_px", "px", "price"),
+        }
+
+        resolved_columns: dict[str, str] = {}
+        for target, candidates in column_aliases.items():
+            for candidate in candidates:
+                if candidate in df.columns:
+                    resolved_columns[target] = candidate
+                    break
 
         volume_column = next(
-            (col for col in ("size", "qty", "volume", "trade_sz") if col in df.columns),
+            (col for col in ("volume", "size", "qty", "trade_sz") if col in df.columns),
             None,
         )
 
-        prices = pd.to_numeric(df[price_column], errors="coerce").to_numpy()
-        if volume_column:
-            volumes = pd.to_numeric(df[volume_column], errors="coerce").to_numpy()
+        if set(resolved_columns) == set(column_aliases):
+            ohlcv = pd.DataFrame(
+                {
+                    key: pd.to_numeric(df[col], errors="coerce").to_numpy()
+                    for key, col in resolved_columns.items()
+                },
+                index=timestamps,
+            )
+            if volume_column:
+                ohlcv["volume"] = pd.to_numeric(df[volume_column], errors="coerce").to_numpy()
+            else:
+                ohlcv["volume"] = 0.0
+            ohlcv = ohlcv.sort_index()
+            ohlcv = ohlcv.loc[~ohlcv.index.duplicated(keep="last")]
         else:
-            volumes = [0.0] * len(df)
+            price_column = resolved_columns.get("close") or next(
+                (
+                    col
+                    for col in ("price", "px", "close", "trade_px")
+                    if col in df.columns
+                ),
+                None,
+            )
+            if price_column is None:
+                raise ValueError("Historical payload missing price column")
 
-        frame = pd.DataFrame(
-            {"price": prices, "volume": volumes}, index=timestamps
-        )
-        frame = frame.sort_index()
-        frame = frame.dropna(subset=["price"])
-        if frame.empty:
-            return []
+            prices = pd.to_numeric(df[price_column], errors="coerce").to_numpy()
+            if volume_column:
+                volumes = pd.to_numeric(df[volume_column], errors="coerce").to_numpy()
+            else:
+                volumes = [0.0] * len(df)
 
-        ohlcv = frame.resample("1min").agg(
-            {"price": ["first", "max", "min", "last"], "volume": "sum"}
-        )
+            frame = pd.DataFrame(
+                {"price": prices, "volume": volumes}, index=timestamps
+            )
+            frame = frame.sort_index()
+            frame = frame.dropna(subset=["price"])
+            if frame.empty:
+                return []
 
-        if ohlcv.empty:
-            return []
+            ohlcv = frame.resample("1min").agg(
+                {"price": ["first", "max", "min", "last"], "volume": "sum"}
+            )
 
-        ohlcv.columns = ["open", "high", "low", "close", "volume"]
-        ohlcv = ohlcv.sort_index()
+            if ohlcv.empty:
+                return []
+
+            ohlcv.columns = ["open", "high", "low", "close", "volume"]
+            ohlcv = ohlcv.sort_index()
 
         start = ohlcv.index.min()
         end = ohlcv.index.max()
