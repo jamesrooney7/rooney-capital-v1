@@ -566,7 +566,25 @@ class LiveWorker:
                 dt.datetime.now(dt.timezone.utc)
                 - dt.timedelta(minutes=self.config.backfill_lookback)
             ).replace(second=0, microsecond=0)
+
+        earliest_start_cache: dict[str, Optional[dt.datetime]] = {}
+
         for (dataset, stype_in), codes in dataset_groups.items():
+            start = backfill_start
+            if start is not None:
+                boundary = earliest_start_cache.get(dataset)
+                if dataset not in earliest_start_cache:
+                    boundary = self._earliest_live_start_for_dataset(dataset)
+                    earliest_start_cache[dataset] = boundary
+                if boundary is not None and start < boundary:
+                    logger.info(
+                        "Clamping backfill start for dataset=%s stype=%s from %s to %s",
+                        dataset,
+                        stype_in,
+                        start.isoformat(),
+                        boundary.isoformat(),
+                    )
+                    start = boundary
             self.subscribers.append(
                 DatabentoSubscriber(
                     dataset=dataset,
@@ -575,7 +593,7 @@ class LiveWorker:
                     api_key=config.databento_api_key,
                     heartbeat_interval=config.heartbeat_interval,
                     stype_in=stype_in,
-                    start=backfill_start,
+                    start=start,
                 )
             )
 
@@ -650,6 +668,11 @@ class LiveWorker:
             key: tuple(sorted(symbols)) for key, symbols in grouped_symbols.items()
         }
         return dataset_groups, symbols_by_group
+
+    def _earliest_live_start_for_dataset(self, dataset: str) -> Optional[dt.datetime]:
+        """Return the earliest timestamp permitted for live subscriptions."""
+
+        return dt.datetime.now(dt.timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
 
     def _setup_data_and_strategies(self) -> None:
         session_start = self.config.resample_session_start
