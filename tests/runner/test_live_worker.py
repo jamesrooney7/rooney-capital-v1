@@ -1,6 +1,10 @@
+import datetime as dt
+import logging
+from pathlib import Path
+
 import pandas as pd
 
-from runner.live_worker import LiveWorker
+from runner.live_worker import LiveWorker, RuntimeConfig
 
 
 def test_convert_databento_preaggregated_skips_resample(monkeypatch):
@@ -33,3 +37,40 @@ def test_convert_databento_preaggregated_skips_resample(monkeypatch):
     assert [bar.close for bar in bars] == [100.5, 101.5, 102.5]
     assert [bar.volume for bar in bars] == [10.0, 11.0, 12.0]
     assert resample_calls == []
+
+
+def test_live_worker_clamps_backfill_start(monkeypatch, caplog):
+    boundary = dt.datetime.now(dt.timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    monkeypatch.setattr(
+        LiveWorker,
+        "_earliest_live_start_for_dataset",
+        lambda self, dataset: boundary,
+    )
+    monkeypatch.setattr(LiveWorker, "_setup_data_and_strategies", lambda self: None)
+
+    config = RuntimeConfig(
+        databento_api_key="demo",
+        contract_map_path=Path("Data/Databento_contract_map.yml"),
+        models_path=None,
+        symbols=("ES",),
+        backfill=True,
+        backfill_lookback=7 * 24 * 60,
+        traderspost_webhook=None,
+    )
+
+    caplog.set_level(logging.INFO)
+    worker = LiveWorker(config)
+
+    assert worker.subscribers, "Expected at least one subscriber"
+    starts = {subscriber.start_time for subscriber in worker.subscribers}
+    assert starts == {boundary}
+
+    clamp_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if "Clamping backfill start" in record.getMessage()
+    ]
+    assert clamp_messages, "Expected a clamp log message"

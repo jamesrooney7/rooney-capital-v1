@@ -316,11 +316,13 @@ class DatabentoSubscriber:
             time.sleep(delay)
 
     def _connect_and_stream(self) -> None:
+        start_display = self.start_time.isoformat() if self.start_time else "default"
         logger.info(
-            "Connecting to Databento dataset=%s schema=%s products=%s",
+            "Connecting to Databento dataset=%s schema=%s products=%s start=%s",
             self.dataset,
             self.schema,
             ",".join(self.product_codes),
+            start_display,
         )
         client = Live(
             key=self.api_key,
