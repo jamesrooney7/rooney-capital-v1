@@ -266,6 +266,7 @@ class DatabentoSubscriber:
         self._last_connect_time: Optional[dt.datetime] = None
         self._last_disconnect_time: Optional[dt.datetime] = None
         self._instrument_roots: Dict[int, Optional[str]] = {}
+        self._seen_roots: set[str] = set()
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -419,6 +420,7 @@ class DatabentoSubscriber:
                 self._instrument_roots.pop(instrument_id, None)
                 return
 
+            seen_before = root in self._seen_roots
             if previous_root == root:
                 logger.debug(
                     "Ignoring duplicate symbol mapping for instrument %s (root %s)",
@@ -426,9 +428,18 @@ class DatabentoSubscriber:
                     root,
                 )
                 self._instrument_roots[instrument_id] = root
+                self._seen_roots.add(root)
                 return
 
             self._instrument_roots[instrument_id] = root
+            if previous_root is None and not seen_before:
+                logger.debug(
+                    "Recorded initial mapping for instrument %s to root %s", instrument_id, root
+                )
+                self._seen_roots.add(root)
+                return
+
+            self._seen_roots.add(root)
             logger.info(
                 "Received symbol mapping for instrument %s; resetting state for %s",
                 instrument_id,
