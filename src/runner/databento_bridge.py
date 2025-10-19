@@ -623,12 +623,25 @@ class DatabentoLiveData(bt.feeds.DataBase):
         if self._stopped:
             return False
 
-        timeout = self.p.qcheck or 0.5
         if self._warmup_bars:
+            # When draining warmup data, bypass the qcheck delay so Backtrader
+            # can consume historical bars as fast as it can process them.  This
+            # mirrors Cerebro's ``do_qcheck`` logic by manipulating the private
+            # ``_qcheck`` attribute which controls how long the engine sleeps
+            # between load attempts.
+            self._qcheck = 0.0
             payload: Bar | QueueSignal = self._warmup_bars.popleft()
         else:
+            if not self._qcheck:
+                # Restore the configured qcheck once warmup bars are exhausted.
+                self._qcheck = self.p.qcheck or 0.5
+
+            timeout = self._qcheck or self.p.qcheck or 0.5
             try:
-                payload = self._queue.get(timeout=timeout)
+                if timeout <= 0:
+                    payload = self._queue.get_nowait()
+                else:
+                    payload = self._queue.get(timeout=timeout)
             except queue.Empty:
                 return None
 

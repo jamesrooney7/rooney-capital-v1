@@ -828,17 +828,21 @@ class LiveWorker:
         )
 
         total_appended = 0
-        for start in range(0, len(bars), batch_size):
+        total_batches = max((len(bars) + batch_size - 1) // batch_size, 1)
+        for batch_index, start in enumerate(range(0, len(bars), batch_size)):
             chunk = bars[start : start + batch_size]
             if not chunk:
                 continue
 
             if total_appended > 0:
+                remaining_batches = max(total_batches - batch_index, 1)
                 self._wait_for_warmup_capacity(
                     feed,
                     symbol=symbol,
                     incoming=len(chunk),
                     limit=queue_limit,
+                    pending_batches=remaining_batches,
+                    total_batches=total_batches,
                 )
 
             appended = int(feed.extend_warmup(chunk))
@@ -857,11 +861,20 @@ class LiveWorker:
         symbol: str,
         incoming: int,
         limit: int,
+        pending_batches: int = 1,
+        total_batches: Optional[int] = None,
     ) -> None:
         if incoming <= 0:
             return
 
-        limit = max(limit, incoming)
+        base_limit = max(limit, incoming)
+        pending_batches = max(int(pending_batches), 1)
+        total_batches = max(int(total_batches or pending_batches), pending_batches)
+        extra_batches = max(pending_batches - 1, total_batches - 1)
+        if incoming:
+            effective_limit = base_limit + extra_batches * incoming
+        else:
+            effective_limit = base_limit
         log_interval = max(float(self._historical_warmup_wait_log_interval), 0.0)
         next_log: Optional[float]
         if log_interval:
@@ -871,7 +884,7 @@ class LiveWorker:
 
         while not self._stop_event.is_set():
             backlog = self._warmup_backlog_size(feed)
-            if backlog + incoming <= limit:
+            if backlog + incoming <= effective_limit:
                 return
 
             now = time.monotonic()
@@ -880,7 +893,7 @@ class LiveWorker:
                     "Waiting for warmup backlog to drain for %s (queued=%d, limit=%d)",
                     symbol,
                     backlog,
-                    limit,
+                    effective_limit,
                 )
                 next_log = now + log_interval
 
