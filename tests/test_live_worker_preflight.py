@@ -442,6 +442,8 @@ def test_historical_warmup_includes_reference_symbols(
 
     worker = LiveWorker(config)
 
+    worker._run_historical_warmup()
+
     assert captured_symbols, "Historical loader should be invoked"
     assert warmup_snapshots, "Warmup counts should be captured"
 
@@ -521,7 +523,9 @@ def test_historical_warmup_uses_dataset_group_parameters(
         historical_lookback_days=1,
     )
 
-    LiveWorker(config)
+    worker = LiveWorker(config)
+
+    worker._run_historical_warmup()
 
     assert load_calls
     assert any(

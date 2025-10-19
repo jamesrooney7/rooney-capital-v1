@@ -681,3 +681,8 @@ class DatabentoLiveData(bt.feeds.DataBase):
                 "Buffered %d warmup bars for %s", appended, self.p.symbol
             )
         return appended
+
+    def warmup_backlog_size(self) -> int:
+        """Return the number of buffered warmup bars awaiting consumption."""
+
+        return len(self._warmup_bars)

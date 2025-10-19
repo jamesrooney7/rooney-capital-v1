@@ -173,6 +173,8 @@ class RuntimeConfig:
     backfill_lookback: int = 0
     load_historical_warmup: bool = False
     historical_lookback_days: int = 252
+    historical_warmup_batch_size: int = 5000
+    historical_warmup_queue_soft_limit: int = 20000
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     heartbeat_file: Optional[Path] = None
@@ -404,6 +406,34 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
                 historical_lookback_days_raw,
             )
 
+    historical_warmup_batch_size_raw = payload.get("historical_warmup_batch_size")
+    if historical_warmup_batch_size_raw is None:
+        historical_warmup_batch_size = 5000
+    else:
+        try:
+            historical_warmup_batch_size = max(1, int(float(historical_warmup_batch_size_raw)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid historical warmup batch size %r; defaulting to 5000",
+                historical_warmup_batch_size_raw,
+            )
+            historical_warmup_batch_size = 5000
+
+    historical_warmup_queue_soft_limit_raw = payload.get("historical_warmup_queue_soft_limit")
+    if historical_warmup_queue_soft_limit_raw is None:
+        historical_warmup_queue_soft_limit = 20000
+    else:
+        try:
+            historical_warmup_queue_soft_limit = int(float(historical_warmup_queue_soft_limit_raw))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid historical warmup queue limit %r; defaulting to 20000",
+                historical_warmup_queue_soft_limit_raw,
+            )
+            historical_warmup_queue_soft_limit = 20000
+    if historical_warmup_queue_soft_limit < historical_warmup_batch_size:
+        historical_warmup_queue_soft_limit = historical_warmup_batch_size
+
     traderspost_payload = payload.get("traderspost") or {}
     webhook_url = (
         payload.get("traderspost_webhook")
@@ -453,6 +483,8 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         backfill_lookback=backfill_lookback_minutes,
         load_historical_warmup=load_historical_warmup,
         historical_lookback_days=historical_lookback_days,
+        historical_warmup_batch_size=historical_warmup_batch_size,
+        historical_warmup_queue_soft_limit=historical_warmup_queue_soft_limit,
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
         heartbeat_file=heartbeat_file,
@@ -578,36 +610,9 @@ class LiveWorker:
         self._setup_data_and_strategies()
 
         self._historical_warmup_counts: dict[str, int] = {}
-        if self.config.load_historical_warmup and self.symbols:
-            if self._symbols_by_dataset_group and self.config.databento_api_key:
-                lookback_days = self.config.historical_lookback_days or 1
-                logger.info(
-                    "Loading %d days of historical data for indicator warmup...",
-                    lookback_days,
-                )
-                try:
-                    for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
-                        load_historical_data(
-                            api_key=self.config.databento_api_key,
-                            dataset=dataset,
-                            symbols=symbols,
-                            stype_in=stype_in,
-                            days=lookback_days,
-                            contract_map=self.contract_map,
-                            on_symbol_loaded=self._warmup_symbol_indicators,
-                        )
-                except Exception:
-                    logger.exception("Failed to load historical data for warmup")
-                    self._historical_warmup_counts.clear()
-                else:
-                    logger.info("Historical data loaded, warming up indicators...")
-                    self._finalize_indicator_warmup()
-            else:
-                logger.info(
-                    "Historical warmup skipped: dataset or API key unavailable"
-                )
-        else:
-            self._historical_warmup_counts.clear()
+        self._historical_warmup_started = False
+        self._historical_warmup_lock = threading.Lock()
+        self._historical_warmup_wait_log_interval = 5.0
 
         if self.config.heartbeat_file:
             logger.info("Heartbeat file configured at %s", self.config.heartbeat_file)
@@ -728,6 +733,49 @@ class LiveWorker:
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to apply commission for %s", symbol)
 
+    def _run_historical_warmup(self) -> None:
+        if not (self.config.load_historical_warmup and self.symbols):
+            return
+
+        if not self._symbols_by_dataset_group or not self.config.databento_api_key:
+            logger.info(
+                "Historical warmup skipped: dataset or API key unavailable"
+            )
+            return
+
+        with self._historical_warmup_lock:
+            if self._historical_warmup_started:
+                return
+            self._historical_warmup_started = True
+
+        lookback_days = self.config.historical_lookback_days or 1
+        logger.info(
+            "Loading %d days of historical data for indicator warmup...",
+            lookback_days,
+        )
+
+        self._historical_warmup_counts.clear()
+        try:
+            for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+                load_historical_data(
+                    api_key=self.config.databento_api_key,
+                    dataset=dataset,
+                    symbols=symbols,
+                    stype_in=stype_in,
+                    days=lookback_days,
+                    contract_map=self.contract_map,
+                    on_symbol_loaded=self._warmup_symbol_indicators,
+                )
+        except Exception:
+            logger.exception("Failed to load historical data for warmup")
+            self._historical_warmup_counts.clear()
+            with self._historical_warmup_lock:
+                self._historical_warmup_started = False
+            return
+
+        logger.info("Historical data loaded, warming up indicators...")
+        self._finalize_indicator_warmup()
+
     def _warmup_symbol_indicators(self, symbol: str, data: Any) -> None:
         feed = self._data_feeds.get(symbol)
         if feed is None:
@@ -742,17 +790,96 @@ class LiveWorker:
             logger.error("Failed to convert warmup data for %s: %s", symbol, exc)
             raise
 
-        appended = 0
-        if hasattr(feed, "extend_warmup"):
-            appended = int(feed.extend_warmup(bars))
-        else:  # pragma: no cover - defensive guard
+        if not bars:
+            logger.info("No historical bars available for %s warmup", symbol)
+            return
+
+        if not hasattr(feed, "extend_warmup"):
             logger.debug("Data feed for %s does not support warmup extension", symbol)
+            return
+
+        batch_size = max(int(self.config.historical_warmup_batch_size), 1)
+        queue_limit = max(
+            int(self.config.historical_warmup_queue_soft_limit),
+            batch_size,
+        )
+
+        total_appended = 0
+        for start in range(0, len(bars), batch_size):
+            chunk = bars[start : start + batch_size]
+            if not chunk:
+                continue
+
+            if total_appended > 0:
+                self._wait_for_warmup_capacity(
+                    feed,
+                    symbol=symbol,
+                    incoming=len(chunk),
+                    limit=queue_limit,
+                )
+
+            appended = int(feed.extend_warmup(chunk))
+            total_appended += appended
 
         previous = int(self._historical_warmup_counts.get(symbol, 0))
-        self._historical_warmup_counts[symbol] = previous + appended
+        self._historical_warmup_counts[symbol] = previous + total_appended
         logger.info(
-            "Buffered %d historical bars for %s warmup", appended, symbol
+            "Buffered %d historical bars for %s warmup", total_appended, symbol
         )
+
+    def _wait_for_warmup_capacity(
+        self,
+        feed: Any,
+        *,
+        symbol: str,
+        incoming: int,
+        limit: int,
+    ) -> None:
+        if incoming <= 0:
+            return
+
+        limit = max(limit, incoming)
+        log_interval = max(float(self._historical_warmup_wait_log_interval), 0.0)
+        next_log: Optional[float]
+        if log_interval:
+            next_log = time.monotonic()
+        else:
+            next_log = None
+
+        while not self._stop_event.is_set():
+            backlog = self._warmup_backlog_size(feed)
+            if backlog + incoming <= limit:
+                return
+
+            now = time.monotonic()
+            if next_log is not None and now >= next_log:
+                logger.info(
+                    "Waiting for warmup backlog to drain for %s (queued=%d, limit=%d)",
+                    symbol,
+                    backlog,
+                    limit,
+                )
+                next_log = now + log_interval
+
+            time.sleep(0.05)
+
+        logger.debug("Warmup backlog wait aborted for %s: stop requested", symbol)
+
+    @staticmethod
+    def _warmup_backlog_size(feed: Any) -> int:
+        getter = getattr(feed, "warmup_backlog_size", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("Failed to query warmup backlog size", exc_info=True)
+        deque_obj = getattr(feed, "_warmup_bars", None)
+        if deque_obj is None:
+            return 0
+        try:
+            return len(deque_obj)
+        except Exception:  # pragma: no cover - defensive guard
+            return 0
 
     def _convert_databento_to_bt_bars(self, symbol: str, data: Any) -> list[Bar]:
         if data is None:
@@ -1123,6 +1250,7 @@ class LiveWorker:
         self._stop_event.clear()
         self._cerebro_thread = threading.Thread(target=self._run_cerebro, name="cerebro-runner", daemon=True)
         self._cerebro_thread.start()
+        self._run_historical_warmup()
         self._update_heartbeat(status="running", force=True)
 
     def stop(self) -> None:
