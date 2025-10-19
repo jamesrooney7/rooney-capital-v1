@@ -596,7 +596,7 @@ class LiveWorker:
                     load_historical_data(
                         api_key=self.config.databento_api_key,
                         dataset=warmup_dataset_name,
-                        symbols=self.symbols,
+                        symbols=self.data_symbols,
                         days=lookback_days,
                         contract_map=self.contract_map,
                         on_symbol_loaded=self._warmup_symbol_indicators,
@@ -723,7 +723,8 @@ class LiveWorker:
         else:  # pragma: no cover - defensive guard
             logger.debug("Data feed for %s does not support warmup extension", symbol)
 
-        self._historical_warmup_counts[symbol] = appended
+        previous = int(self._historical_warmup_counts.get(symbol, 0))
+        self._historical_warmup_counts[symbol] = previous + appended
         logger.info(
             "Buffered %d historical bars for %s warmup", appended, symbol
         )

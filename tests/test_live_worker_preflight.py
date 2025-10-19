@@ -9,6 +9,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import databento
+import pandas as pd
 import pytest
 import requests
 
@@ -380,3 +381,77 @@ def test_run_cerebro_aborts_until_all_queues_ready(
 
     expected_missing = ", ".join(sorted(required_queues))
     assert any(expected_missing in message for message in error_messages)
+
+
+def test_historical_warmup_includes_reference_symbols(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_dependencies(monkeypatch)
+
+    captured_symbols: list[tuple[str, ...]] = []
+    warmup_snapshots: list[dict[str, int]] = []
+
+    original_finalize = LiveWorker._finalize_indicator_warmup
+
+    def _capture_finalize(self: LiveWorker) -> None:
+        warmup_snapshots.append(dict(self._historical_warmup_counts))
+        original_finalize(self)
+
+    monkeypatch.setattr(LiveWorker, "_finalize_indicator_warmup", _capture_finalize)
+
+    base_timestamp = pd.Timestamp("2024-01-01 00:00:00", tz="UTC")
+    sample_frame = pd.DataFrame(
+        {
+            "ts_event": [
+                base_timestamp.value,
+                (base_timestamp + pd.Timedelta(seconds=30)).value,
+            ],
+            "price": [100.0, 101.0],
+            "volume": [1.0, 2.0],
+        }
+    )
+
+    class _Payload:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self._frame = frame
+
+        def to_df(self) -> pd.DataFrame:
+            return self._frame.copy()
+
+    def _load_historical_data(
+        *,
+        api_key: str,
+        dataset: str,
+        symbols: tuple[str, ...],
+        days: int,
+        contract_map,
+        on_symbol_loaded,
+    ) -> None:
+        captured_symbols.append(tuple(symbols))
+        for symbol in symbols:
+            on_symbol_loaded(symbol, _Payload(sample_frame))
+
+    monkeypatch.setattr(live_worker, "load_historical_data", _load_historical_data)
+
+    config = replace(
+        _successful_config(),
+        load_historical_warmup=True,
+        historical_lookback_days=1,
+    )
+
+    worker = LiveWorker(config)
+
+    assert captured_symbols, "Historical loader should be invoked"
+    assert warmup_snapshots, "Warmup counts should be captured"
+
+    loaded_symbols = captured_symbols[0]
+    assert set(loaded_symbols) == set(worker.data_symbols)
+
+    warmup_counts = warmup_snapshots[0]
+    reference_symbols = [
+        symbol for symbol in worker.reference_symbols if symbol in worker.data_symbols
+    ]
+    assert reference_symbols, "Expected at least one reference symbol"
+
+    for symbol in reference_symbols:
+        assert warmup_counts.get(symbol, 0) > 0
