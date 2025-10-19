@@ -24,7 +24,9 @@ def load_historical_data(
 
     client = db.Historical(api_key)
 
-    end = datetime.now(tz=timezone.utc) - timedelta(hours=1)
+    # Use a larger buffer to avoid requesting beyond the last available data,
+    # especially over weekends when the latest data may be from Friday's close.
+    end = datetime.now(tz=timezone.utc) - timedelta(hours=24)
     start = end - timedelta(days=max(days, 1))
 
     historical_data: dict[str, Any] = {}
