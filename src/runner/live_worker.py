@@ -518,19 +518,12 @@ class LiveWorker:
         ).items():
             product_to_root.setdefault(code, symbol)
 
-        dataset_groups = self.contract_map.dataset_groups(contract_symbols)
-        for key, codes in self.contract_map.reference_dataset_groups(self.reference_symbols).items():
-            existing = set(dataset_groups.get(key, ()))
-            existing.update(codes)
-            dataset_groups[key] = tuple(sorted(existing))
-
         self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
-        warmup_dataset_name: Optional[str] = None
-        if dataset_groups:
-            first_key = next(iter(dataset_groups.keys()))
-            if isinstance(first_key, tuple) and first_key:
-                warmup_dataset_name = first_key[0]
+        dataset_groups, symbols_by_group = self._build_dataset_groups(
+            contract_symbols, self.reference_symbols
+        )
+        self._symbols_by_dataset_group = symbols_by_group
 
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
@@ -586,21 +579,23 @@ class LiveWorker:
 
         self._historical_warmup_counts: dict[str, int] = {}
         if self.config.load_historical_warmup and self.symbols:
-            if warmup_dataset_name and self.config.databento_api_key:
+            if self._symbols_by_dataset_group and self.config.databento_api_key:
                 lookback_days = self.config.historical_lookback_days or 1
                 logger.info(
                     "Loading %d days of historical data for indicator warmup...",
                     lookback_days,
                 )
                 try:
-                    load_historical_data(
-                        api_key=self.config.databento_api_key,
-                        dataset=warmup_dataset_name,
-                        symbols=self.data_symbols,
-                        days=lookback_days,
-                        contract_map=self.contract_map,
-                        on_symbol_loaded=self._warmup_symbol_indicators,
-                    )
+                    for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+                        load_historical_data(
+                            api_key=self.config.databento_api_key,
+                            dataset=dataset,
+                            symbols=symbols,
+                            stype_in=stype_in,
+                            days=lookback_days,
+                            contract_map=self.contract_map,
+                            on_symbol_loaded=self._warmup_symbol_indicators,
+                        )
                 except Exception:
                     logger.exception("Failed to load historical data for warmup")
                     self._historical_warmup_counts.clear()
@@ -620,6 +615,36 @@ class LiveWorker:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _build_dataset_groups(
+        self,
+        contract_symbols: Sequence[str],
+        reference_symbols: Sequence[str],
+    ) -> tuple[
+        dict[tuple[str, str], tuple[str, ...]],
+        dict[tuple[str, str], tuple[str, ...]],
+    ]:
+        """Return grouped subscription codes and their associated symbols."""
+
+        grouped_codes: dict[tuple[str, str], set[str]] = {}
+        grouped_symbols: dict[tuple[str, str], set[str]] = {}
+
+        for symbol in sorted(set(contract_symbols) | set(reference_symbols)):
+            subscription = self.contract_map.subscription_for(symbol)
+            if not subscription:
+                continue
+            key = (subscription.dataset, subscription.stype_in)
+            if subscription.codes:
+                grouped_codes.setdefault(key, set()).update(subscription.codes)
+            grouped_symbols.setdefault(key, set()).add(symbol)
+
+        dataset_groups = {
+            key: tuple(sorted(codes)) for key, codes in grouped_codes.items()
+        }
+        symbols_by_group = {
+            key: tuple(sorted(symbols)) for key, symbols in grouped_symbols.items()
+        }
+        return dataset_groups, symbols_by_group
 
     def _setup_data_and_strategies(self) -> None:
         session_start = self.config.resample_session_start
