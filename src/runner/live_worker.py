@@ -525,7 +525,7 @@ class LiveWorker:
 
         self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
-        self.historical_data: Optional[dict[str, Any]] = None
+        self._historical_warmup_counts: dict[str, Any] = {}
         if self.config.load_historical_warmup and self.symbols:
             dataset_name: Optional[str] = None
             if dataset_groups:
@@ -539,19 +539,20 @@ class LiveWorker:
                     lookback_days,
                 )
                 try:
-                    self.historical_data = load_historical_data(
+                    load_historical_data(
                         api_key=self.config.databento_api_key,
                         dataset=dataset_name,
                         symbols=self.symbols,
                         days=lookback_days,
                         contract_map=self.contract_map,
+                        on_symbol_loaded=self._warmup_symbol_indicators,
                     )
                 except Exception:
                     logger.exception("Failed to load historical data for warmup")
-                    self.historical_data = None
+                    self._historical_warmup_counts.clear()
                 else:
                     logger.info("Historical data loaded, warming up indicators...")
-                    self._warmup_indicators()
+                    self._finalize_indicator_warmup()
             else:
                 logger.info(
                     "Historical warmup skipped: dataset or API key unavailable"
@@ -698,21 +699,25 @@ class LiveWorker:
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to apply commission for %s", symbol)
 
-    def _warmup_indicators(self) -> None:
-        if not self.historical_data:
+    def _warmup_symbol_indicators(self, symbol: str, data: Any) -> None:
+        try:
+            bar_count = len(data) if hasattr(data, "__len__") else "unknown"
+        except Exception:  # pragma: no cover - defensive guard
+            bar_count = "unknown"
+
+        self._historical_warmup_counts[symbol] = bar_count
+        logger.debug("Warmup data prepared for %s (%s bars)", symbol, bar_count)
+
+    def _finalize_indicator_warmup(self) -> None:
+        if not self._historical_warmup_counts:
             logger.info("No historical data available for indicator warmup")
             return
 
-        for symbol, data in self.historical_data.items():
-            try:
-                bar_count = len(data) if hasattr(data, "__len__") else "unknown"
-            except Exception:  # pragma: no cover - defensive guard
-                bar_count = "unknown"
-            logger.debug("Warmup data prepared for %s (%s bars)", symbol, bar_count)
-
         logger.info(
-            "Indicator warmup completed for %d symbols", len(self.historical_data)
+            "Indicator warmup completed for %d symbols",
+            len(self._historical_warmup_counts),
         )
+        self._historical_warmup_counts.clear()
 
     def validate_policy_killswitch(self) -> bool:
         if getattr(self.config, "killswitch", False):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional
 
 import databento as db
 
@@ -19,8 +19,14 @@ def load_historical_data(
     symbols: Iterable[str],
     days: int = 252,
     contract_map: Optional[ContractMap] = None,
-) -> dict[str, Any]:
-    """Load historical L1 data for indicator warmup."""
+    on_symbol_loaded: Optional[Callable[[str, Any], None]] = None,
+) -> Optional[dict[str, Any]]:
+    """Load historical L1 data for indicator warmup.
+
+    When ``on_symbol_loaded`` is provided, symbols are streamed sequentially to
+    the callback to keep peak memory usage low. Otherwise, the function returns
+    a mapping of symbol to the retrieved historical data.
+    """
 
     client = db.Historical(api_key)
 
@@ -30,6 +36,7 @@ def load_historical_data(
     start = end - timedelta(days=max(days, 1))
 
     historical_data: dict[str, Any] = {}
+    processed_symbols = 0
 
     for symbol in symbols:
         logger.debug(
@@ -53,7 +60,20 @@ def load_historical_data(
             end=end,
             stype_in="parent",
         )
-        historical_data[str(symbol)] = data
+        if on_symbol_loaded is not None:
+            on_symbol_loaded(str(symbol), data)
+            processed_symbols += 1
+            del data
+        else:
+            historical_data[str(symbol)] = data
+
+    if on_symbol_loaded is not None:
+        logger.info(
+            "Processed historical data for %d symbols spanning %d days",
+            processed_symbols,
+            days,
+        )
+        return None
 
     logger.info(
         "Loaded historical data for %d symbols spanning %d days", len(historical_data), days
