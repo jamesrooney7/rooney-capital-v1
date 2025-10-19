@@ -533,3 +533,46 @@ def test_historical_warmup_uses_dataset_group_parameters(
         for dataset, stype, symbols in load_calls
     )
 
+
+def test_convert_databento_to_bt_bars_includes_quiet_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_dependencies(monkeypatch)
+    worker = LiveWorker(_successful_config())
+
+    first_trade = pd.Timestamp("2024-01-01T12:00:10Z")
+    second_trade = first_trade + pd.Timedelta(minutes=3)
+    payload = pd.DataFrame(
+        {
+            "ts_event": [first_trade.value, second_trade.value],
+            "price": [100.0, 101.0],
+            "size": [2.0, 3.0],
+        }
+    )
+
+    bars = worker._convert_databento_to_bt_bars("ES", payload)
+
+    assert len(bars) == 4
+    expected_timestamps = list(
+        pd.date_range(start="2024-01-01T12:00:00Z", periods=4, freq="1min").to_pydatetime()
+    )
+    assert [bar.timestamp for bar in bars] == expected_timestamps
+
+    for prev, curr in zip(bars, bars[1:]):
+        assert curr.timestamp - prev.timestamp == dt.timedelta(minutes=1)
+
+    assert bars[0].open == pytest.approx(100.0)
+    assert bars[0].close == pytest.approx(100.0)
+    assert bars[0].volume == pytest.approx(2.0)
+
+    for quiet_bar in bars[1:3]:
+        assert quiet_bar.volume == pytest.approx(0.0)
+        assert quiet_bar.open == pytest.approx(100.0)
+        assert quiet_bar.high == pytest.approx(100.0)
+        assert quiet_bar.low == pytest.approx(100.0)
+        assert quiet_bar.close == pytest.approx(100.0)
+
+    assert bars[-1].open == pytest.approx(101.0)
+    assert bars[-1].close == pytest.approx(101.0)
+    assert bars[-1].volume == pytest.approx(3.0)
+
