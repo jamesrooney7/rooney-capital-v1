@@ -265,6 +265,7 @@ class DatabentoSubscriber:
         self._last_error: Optional[str] = None
         self._last_connect_time: Optional[dt.datetime] = None
         self._last_disconnect_time: Optional[dt.datetime] = None
+        self._instrument_roots: Dict[int, Optional[str]] = {}
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -355,6 +356,9 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                root = self.queue_manager.resolve_root(instrument_id)
+                if root:
+                    self._instrument_roots[instrument_id] = root
 
             for entry in getattr(metadata, "symbols", []) or []:
                 instrument_id = getattr(entry, "instrument_id", None)
@@ -364,6 +368,9 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                root = self.queue_manager.resolve_root(instrument_id)
+                if root:
+                    self._instrument_roots[instrument_id] = root
 
         sym_map = getattr(client, "symbology_map", None)
         if isinstance(sym_map, dict):
@@ -373,6 +380,9 @@ class DatabentoSubscriber:
                 except (TypeError, ValueError):
                     continue
                 self.queue_manager.update_mapping(inst, str(symbol))
+                root = self.queue_manager.resolve_root(inst)
+                if root:
+                    self._instrument_roots[inst] = root
 
         logger.info("Databento subscription ready; entering stream loop")
 
@@ -396,23 +406,40 @@ class DatabentoSubscriber:
     # ------------------------------------------------------------------
     def _handle_record(self, record) -> None:
         if isinstance(record, SymbolMappingMsg):
+            instrument_id = getattr(record, "instrument_id", None)
+            if instrument_id is None:
+                return
             symbol = getattr(record, "stype_in_symbol", None) or getattr(
                 record, "stype_out_symbol", None
             )
-            self.queue_manager.update_mapping(record.instrument_id, symbol)
-            root = self.queue_manager.resolve_root(record.instrument_id)
-            if root:
-                logger.info(
-                    "Received symbol mapping for instrument %s; resetting state for %s",
-                    record.instrument_id,
+            previous_root = self._instrument_roots.get(instrument_id)
+            self.queue_manager.update_mapping(instrument_id, symbol)
+            root = self.queue_manager.resolve_root(instrument_id)
+            if not root:
+                self._instrument_roots.pop(instrument_id, None)
+                return
+
+            if previous_root == root:
+                logger.debug(
+                    "Ignoring duplicate symbol mapping for instrument %s (root %s)",
+                    instrument_id,
                     root,
                 )
-                with self._lock:
-                    self._current_bars.pop(root, None)
-                    self._last_emitted_minute.pop(root, None)
-                    self._last_close.pop(root, None)
-                    self._last_trade_ts.pop(root, None)
-                self.queue_manager.publish_reset(root)
+                self._instrument_roots[instrument_id] = root
+                return
+
+            self._instrument_roots[instrument_id] = root
+            logger.info(
+                "Received symbol mapping for instrument %s; resetting state for %s",
+                instrument_id,
+                root,
+            )
+            with self._lock:
+                self._current_bars.pop(root, None)
+                self._last_emitted_minute.pop(root, None)
+                self._last_close.pop(root, None)
+                self._last_trade_ts.pop(root, None)
+            self.queue_manager.publish_reset(root)
             return
 
         if isinstance(record, TradeMsg):
