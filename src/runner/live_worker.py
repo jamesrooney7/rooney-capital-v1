@@ -25,13 +25,14 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 import backtrader as bt
 
+import pandas as pd
 import requests
 from requests import exceptions as requests_exceptions
 
 from config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
 from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
-from runner.databento_bridge import DatabentoLiveData, DatabentoSubscriber, QueueFanout
+from runner.databento_bridge import Bar, DatabentoLiveData, DatabentoSubscriber, QueueFanout
 from runner.historical_loader import load_historical_data
 from runner.traderspost_client import (
     TradersPostClient,
@@ -525,39 +526,12 @@ class LiveWorker:
 
         self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
-        self._historical_warmup_counts: dict[str, Any] = {}
-        if self.config.load_historical_warmup and self.symbols:
-            dataset_name: Optional[str] = None
-            if dataset_groups:
-                first_key = next(iter(dataset_groups.keys()))
-                if isinstance(first_key, tuple) and first_key:
-                    dataset_name = first_key[0]
-            if dataset_name and self.config.databento_api_key:
-                lookback_days = self.config.historical_lookback_days or 1
-                logger.info(
-                    "Loading %d days of historical data for indicator warmup...",
-                    lookback_days,
-                )
-                try:
-                    load_historical_data(
-                        api_key=self.config.databento_api_key,
-                        dataset=dataset_name,
-                        symbols=self.symbols,
-                        days=lookback_days,
-                        contract_map=self.contract_map,
-                        on_symbol_loaded=self._warmup_symbol_indicators,
-                    )
-                except Exception:
-                    logger.exception("Failed to load historical data for warmup")
-                    self._historical_warmup_counts.clear()
-                else:
-                    logger.info("Historical data loaded, warming up indicators...")
-                    self._finalize_indicator_warmup()
-            else:
-                logger.info(
-                    "Historical warmup skipped: dataset or API key unavailable"
-                )
-        
+        warmup_dataset_name: Optional[str] = None
+        if dataset_groups:
+            first_key = next(iter(dataset_groups.keys()))
+            if isinstance(first_key, tuple) and first_key:
+                warmup_dataset_name = first_key[0]
+
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
         self.subscribers = []
@@ -609,6 +583,36 @@ class LiveWorker:
             self.traderspost_client = None
 
         self._setup_data_and_strategies()
+
+        self._historical_warmup_counts: dict[str, int] = {}
+        if self.config.load_historical_warmup and self.symbols:
+            if warmup_dataset_name and self.config.databento_api_key:
+                lookback_days = self.config.historical_lookback_days or 1
+                logger.info(
+                    "Loading %d days of historical data for indicator warmup...",
+                    lookback_days,
+                )
+                try:
+                    load_historical_data(
+                        api_key=self.config.databento_api_key,
+                        dataset=warmup_dataset_name,
+                        symbols=self.symbols,
+                        days=lookback_days,
+                        contract_map=self.contract_map,
+                        on_symbol_loaded=self._warmup_symbol_indicators,
+                    )
+                except Exception:
+                    logger.exception("Failed to load historical data for warmup")
+                    self._historical_warmup_counts.clear()
+                else:
+                    logger.info("Historical data loaded, warming up indicators...")
+                    self._finalize_indicator_warmup()
+            else:
+                logger.info(
+                    "Historical warmup skipped: dataset or API key unavailable"
+                )
+        else:
+            self._historical_warmup_counts.clear()
 
         if self.config.heartbeat_file:
             logger.info("Heartbeat file configured at %s", self.config.heartbeat_file)
@@ -700,23 +704,120 @@ class LiveWorker:
                 logger.exception("Failed to apply commission for %s", symbol)
 
     def _warmup_symbol_indicators(self, symbol: str, data: Any) -> None:
-        try:
-            bar_count = len(data) if hasattr(data, "__len__") else "unknown"
-        except Exception:  # pragma: no cover - defensive guard
-            bar_count = "unknown"
+        feed = self._data_feeds.get(symbol)
+        if feed is None:
+            logger.warning(
+                "Skipping warmup for %s: no matching data feed initialised", symbol
+            )
+            return
 
-        self._historical_warmup_counts[symbol] = bar_count
-        logger.debug("Warmup data prepared for %s (%s bars)", symbol, bar_count)
+        try:
+            bars = self._convert_databento_to_bt_bars(symbol, data)
+        except Exception as exc:
+            logger.error("Failed to convert warmup data for %s: %s", symbol, exc)
+            raise
+
+        appended = 0
+        if hasattr(feed, "extend_warmup"):
+            appended = int(feed.extend_warmup(bars))
+        else:  # pragma: no cover - defensive guard
+            logger.debug("Data feed for %s does not support warmup extension", symbol)
+
+        self._historical_warmup_counts[symbol] = appended
+        logger.info(
+            "Buffered %d historical bars for %s warmup", appended, symbol
+        )
+
+    def _convert_databento_to_bt_bars(self, symbol: str, data: Any) -> list[Bar]:
+        if data is None:
+            return []
+
+        if hasattr(data, "to_df"):
+            df = data.to_df()
+        elif hasattr(data, "to_pandas"):
+            df = data.to_pandas()
+        else:
+            df = pd.DataFrame(data)
+
+        if df is None or df.empty:
+            return []
+
+        df = df.copy()
+        if "ts_event" in df.columns:
+            timestamps = pd.to_datetime(df["ts_event"], unit="ns", utc=True)
+        elif df.index.name == "ts_event":
+            timestamps = pd.to_datetime(df.index, unit="ns", utc=True)
+        else:
+            raise ValueError("Historical payload missing ts_event column")
+
+        price_column = next(
+            (col for col in ("price", "px", "close", "trade_px") if col in df.columns),
+            None,
+        )
+        if price_column is None:
+            raise ValueError("Historical payload missing price column")
+
+        volume_column = next(
+            (col for col in ("size", "qty", "volume", "trade_sz") if col in df.columns),
+            None,
+        )
+
+        prices = pd.to_numeric(df[price_column], errors="coerce").to_numpy()
+        if volume_column:
+            volumes = pd.to_numeric(df[volume_column], errors="coerce").to_numpy()
+        else:
+            volumes = [0.0] * len(df)
+
+        frame = pd.DataFrame(
+            {"price": prices, "volume": volumes}, index=timestamps
+        )
+        frame = frame.sort_index()
+        frame = frame.dropna(subset=["price"])
+        if frame.empty:
+            return []
+
+        ohlcv = (
+            frame.resample("1T")
+            .agg({"price": ["first", "max", "min", "last"], "volume": "sum"})
+            .dropna(subset=[("price", "first"), ("price", "last")])
+        )
+
+        ohlcv.columns = ["open", "high", "low", "close", "volume"]
+        ohlcv = ohlcv.dropna(subset=["open", "close"])
+
+        bars: list[Bar] = []
+        for timestamp, row in ohlcv.iterrows():
+            bars.append(
+                Bar(
+                    symbol=symbol,
+                    timestamp=timestamp.to_pydatetime(),
+                    open=float(row.open),
+                    high=float(row.high),
+                    low=float(row.low),
+                    close=float(row.close),
+                    volume=float(row.volume or 0.0),
+                )
+            )
+        return bars
 
     def _finalize_indicator_warmup(self) -> None:
         if not self._historical_warmup_counts:
             logger.info("No historical data available for indicator warmup")
             return
 
+        total_bars = sum(int(count) for count in self._historical_warmup_counts.values())
         logger.info(
-            "Indicator warmup completed for %d symbols",
+            "Indicator warmup completed using %d bars across %d symbols",
+            total_bars,
             len(self._historical_warmup_counts),
         )
+
+        missing_symbols = set(self.symbols) - set(self._historical_warmup_counts)
+        if missing_symbols:
+            logger.warning(
+                "Missing warmup data for symbols: %s", ", ".join(sorted(missing_symbols))
+            )
+
         self._historical_warmup_counts.clear()
 
     def validate_policy_killswitch(self) -> bool:

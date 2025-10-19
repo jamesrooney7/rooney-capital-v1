@@ -27,7 +27,7 @@ import logging
 import queue
 import threading
 import time
-from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Dict, Iterable, Mapping, MutableMapping, Optional, Sequence
 
 import backtrader as bt
 from databento import Live, SymbolMappingMsg, TradeMsg
@@ -606,6 +606,7 @@ class DatabentoLiveData(bt.feeds.DataBase):
         self._queue: queue.Queue = self.p.queue_manager.get_queue(self.p.symbol)
         self._latest_dt: Optional[dt.datetime] = None
         self._stopped = False
+        self._warmup_bars: "collections.deque[Bar]" = collections.deque()
 
     def start(self) -> None:
         super().start()
@@ -621,10 +622,13 @@ class DatabentoLiveData(bt.feeds.DataBase):
             return False
 
         timeout = self.p.qcheck or 0.5
-        try:
-            payload = self._queue.get(timeout=timeout)
-        except queue.Empty:
-            return None
+        if self._warmup_bars:
+            payload: Bar | QueueSignal = self._warmup_bars.popleft()
+        else:
+            try:
+                payload = self._queue.get(timeout=timeout)
+            except queue.Empty:
+                return None
 
         if isinstance(payload, QueueSignal):
             if payload.kind == QueueSignal.SHUTDOWN:
@@ -658,3 +662,22 @@ class DatabentoLiveData(bt.feeds.DataBase):
 
         self._latest_dt = payload.timestamp
         return True
+
+    # ------------------------------------------------------------------
+    # Warmup helpers
+    # ------------------------------------------------------------------
+    def extend_warmup(self, bars: Iterable[Bar]) -> int:
+        """Append historical ``bars`` to be consumed before live data."""
+
+        appended = 0
+        for bar in bars:
+            if not isinstance(bar, Bar):  # pragma: no cover - defensive guard
+                logger.debug("Ignoring warmup payload of type %s", type(bar))
+                continue
+            self._warmup_bars.append(bar)
+            appended += 1
+        if appended:
+            logger.debug(
+                "Buffered %d warmup bars for %s", appended, self.p.symbol
+            )
+        return appended
