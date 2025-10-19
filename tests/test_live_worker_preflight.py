@@ -388,7 +388,7 @@ def test_historical_warmup_includes_reference_symbols(
 ) -> None:
     _patch_successful_dependencies(monkeypatch)
 
-    captured_symbols: list[tuple[str, ...]] = []
+    captured_symbols: list[tuple[str, str, tuple[str, ...]]] = []
     warmup_snapshots: list[dict[str, int]] = []
 
     original_finalize = LiveWorker._finalize_indicator_warmup
@@ -423,11 +423,12 @@ def test_historical_warmup_includes_reference_symbols(
         api_key: str,
         dataset: str,
         symbols: tuple[str, ...],
+        stype_in: str,
         days: int,
         contract_map,
         on_symbol_loaded,
     ) -> None:
-        captured_symbols.append(tuple(symbols))
+        captured_symbols.append((dataset, stype_in, tuple(symbols)))
         for symbol in symbols:
             on_symbol_loaded(symbol, _Payload(sample_frame))
 
@@ -444,8 +445,8 @@ def test_historical_warmup_includes_reference_symbols(
     assert captured_symbols, "Historical loader should be invoked"
     assert warmup_snapshots, "Warmup counts should be captured"
 
-    loaded_symbols = captured_symbols[0]
-    assert set(loaded_symbols) == set(worker.data_symbols)
+    loaded_symbol_sets = {symbol for _, _, group in captured_symbols for symbol in group}
+    assert loaded_symbol_sets == set(worker.data_symbols)
 
     warmup_counts = warmup_snapshots[0]
     reference_symbols = [
@@ -455,3 +456,80 @@ def test_historical_warmup_includes_reference_symbols(
 
     for symbol in reference_symbols:
         assert warmup_counts.get(symbol, 0) > 0
+
+
+def test_historical_warmup_uses_dataset_group_parameters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_successful_dependencies(monkeypatch)
+
+    original_build = LiveWorker._build_dataset_groups
+
+    def _custom_build(self: LiveWorker, contract_symbols, reference_symbols):
+        dataset_groups, symbols_by_group = original_build(
+            self, contract_symbols, reference_symbols
+        )
+        dataset_groups = {key: tuple(values) for key, values in dataset_groups.items()}
+        symbols_by_group = {key: tuple(values) for key, values in symbols_by_group.items()}
+
+        original_key: tuple[str, str] | None = None
+        for key, symbols in list(symbols_by_group.items()):
+            if "NQ" in symbols:
+                original_key = key
+                remaining = tuple(sym for sym in symbols if sym != "NQ")
+                if remaining:
+                    symbols_by_group[key] = remaining
+                else:
+                    symbols_by_group.pop(key)
+                break
+
+        if original_key is not None:
+            original_codes = dataset_groups.get(original_key, tuple())
+            filtered_codes = tuple(code for code in original_codes if code != "MNQ.FUT")
+            if filtered_codes:
+                dataset_groups[original_key] = filtered_codes
+            else:
+                dataset_groups.pop(original_key, None)
+
+        custom_key = ("CUSTOM.DATA", "product_id")
+        dataset_groups[custom_key] = ("MNQ.FUT",)
+        symbols_by_group[custom_key] = ("NQ",)
+
+        return dataset_groups, symbols_by_group
+
+    monkeypatch.setattr(LiveWorker, "_build_dataset_groups", _custom_build)
+
+    load_calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+    def _load_historical_data(
+        *,
+        api_key: str,
+        dataset: str,
+        symbols: tuple[str, ...],
+        stype_in: str,
+        days: int,
+        contract_map,
+        on_symbol_loaded,
+    ) -> None:
+        load_calls.append((dataset, stype_in, tuple(symbols)))
+
+    monkeypatch.setattr(live_worker, "load_historical_data", _load_historical_data)
+
+    config = replace(
+        _successful_config(),
+        load_historical_warmup=True,
+        historical_lookback_days=1,
+    )
+
+    LiveWorker(config)
+
+    assert load_calls
+    assert any(
+        dataset == "GLBX.MDP3" and stype == "parent" and "ES" in symbols and "NQ" not in symbols
+        for dataset, stype, symbols in load_calls
+    )
+    assert any(
+        dataset == "CUSTOM.DATA" and stype == "product_id" and symbols == ("NQ",)
+        for dataset, stype, symbols in load_calls
+    )
+

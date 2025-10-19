@@ -17,6 +17,8 @@ def load_historical_data(
     api_key: str,
     dataset: str,
     symbols: Iterable[str],
+    *,
+    stype_in: str = "parent",
     days: int = 252,
     contract_map: Optional[ContractMap] = None,
     on_symbol_loaded: Optional[Callable[[str, Any], None]] = None,
@@ -42,23 +44,32 @@ def load_historical_data(
         logger.debug(
             "Requesting historical data for %s from %s to %s", symbol, start, end
         )
-        product_id: Optional[str] = None
+        request_symbols: list[str] = []
         if contract_map is not None:
-            try:
-                contract = contract_map.active_contract(symbol)
-            except KeyError:
-                contract = None
-            if contract is not None:
-                product_id = contract.databento.product_id
+            subscription = contract_map.subscription_for(symbol)
+            if subscription and subscription.codes:
+                request_symbols.extend(subscription.codes)
+            elif stype_in == "product_id":
+                try:
+                    contract = contract_map.active_contract(symbol)
+                except KeyError:
+                    contract = None
+                if contract and contract.databento.product_id:
+                    request_symbols.append(contract.databento.product_id)
 
-        request_symbols = [product_id] if product_id else [f"{symbol}.FUT"]
+        if not request_symbols:
+            if stype_in == "parent":
+                request_symbols = [f"{symbol}.FUT"]
+            else:
+                request_symbols = [symbol]
+
         data = client.timeseries.get_range(
             dataset=dataset,
             schema="mbp-1",  # L1 top-of-book
             symbols=request_symbols,
             start=start,
             end=end,
-            stype_in="parent",
+            stype_in=stype_in,
         )
         if on_symbol_loaded is not None:
             on_symbol_loaded(str(symbol), data)

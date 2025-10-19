@@ -245,6 +245,16 @@ class ContractMap:
             grouped.setdefault(key, set()).update(subscription.codes)
         return {key: tuple(sorted(values)) for key, values in grouped.items()}
 
+    def subscription_for(self, symbol: str) -> Optional[DatabentoSubscription]:
+        """Return the resolved subscription for ``symbol`` if available."""
+
+        if symbol in self:
+            return self.active_contract(symbol).subscription()
+        feed = self.reference_feed(symbol)
+        if not feed:
+            return None
+        return _subscription_from_feed(symbol, feed)
+
     def traderspost_metadata(self, symbol: str) -> dict[str, Any]:
         """Return supplemental metadata for the TradersPost payload builder."""
 
