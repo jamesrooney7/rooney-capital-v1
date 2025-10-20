@@ -1,10 +1,13 @@
 import datetime as dt
 import logging
+import threading
+import types
 from pathlib import Path
 
 import pandas as pd
 
 from runner.live_worker import LiveWorker, RuntimeConfig
+from runner.ml_feature_tracker import MlFeatureTracker
 
 
 def test_convert_databento_preaggregated_skips_resample(monkeypatch):
@@ -74,3 +77,50 @@ def test_live_worker_clamps_backfill_start(monkeypatch, caplog):
         if "Clamping backfill start" in record.getMessage()
     ]
     assert clamp_messages, "Expected a clamp log message"
+
+
+def test_warmup_feature_snapshot_marks_tracker_ready():
+    symbol = "ES"
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.symbols = (symbol,)
+    worker.ml_feature_tracker = MlFeatureTracker()
+    worker._ml_feature_lock = threading.Lock()
+    worker._pending_ml_warmup = set()
+    worker._ml_features_seen = {}
+
+    tracker = worker.ml_feature_tracker
+    tracker.register_bundle(symbol, ("feat_a", "feat_b"))
+
+    worker._mark_warmup_features_pending(symbol)
+
+    tracker.update_feature(symbol, "feat_a", 1.0)
+    tracker.update_feature(symbol, "feat_b", None)
+
+    class _Collector:
+        def __init__(self):
+            self.payload = {"feat_a": 1.0, "feat_b": None}
+
+        @property
+        def snapshot(self):
+            return dict(self.payload)
+
+    class _Strategy:
+        def __init__(self, collector):
+            self.ml_feature_collector = collector
+            self.p = types.SimpleNamespace(symbol=symbol, ml_features=("feat_a", "feat_b"))
+
+    strategy = _Strategy(_Collector())
+
+    # First snapshot leaves one feature missing; pending set remains.
+    worker._on_strategy_feature_snapshot(strategy)
+    assert symbol in worker._pending_ml_warmup
+
+    tracker.update_feature(symbol, "feat_b", -0.25)
+    strategy.ml_feature_collector.payload["feat_b"] = -0.25
+
+    worker._on_strategy_feature_snapshot(strategy)
+
+    report = tracker.readiness_report().get(symbol, {})
+    assert report.get("feature_count") == 2
+    assert report.get("ready") is True
+    assert symbol not in worker._pending_ml_warmup

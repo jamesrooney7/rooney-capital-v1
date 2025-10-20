@@ -22,6 +22,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+import weakref
 
 import backtrader as bt
 
@@ -75,6 +76,17 @@ class NotifyingIbsStrategy(IbsStrategy):
         ] = None,
         **kwargs: Any,
     ) -> None:
+        live_worker_ref = kwargs.pop("live_worker_ref", None)
+        self._live_worker_ref: Optional["weakref.ReferenceType[LiveWorker]"]
+        if isinstance(live_worker_ref, weakref.ReferenceType):
+            self._live_worker_ref = live_worker_ref
+        elif live_worker_ref is None:
+            self._live_worker_ref = None
+        else:  # pragma: no cover - defensive guard
+            try:
+                self._live_worker_ref = weakref.ref(live_worker_ref)  # type: ignore[arg-type]
+            except TypeError:
+                self._live_worker_ref = None
         self._external_order_callbacks = list(order_callbacks or [])
         self._external_trade_callbacks = list(trade_callbacks or [])
         super().__init__(*args, **kwargs)
@@ -103,6 +115,19 @@ class NotifyingIbsStrategy(IbsStrategy):
                 callback(self, trade, exit_snapshot)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Trade notification callback failed")
+
+    def next(self):
+        super().next()
+        worker_ref = getattr(self, "_live_worker_ref", None)
+        if not worker_ref:
+            return
+        worker = worker_ref()
+        if worker is None:
+            return
+        try:
+            worker._on_strategy_feature_snapshot(self)
+        except Exception:  # pragma: no cover - defensive guard
+            logger.exception("Failed to process ML warmup snapshot")
 
 
 # ---------------------------------------------------------------------------
@@ -611,6 +636,9 @@ class LiveWorker:
         }
 
         self.ml_feature_tracker = MlFeatureTracker()
+        self._ml_feature_lock = threading.Lock()
+        self._pending_ml_warmup: set[str] = set()
+        self._ml_features_seen: dict[str, set[str]] = {}
 
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook:
@@ -757,6 +785,7 @@ class LiveWorker:
                 NotifyingIbsStrategy,
                 order_callbacks=order_callbacks,
                 trade_callbacks=trade_callbacks,
+                live_worker_ref=weakref.ref(self),
                 **strategy_kwargs,
             )
 
@@ -769,6 +798,17 @@ class LiveWorker:
                 self.cerebro.broker.setcommission(**commission_args)
             except Exception:  # pragma: no cover - defensive guard
                 logger.exception("Failed to apply commission for %s", symbol)
+
+    def _mark_warmup_features_pending(self, symbol: str) -> None:
+        tracker = getattr(self, "ml_feature_tracker", None)
+        if tracker is None:
+            return
+        canonical = str(symbol or "").strip().upper()
+        if not canonical:
+            return
+        with self._ml_feature_lock:
+            self._pending_ml_warmup.add(canonical)
+            self._ml_features_seen.pop(canonical, None)
 
     def _run_historical_warmup(self) -> None:
         if not (self.config.load_historical_warmup and self.symbols):
@@ -867,6 +907,8 @@ class LiveWorker:
         logger.info(
             "Buffered %d historical bars for %s warmup", total_appended, symbol
         )
+        if total_appended:
+            self._mark_warmup_features_pending(symbol)
 
     def _wait_for_warmup_capacity(
         self,
@@ -1089,6 +1131,73 @@ class LiveWorker:
         tracker = getattr(self, "ml_feature_tracker", None)
         if tracker is not None:
             tracker.refresh_all(self.symbols)
+
+    def _on_strategy_feature_snapshot(self, strategy: NotifyingIbsStrategy) -> None:
+        tracker = getattr(self, "ml_feature_tracker", None)
+        if tracker is None:
+            return
+
+        symbol = getattr(getattr(strategy, "p", None), "symbol", None)
+        if not isinstance(symbol, str):
+            return
+        canonical = symbol.strip().upper()
+        if not canonical:
+            return
+
+        with self._ml_feature_lock:
+            if canonical not in self._pending_ml_warmup:
+                return
+            seen = self._ml_features_seen.setdefault(canonical, set())
+
+        features = getattr(getattr(strategy, "p", None), "ml_features", None)
+        if not features:
+            with self._ml_feature_lock:
+                self._pending_ml_warmup.discard(canonical)
+                self._ml_features_seen.pop(canonical, None)
+            return
+
+        collector = getattr(strategy, "ml_feature_collector", None)
+        if collector is None:
+            return
+
+        try:
+            snapshot = collector.snapshot  # type: ignore[attr-defined]
+        except Exception:  # pragma: no cover - defensive guard
+            logger.debug("Failed to obtain ML snapshot for %s", canonical, exc_info=True)
+            return
+
+        if not isinstance(snapshot, Mapping):
+            try:
+                snapshot = dict(snapshot)
+            except Exception:  # pragma: no cover - defensive guard
+                logger.debug("Snapshot for %s is not a mapping", canonical, exc_info=True)
+                return
+
+        updated = False
+        required: list[str] = []
+        for feature in features:
+            key = str(feature or "").strip()
+            if not key:
+                continue
+            required.append(key)
+            if key in seen:
+                continue
+            value = snapshot.get(key)
+            if value is None:
+                continue
+            seen.add(key)
+            updated = True
+
+        if updated:
+            tracker.refresh(canonical)
+
+        if not required:
+            return
+
+        with self._ml_feature_lock:
+            if all(key in seen for key in required):
+                self._pending_ml_warmup.discard(canonical)
+                self._ml_features_seen.pop(canonical, None)
 
     def validate_policy_killswitch(self) -> bool:
         if getattr(self.config, "killswitch", False):
