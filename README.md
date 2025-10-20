@@ -339,6 +339,19 @@ This launches the Databento subscribers, hydrates ML bundles, and begins routing
 orders to TradersPost. The worker handles `SIGINT`/`SIGTERM` for graceful
 shutdown.
 
+To review ML feature readiness without starting the trading loop, inspect the
+heartbeat file (or the live worker directly) using the bundled helper:
+
+```bash
+export PINE_RUNTIME_CONFIG=/path/to/config.yml
+python scripts/inspect_ml_features.py --show-features
+```
+
+By default the script prefers the heartbeat file configured in the runtime
+config and falls back to instantiating `LiveWorker` if the heartbeat is
+unavailable. Use `--source heartbeat` or `--source worker` to force a specific
+data source.
+
 ### Production via systemd
 
 On the production host the workflow is:
