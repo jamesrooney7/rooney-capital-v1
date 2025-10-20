@@ -214,6 +214,7 @@ ML_FEATURE_EVAL_OVERRIDES: dict[str, str] = {
     "pair_ibs_pct": "pair_ibs",
     "pair_z_pct": "pair_z",
     "atrz_pct": "atrz",
+    "ibsxatrz": "ibs",
     "volz_pct": "volz",
     "datrz_pct": "datrz",
     "dvolz_pct": "dvolz",
@@ -226,6 +227,10 @@ ML_FEATURE_EVAL_OVERRIDES: dict[str, str] = {
     "rsi_len2_pct": "rsi_len2",
     "prev_bar_pct_pct": "prev_bar_pct",
     "value_pct": "value",
+}
+
+ML_FEATURE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
+    "ibsxatrz": ("enableATRZ",),
 }
 
 
@@ -2799,6 +2804,7 @@ class IbsStrategy(bt.Strategy):
             alias = FRIENDLY_FILTER_NAMES.get(column_key)
             if alias:
                 values[alias] = value
+            self._publish_ml_feature(column_key, value)
             feature_aliases = FEATURE_KEY_ALIASES.get(column_key)
             if feature_aliases:
                 for alias_key in dict.fromkeys(feature_aliases):
@@ -4035,6 +4041,12 @@ class IbsStrategy(bt.Strategy):
                     if alias_key not in candidates:
                         queue.append(alias_key)
 
+            dependency_values = ML_FEATURE_DEPENDENCIES.get(current)
+            if dependency_values:
+                for dep_key in dependency_values:
+                    if dep_key not in candidates:
+                        queue.append(dep_key)
+
             override = ML_FEATURE_EVAL_OVERRIDES.get(current)
             if override and override not in candidates:
                 queue.append(override)
@@ -4129,6 +4141,10 @@ class IbsStrategy(bt.Strategy):
             if eval_key is None:
                 eval_key = base_key
             resolved.add(eval_key)
+
+            extras = ML_FEATURE_DEPENDENCIES.get(base_key)
+            if extras:
+                resolved.update(extras)
         return resolved
 
     def _ml_default_for_feature(self, key: str) -> float:

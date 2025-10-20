@@ -280,6 +280,23 @@ def test_ml_features_request_cross_zscore_populates_snapshot():
     assert normalized["tlt_daily_z_pipeline"] == pytest.approx(1.5)
 
 
+def test_derive_ml_feature_keys_adds_enable_atrz_for_ibsxatrz():
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy.ml_features = ("ibsxatrz",)
+    strategy.filter_keys = set()
+    strategy.filter_columns = []
+    strategy.filter_column_keys = set()
+    strategy.filter_columns_by_param = {}
+    strategy.column_to_param = {}
+
+    derived = strategy._derive_ml_feature_param_keys()
+
+    assert "enableATRZ" in derived
+    assert "ibs" in derived
+
+
 def test_collect_filter_values_matches_model_bundle(monkeypatch):
     symbol = "6A"
 
@@ -945,6 +962,85 @@ def test_collect_filter_values_updates_ml_collector(monkeypatch):
     for key, value in collector.items():
         if value is not None:
             assert not isinstance(value, float) or not math.isnan(value)
+
+
+def test_collect_filter_values_populates_ibsxatrz_for_ml_features(monkeypatch):
+    class DummyLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.value
+
+    def fake_line_val(line, ago=0):
+        if line is None:
+            return None
+        return getattr(line, "value", line)
+
+    def fake_timeframed_line_val(
+        line, *, data=None, timeframe=None, daily_ago=-1, intraday_ago=0
+    ):
+        return fake_line_val(line)
+
+    monkeypatch.setattr(ibs_module, "line_val", fake_line_val)
+    monkeypatch.setattr(ibs_module, "timeframed_line_val", fake_timeframed_line_val)
+
+    class EchoPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return _args[1] if len(_args) > 1 else None
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    dt_num = bt.date2num(datetime(2024, 1, 2, 9, 0))
+
+    strategy.percentile_tracker = EchoPercentileTracker()
+    strategy.hourly = SimpleNamespace(
+        datetime=DummyLine(dt_num),
+        close=DummyLine(105.0),
+        high=DummyLine(110.0),
+        low=DummyLine(100.0),
+    )
+    strategy.prev_bar_pct_data = strategy.hourly
+    strategy.daily = SimpleNamespace(datetime=DummyLine(dt_num), close=DummyLine(100.0))
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_median = None
+    strategy.vix_data = None
+    strategy.dom_threshold = None
+
+    strategy.atr_z = DummyLine(0.5)
+    strategy.atr_z_data = SimpleNamespace(datetime=DummyLine(dt_num))
+    strategy.ibs = MethodType(lambda self: 0.55, strategy)
+
+    strategy.prev_day_pct = MethodType(lambda self: 0.0, strategy)
+    strategy.prev_bar_pct = MethodType(lambda self: 0.0, strategy)
+
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+    strategy.filter_columns = []
+    strategy.filter_keys = set()
+    strategy.filter_column_keys = set()
+    strategy.filter_columns_by_param = {}
+    strategy.column_to_param = {}
+
+    strategy.p = SimpleNamespace(prev_bar_pct_tf="Hour", atrTF="Hour")
+
+    strategy.ml_features = ("ibsxatrz",)
+    strategy.ml_feature_param_keys = strategy._derive_ml_feature_param_keys()
+
+    strategy.collect_filter_values()
+
+    collector = strategy.ml_feature_collector
+    expected = 0.55 * 0.5
+    assert collector["ibsxatrz"] == pytest.approx(expected)
 
 
 def _build_strategy_for_logging(features, snapshot):
