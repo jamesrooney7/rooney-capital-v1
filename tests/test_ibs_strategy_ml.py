@@ -17,7 +17,7 @@ if str(SRC) not in sys.path:
 
 from models import loader as loader_module  # noqa: E402
 from models.loader import load_model_bundle  # noqa: E402
-from strategy.ibs_strategy import IbsStrategy  # noqa: E402
+from strategy.ibs_strategy import IbsStrategy, _metadata_feature_key  # noqa: E402
 from strategy.filter_column import FilterColumn  # noqa: E402
 from strategy.feature_utils import normalize_column_name  # noqa: E402
 
@@ -134,6 +134,10 @@ def test_collect_filter_values_emits_metadata_keys():
             "data": None,
             "line": DummyLine(value),
             "denom": DummyLine(denom),
+            "feature_key": _metadata_feature_key(symbol, timeframe, "z_score"),
+            "pipeline_feature_key": _metadata_feature_key(
+                symbol, timeframe, "z_pipeline"
+            ),
         }
 
     cross_specs = {
@@ -159,6 +163,10 @@ def test_collect_filter_values_emits_metadata_keys():
             "lookback": 1,
             "last_dt": None,
             "last_value": None,
+            "feature_key": _metadata_feature_key(symbol, timeframe, "return"),
+            "pipeline_feature_key": _metadata_feature_key(
+                symbol, timeframe, "return_pipeline"
+            ),
         }
 
     return_specs = {
@@ -472,3 +480,49 @@ def test_collect_filter_values_populates_alias_features():
     assert normalized["rsixvolz"] == pytest.approx(44.0)
     assert normalized["price_usd"] == pytest.approx(105.0)
     assert normalized["price_z_score_daily"] == pytest.approx(0.2)
+
+
+def test_cross_return_updates_ml_feature_collector():
+    class DummyLine:
+        def __init__(self, current):
+            self.current = current
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.current
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy.ml_feature_collector = {}
+
+    initial_dt = bt.date2num(datetime(2024, 1, 2, 9, 0))
+    data = SimpleNamespace(datetime=DummyLine(initial_dt))
+
+    meta = {
+        "symbol": "CL",
+        "timeframe": "Hour",
+        "data": data,
+        "line": DummyLine(0.42),
+        "lookback": 1,
+        "last_dt": None,
+        "last_value": None,
+        "feature_key": "cl_hourly_return",
+        "pipeline_feature_key": "cl_hourly_return_pipeline",
+    }
+
+    value = strategy._calc_return_value(meta)
+    assert value == pytest.approx(0.42)
+    assert strategy.ml_feature_collector["cl_hourly_return"] == pytest.approx(0.42)
+    assert strategy.ml_feature_collector["cl_hourly_return_pipeline"] == pytest.approx(0.42)
+
+    # Update the underlying line to simulate a new bar
+    meta["line"].current = 0.58
+    data.datetime.current = bt.date2num(datetime(2024, 1, 2, 10, 0))
+
+    new_value = strategy._calc_return_value(meta)
+    assert new_value == pytest.approx(0.58)
+    assert strategy.ml_feature_collector["cl_hourly_return"] == pytest.approx(0.58)
+    assert strategy.ml_feature_collector["cl_hourly_return_pipeline"] == pytest.approx(0.58)
