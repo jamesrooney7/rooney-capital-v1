@@ -2,6 +2,7 @@ import json
 import logging
 import sys
 import math
+import numpy as np
 import warnings
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -312,6 +313,83 @@ def test_derive_ml_feature_keys_adds_enable_volz_for_ibsxvolz():
 
     assert "enableVolZ" in derived
     assert "ibs" in derived
+
+
+def test_collect_filter_values_exposes_ibsx_combos_from_full_strategy():
+    hourly_index = pd.date_range("2024-01-01", periods=200, freq="h")
+    hourly_base = 100 + np.linspace(0, 5, len(hourly_index))
+    hourly_df = pd.DataFrame(
+        {
+            "open": hourly_base,
+            "high": hourly_base + 0.5,
+            "low": hourly_base - 0.5,
+            "close": hourly_base + 0.25,
+            "volume": 1_000 + np.arange(len(hourly_index)) * 10,
+        },
+        index=hourly_index,
+    )
+
+    daily_index = pd.date_range("2023-12-01", periods=60, freq="D")
+    daily_base = 110 + np.linspace(0, 3, len(daily_index))
+    daily_df = pd.DataFrame(
+        {
+            "open": daily_base,
+            "high": daily_base + 1.0,
+            "low": daily_base - 1.0,
+            "close": daily_base + 0.5,
+            "volume": 2_000 + np.arange(len(daily_index)) * 5,
+        },
+        index=daily_index,
+    )
+
+    tlt_index = pd.date_range("2023-12-01", periods=60, freq="D")
+    tlt_base = 90 + np.linspace(0, 2, len(tlt_index))
+    tlt_df = pd.DataFrame(
+        {
+            "open": tlt_base,
+            "high": tlt_base + 0.75,
+            "low": tlt_base - 0.75,
+            "close": tlt_base + 0.25,
+            "volume": 1_500 + np.arange(len(tlt_index)) * 3,
+        },
+        index=tlt_index,
+    )
+
+    cerebro = bt.Cerebro(stdstats=False)
+    cerebro.adddata(
+        bt.feeds.PandasData(
+            dataname=hourly_df,
+            timeframe=bt.TimeFrame.Minutes,
+            compression=60,
+        ),
+        name="ES_hour",
+    )
+    cerebro.adddata(bt.feeds.PandasData(dataname=daily_df), name="ES_day")
+    cerebro.adddata(bt.feeds.PandasData(dataname=tlt_df), name="TLT_day")
+
+    cerebro.addstrategy(
+        IbsStrategy,
+        symbol="ES",
+        ml_features=("ibsxatrz", "ibsxvolz"),
+        atrLen=3,
+        atrWindow=5,
+        volLen=3,
+        volWindow=5,
+    )
+
+    strategies = cerebro.run(maxcpus=1, runonce=False)
+    strategy = strategies[0]
+
+    snapshot = strategy.collect_filter_values()
+    normalized = {
+        normalize_column_name(key): value for key, value in snapshot.items()
+    }
+
+    ibsxatrz = normalized.get("ibsxatrz")
+    ibsxvolz = normalized.get("ibsxvolz")
+
+    assert ibsxatrz is not None and not math.isnan(ibsxatrz)
+    assert ibsxvolz is not None and not math.isnan(ibsxvolz)
 
 
 def test_collect_filter_values_matches_model_bundle(monkeypatch):
