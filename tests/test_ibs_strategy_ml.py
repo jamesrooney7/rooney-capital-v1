@@ -399,6 +399,192 @@ def test_cross_zscore_recovers_after_missing_feed(monkeypatch):
     assert published[pipeline_key][-1] == pytest.approx(2.34)
 
 
+def test_collect_filter_values_retries_after_late_cross_resample(caplog):
+    class DummyLine:
+        def __init__(self, values, data=None):
+            self.values = list(values)
+            self.data = data
+
+        def __len__(self):
+            return len(self.values)
+
+        def __getitem__(self, idx):
+            if not self.values:
+                raise IndexError("no data")
+            if idx >= 0:
+                pos = len(self.values) - 1 - idx
+            else:
+                pos = len(self.values) + idx
+            if pos < 0 or pos >= len(self.values):
+                raise IndexError(idx)
+            return self.values[pos]
+
+        def append(self, value):
+            self.values.append(value)
+
+    class DummyPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return None
+
+    class DummyFeed:
+        def __init__(self, close_values, dt_values):
+            self._timeframe = bt.TimeFrame.Minutes
+            self.close = DummyLine(close_values, data=self)
+            self.datetime = DummyLine(dt_values, data=self)
+            self._name = "6C_hour"
+
+    caplog.set_level(logging.INFO)
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = DummyPercentileTracker()
+    strategy.cross_zscore_cache = {}
+    strategy.cross_data_cache = {}
+    strategy.cross_data_missing = set()
+    strategy.available_data_names = set()
+    strategy.return_meta = {}
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+    strategy._periods = []
+    strategy.max_period = 0
+    strategy.p = SimpleNamespace()
+
+    published: dict[str, list[float | None]] = {}
+
+    def fake_publish(self, key, value, _propagating=False):
+        if isinstance(key, str):
+            published.setdefault(key, []).append(value)
+
+    strategy._publish_ml_feature = MethodType(fake_publish, strategy)
+    strategy._is_feature_requested = MethodType(lambda self, _key: True, strategy)
+
+    added_periods: list[int] = []
+
+    def fake_addminperiod(self, period):
+        added_periods.append(period)
+
+    strategy.addminperiod = MethodType(fake_addminperiod, strategy)
+
+    dt_values = [
+        bt.date2num(datetime(2024, 1, 2, 8, 0)),
+        bt.date2num(datetime(2024, 1, 2, 9, 0)),
+    ]
+    feed = DummyFeed([1.0, 1.1], dt_values)
+
+    strategy.hourly = SimpleNamespace(
+        datetime=DummyLine(dt_values, data=None),
+        close=DummyLine([100.0, 101.0], data=None),
+    )
+    strategy.daily = SimpleNamespace(close=DummyLine([100.5, 100.75], data=None))
+    strategy.signal_data = SimpleNamespace(close=DummyLine([100.25], data=None))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_data = None
+    strategy.vix_median = None
+    strategy.dom_threshold = None
+    strategy.datr_pct_pct = 55.0
+    strategy.hatr_pct_pct = 45.0
+
+    symbol = "6C"
+    timeframe = "Hour"
+    feed_suffix = "hour"
+    enable_param = "enable6CZScoreHour"
+    feature_key = _metadata_feature_key(symbol, timeframe, "z_score")
+    pipeline_key = _metadata_feature_key(symbol, timeframe, "z_pipeline")
+    length = 3
+    window = 4
+
+    filter_column = FilterColumn(enable_param, "", "", enable_param)
+    strategy.filter_columns = [filter_column]
+    strategy.filter_keys = {enable_param}
+    strategy.filter_column_keys = {filter_column.column_key}
+    strategy.filter_columns_by_param = {enable_param: [filter_column]}
+    strategy.column_to_param = {filter_column.column_key: enable_param}
+    strategy.ml_feature_param_keys = {enable_param}
+
+    meta: dict[str, object] = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "feed_suffix": feed_suffix,
+        "feature_key": feature_key,
+        "pipeline_feature_key": pipeline_key,
+        "enable_param": enable_param,
+        "len": length,
+        "window": window,
+        "line": None,
+        "data": None,
+        "denom": None,
+        "mean": None,
+        "std": None,
+    }
+    strategy.cross_zscore_meta = {enable_param: meta}
+
+    def fake_get(self, sym, suffix, enable):
+        assert sym == symbol
+        assert suffix == feed_suffix
+        assert enable == enable_param
+        return feed
+
+    strategy._get_cross_feed = MethodType(fake_get, strategy)
+
+    store_calls: list[tuple] = []
+    original_store = IbsStrategy._store_zscore_pipeline
+
+    def tracking_store(self, meta_obj, data_feed, pipeline_obj, *args, **kwargs):
+        store_calls.append((meta_obj.copy(), data_feed, pipeline_obj))
+        return original_store(self, meta_obj, data_feed, pipeline_obj, *args, **kwargs)
+
+    strategy._store_zscore_pipeline = MethodType(tracking_store, strategy)
+
+    first_values = strategy.collect_filter_values()
+
+    assert first_values[enable_param] == 0
+    assert meta["line"] is None
+    assert store_calls == []
+    assert strategy.cross_zscore_cache == {}
+    assert any(
+        "not warm" in record.message for record in caplog.records
+    ), "Expected warm-up log message"
+
+    feed.close.append(1.2)
+    feed.close.append(1.3)
+    feed.datetime.append(bt.date2num(datetime(2024, 1, 2, 10, 0)))
+
+    pipeline_line = DummyLine([0.05, 0.15, 0.2, 0.3], data=feed)
+    mean_line = DummyLine([0.1, 0.12, 0.18, 0.22], data=feed)
+    std_line = DummyLine([0.8, 0.9, 1.0, 1.1], data=feed)
+    denom_line = DummyLine([0.8, 0.9, 1.0, 1.1], data=feed)
+
+    pipeline = {
+        "line": pipeline_line,
+        "mean": mean_line,
+        "std": std_line,
+        "denom": denom_line,
+        "len": length,
+        "window": window,
+        "data": feed,
+    }
+    strategy.cross_zscore_cache[(symbol, timeframe)] = pipeline
+
+    second_values = strategy.collect_filter_values()
+
+    assert second_values[enable_param] == pytest.approx(0.3)
+    assert second_values[feature_key] == pytest.approx(0.3)
+    assert second_values[pipeline_key] == pytest.approx(1.1)
+    assert meta["line"] is pipeline_line
+    assert meta["denom"] is denom_line
+    assert meta["data"] is feed
+    assert store_calls
+    assert store_calls[-1][1] is feed
+    assert strategy._periods[-2:] == [length, window]
+    assert strategy.max_period == window
+    assert added_periods == [window]
+    assert published[feature_key][-1] == pytest.approx(0.3)
+    assert published[pipeline_key][-1] == pytest.approx(1.1)
+
+
 def test_derive_ml_feature_keys_adds_enable_atrz_for_ibsxatrz():
     strategy = IbsStrategy.__new__(IbsStrategy)
     strategy.cross_zscore_meta = {}
