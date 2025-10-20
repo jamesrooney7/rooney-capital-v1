@@ -207,6 +207,78 @@ def test_collect_filter_values_emits_metadata_keys():
     assert expected <= set(normalized.keys())
 
 
+def test_ml_features_request_cross_zscore_populates_snapshot():
+    class DummyLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.value
+
+    class DummyPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return None
+
+    dt_num = bt.date2num(datetime(2024, 1, 2, 8, 30))
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = DummyPercentileTracker()
+    strategy.hourly = SimpleNamespace(
+        datetime=DummyLine(dt_num),
+        close=DummyLine(100.0),
+    )
+    strategy.daily = SimpleNamespace(close=DummyLine(100.0))
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_data = None
+    strategy.vix_median = DummyLine(None)
+    strategy.dom_threshold = None
+    strategy.datr_pct_pct = 55.0
+    strategy.hatr_pct_pct = 45.0
+    strategy.filter_columns = []
+    strategy.filter_keys = set()
+    strategy.filter_column_keys = set()
+    strategy.filter_columns_by_param = {}
+    strategy.column_to_param = {}
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy._cross_feature_enable_lookup = {}
+
+    meta = {
+        "symbol": "TLT",
+        "timeframe": "Day",
+        "data": None,
+        "line": DummyLine(0.75),
+        "denom": DummyLine(1.5),
+        "feature_key": _metadata_feature_key("TLT", "Day", "z_score"),
+        "pipeline_feature_key": _metadata_feature_key("TLT", "Day", "z_pipeline"),
+    }
+    strategy._register_cross_feature_meta(
+        strategy.cross_zscore_meta, "enableTLTZScoreDay", meta
+    )
+
+    strategy.ml_features = ("tlt_daily_z_score",)
+    strategy._normalized_ml_features = (
+        normalize_column_name("tlt_daily_z_score"),
+    )
+    strategy.ml_feature_param_keys = strategy._derive_ml_feature_param_keys()
+
+    assert "enableTLTZScoreDay" in strategy.ml_feature_param_keys
+
+    snapshot = strategy.collect_filter_values()
+    normalized = {normalize_column_name(key): value for key, value in snapshot.items()}
+
+    assert normalized["tlt_daily_z_score"] == pytest.approx(0.75)
+    assert normalized["tlt_daily_z_pipeline"] == pytest.approx(1.5)
+
+
 def test_collect_filter_values_matches_model_bundle(monkeypatch):
     symbol = "6A"
 
