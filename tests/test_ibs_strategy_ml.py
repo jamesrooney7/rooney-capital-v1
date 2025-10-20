@@ -1295,3 +1295,112 @@ def test_next_logs_full_missing_feature_list_in_debug(caplog):
     debug_message = debug_records[-1].message
     for feature in features[1:]:
         assert feature in debug_message
+
+
+def test_cross_zscore_recovers_after_missing_feed():
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.cross_data_cache = {}
+    strategy.cross_data_missing = set()
+    strategy.cross_zscore_cache = {}
+    strategy.available_data_names = set()
+    strategy.cross_zscore_meta = {}
+    strategy.filter_keys = set()
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+
+    strategy._publish_ml_feature = MethodType(
+        lambda self, key, numeric, _propagating=False: None, strategy
+    )
+    strategy._record_cross_zscore_snapshot = MethodType(
+        lambda self, meta, intraday_ago=0: (None, None), strategy
+    )
+
+    strategy.p = SimpleNamespace(enable6CZScoreHour=False)
+
+    feed_name = "6C_hour"
+    feed = SimpleNamespace(_name=feed_name, close=object())
+    state = {"ready": False}
+
+    def fake_getdatabyname(self, name):
+        if not state["ready"]:
+            raise KeyError(name)
+        return feed
+
+    strategy.getdatabyname = MethodType(fake_getdatabyname, strategy)
+
+    def fake_build(
+        self,
+        symbol,
+        timeframe,
+        feed_suffix,
+        length,
+        window,
+        data_feed=None,
+    ):
+        if data_feed is None:
+            enable_param = f"enable{symbol}ZScore{timeframe}"
+            data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
+        if data_feed is None:
+            return None
+        pipeline = {
+            "line": f"{symbol}_{timeframe}_line",
+            "mean": f"{symbol}_{timeframe}_mean",
+            "std": f"{symbol}_{timeframe}_std",
+            "denom": f"{symbol}_{timeframe}_denom",
+            "len": length,
+            "window": window,
+            "data": data_feed,
+        }
+        self.cross_zscore_cache[(symbol, timeframe)] = pipeline
+        return pipeline
+
+    strategy._build_cross_zscore_pipeline = MethodType(fake_build, strategy)
+
+    enable_param = "enable6CZScoreHour"
+    meta = {
+        "symbol": "6C",
+        "timeframe": "Hour",
+        "feed_suffix": "hour",
+        "len_param": "len_param",
+        "window_param": "window_param",
+        "len_aliases": ("len_param",),
+        "window_aliases": ("window_param",),
+        "feature_key": _metadata_feature_key("6C", "Hour", "z_score"),
+        "pipeline_feature_key": _metadata_feature_key("6C", "Hour", "z_pipeline"),
+        "line": None,
+        "data": None,
+        "mean": None,
+        "std": None,
+        "denom": None,
+    }
+    strategy.cross_zscore_meta[enable_param] = meta
+
+    missing = strategy._get_cross_feed("6C", "hour", enable_param)
+    assert missing is None
+    assert ("6C", "hour") not in strategy.cross_data_cache
+    assert ("6C", "hour") in strategy.cross_data_missing
+
+    state["ready"] = True
+    strategy.available_data_names.add(feed_name)
+
+    pipeline = strategy._build_cross_zscore_pipeline("6C", "Hour", "hour", 20, 252)
+    assert pipeline is not None
+
+    meta.update(
+        {
+            "line": pipeline["line"],
+            "data": pipeline["data"],
+            "mean": pipeline["mean"],
+            "std": pipeline["std"],
+            "denom": pipeline["denom"],
+            "len": 20,
+            "window": 252,
+        }
+    )
+    strategy._record_cross_zscore_snapshot(meta)
+
+    assert strategy.cross_data_cache[("6C", "hour")] is feed
+    assert ("6C", "hour") not in strategy.cross_data_missing
+    assert meta["data"] is feed
+    assert meta["line"] == "6C_Hour_line"
+    assert strategy.cross_zscore_cache[("6C", "Hour")]["data"] is feed
