@@ -14,6 +14,10 @@ if str(SRC) not in sys.path:
 from strategy.safe_div import SafeDivision
 
 
+# Importing the IBS strategy module applies the SafeDivision monkey patch.
+import strategy.ibs_strategy  # noqa: E402,F401
+
+
 class _ZeroDenominatorStrategy(bt.Strategy):
     params = dict(fallback=7.0)
 
@@ -52,3 +56,35 @@ def test_safe_division_handles_zero_denominator_without_error(runonce):
     strategy = _run_strategy(dataframe, _ZeroDenominatorStrategy, runonce=runonce)
 
     assert strategy.outputs[0] == pytest.approx(strategy.p.fallback)
+
+
+class _IndicatorDivisionStrategy(bt.Strategy):
+    def __init__(self):
+        self.outputs = []
+        self.atr = bt.indicators.ATR(self.data, period=1)
+        sma = bt.indicators.SimpleMovingAverage(self.data.close, period=1)
+        self.division = sma / self.atr
+
+    def next(self):
+        self.outputs.append((self.atr[0], self.division[0]))
+
+
+@pytest.mark.parametrize("runonce", [True, False])
+def test_monkey_patched_division_handles_zero_denominator_without_error(runonce):
+    dataframe = pd.DataFrame(
+        {
+            "open": [1.0, 1.0, 1.0],
+            "high": [1.0, 1.0, 1.0],
+            "low": [1.0, 1.0, 1.0],
+            "close": [1.0, 1.0, 1.0],
+            "volume": [1, 1, 1],
+        },
+        index=pd.date_range("2020-01-01", periods=3),
+    )
+
+    strategy = _run_strategy(dataframe, _IndicatorDivisionStrategy, runonce=runonce)
+
+    assert strategy.outputs, "expected at least one output value"
+    for atr_value, division_value in strategy.outputs:
+        assert atr_value == pytest.approx(0.0)
+        assert division_value == pytest.approx(0.0)

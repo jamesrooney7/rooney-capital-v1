@@ -15,9 +15,13 @@ except Exception:  # pragma: no cover - pandas is optional at runtime
 
 from config import COMMISSION_PER_SIDE, PAIR_MAP
 from .filter_column import FilterColumn
-from .safe_div import safe_div
+from .safe_div import monkey_patch_division, safe_div
 from .contract_specs import CONTRACT_SPECS, point_value
 from .feature_utils import normalize_column_name
+
+
+# Ensure Backtrader line division uses SafeDivision before any strategies are built.
+monkey_patch_division()
 
 
 logger = logging.getLogger(__name__)
