@@ -404,6 +404,7 @@ def test_collect_filter_values_retries_after_late_cross_resample(caplog):
         def __init__(self, values, data=None):
             self.values = list(values)
             self.data = data
+            self.last_request: tuple[int, int | None, list] | None = None
 
         def __len__(self):
             return len(self.values)
@@ -1520,6 +1521,256 @@ def test_collect_filter_values_populates_ibsxvolz_for_ml_features(monkeypatch):
     expected = 0.55 * 0.27
     assert collector["volz_pct"] == pytest.approx(0.27)
     assert collector["ibsxvolz"] == pytest.approx(expected)
+
+
+def test_collect_filter_values_emits_cross_and_combo_features_after_warmup(
+    monkeypatch,
+):
+    class DummyLine:
+        def __init__(self, values, data=None):
+            self.values = list(values)
+            self.data = data
+
+        def __len__(self):
+            return len(self.values)
+
+        def __getitem__(self, idx):
+            if not self.values:
+                raise IndexError("no data")
+            if idx >= 0:
+                pos = len(self.values) - 1 - idx
+            else:
+                pos = len(self.values) + idx
+            if pos < 0 or pos >= len(self.values):
+                raise IndexError(idx)
+            return self.values[pos]
+
+        def append(self, value):
+            self.values.append(value)
+
+    class DummyFeed:
+        def __init__(self, close_values, dt_values):
+            self.close = DummyLine(close_values, data=self)
+            self.datetime = DummyLine(dt_values, data=self)
+            self._timeframe = bt.TimeFrame.Minutes
+            self._name = "6C_hour"
+
+    def fake_line_val(line, ago=0):
+        if isinstance(line, DummyLine):
+            if not line.values:
+                line.last_request = (ago, None, list(line.values))
+                return None
+            if ago >= 0:
+                pos = len(line.values) - 1 - ago
+            else:
+                pos = len(line.values) + ago
+            if pos < 0 or pos >= len(line.values):
+                line.last_request = (ago, None, list(line.values))
+                return None
+            line.last_request = (ago, pos, list(line.values))
+            return line.values[pos]
+        if line is None:
+            return None
+        return getattr(line, "value", line)
+
+    def fake_timeframed_line_val(
+        line,
+        *,
+        data=None,
+        timeframe=None,
+        daily_ago=-1,
+        intraday_ago=0,
+    ):
+        return fake_line_val(line, ago=intraday_ago)
+
+    monkeypatch.setattr(ibs_module, "line_val", fake_line_val)
+    monkeypatch.setattr(ibs_module, "timeframed_line_val", fake_timeframed_line_val)
+
+    class EchoPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return _args[1] if len(_args) > 1 else None
+
+    dt_values = [
+        bt.date2num(datetime(2024, 1, 2, 8, 0)),
+        bt.date2num(datetime(2024, 1, 2, 9, 0)),
+        bt.date2num(datetime(2024, 1, 2, 10, 0)),
+    ]
+    feed = DummyFeed([1.0, 1.1, 1.2], dt_values[:3])
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = EchoPercentileTracker()
+    strategy.cross_zscore_cache = {}
+    strategy.cross_data_cache = {}
+    strategy.cross_data_missing = set()
+    strategy.available_data_names = set()
+    strategy.return_meta = {}
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+    strategy._periods = []
+    strategy.max_period = 0
+
+    added_periods: list[int] = []
+
+    def fake_addminperiod(self, period):
+        added_periods.append(period)
+
+    strategy.addminperiod = MethodType(fake_addminperiod, strategy)
+    strategy._is_feature_requested = MethodType(lambda self, *flags: True, strategy)
+
+    hourly_dt = DummyLine(dt_values[:3], data=None)
+    hourly_close = DummyLine([100.0, 101.0, 102.0], data=None)
+    strategy.hourly = SimpleNamespace(datetime=hourly_dt, close=hourly_close)
+    strategy.prev_bar_pct_data = strategy.hourly
+    strategy.daily = SimpleNamespace(
+        datetime=DummyLine([
+            bt.date2num(datetime(2024, 1, 1)),
+            bt.date2num(datetime(2024, 1, 2)),
+            bt.date2num(datetime(2024, 1, 3)),
+        ]),
+        close=DummyLine([98.0, 99.0, 100.0]),
+    )
+    strategy.signal_data = SimpleNamespace(close=DummyLine([float("nan")], data=None))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_median = None
+    strategy.vix_data = None
+    strategy.dom_threshold = None
+
+    strategy.atr_z = DummyLine([None])
+    strategy.atr_z_data = SimpleNamespace(datetime=DummyLine(dt_values[:3]))
+    strategy.vol_z = DummyLine([None])
+    strategy.vol_z_data = SimpleNamespace(datetime=DummyLine(dt_values[:3]))
+    strategy.ibs = MethodType(lambda self: 0.6, strategy)
+    strategy.prev_day_pct = MethodType(lambda self: 0.1, strategy)
+    strategy.prev_bar_pct = MethodType(lambda self: 0.05, strategy)
+
+    params = [
+        "enablePrevDayPct",
+        "enablePrevBarPct",
+        "enableIBSEntry",
+        "enableATRZ",
+        "enableVolZ",
+        "enable6CZScoreHour",
+    ]
+    filter_columns = [FilterColumn(param, "", "", param) for param in params]
+    strategy.filter_columns = filter_columns
+    strategy.filter_keys = {col.parameter for col in filter_columns}
+    strategy.filter_column_keys = {col.column_key for col in filter_columns}
+    strategy.filter_columns_by_param = {col.parameter: [col] for col in filter_columns}
+    strategy.column_to_param = {col.column_key: col.parameter for col in filter_columns}
+
+    strategy.p = SimpleNamespace(
+        prev_bar_pct_tf="Hour",
+        atrTF="Hour",
+        volTF="Hour",
+    )
+
+    symbol = "6C"
+    timeframe = "Hour"
+    feed_suffix = "hour"
+    enable_param = "enable6CZScoreHour"
+    feature_key = _metadata_feature_key(symbol, timeframe, "z_score")
+    pipeline_key = _metadata_feature_key(symbol, timeframe, "z_pipeline")
+    length = 3
+    window = 4
+
+    pipeline_line = DummyLine([])
+    mean_line = DummyLine([])
+    std_line = DummyLine([])
+    denom_line = DummyLine([])
+
+    state: dict[str, object | None] = {"pipeline": None}
+
+    def fake_build(
+        self,
+        sym,
+        tf,
+        suffix,
+        build_len,
+        build_window,
+        data_feed=None,
+    ):
+        assert (sym, tf, suffix) == (symbol, timeframe, feed_suffix)
+        assert data_feed is feed
+        if len(feed.close) < max(build_len, build_window):
+            return None
+        if state["pipeline"] is None:
+            pipeline_line.values[:] = [0.12, 0.18, 0.26, 0.42]
+            mean_line.values[:] = [1.05, 1.07, 1.09, 1.12]
+            std_line.values[:] = [0.8, 0.82, 0.84, 0.88]
+            denom_line.values[:] = [0.8, 0.82, 0.84, 0.88]
+            state["pipeline"] = {
+                "line": pipeline_line,
+                "mean": mean_line,
+                "std": std_line,
+                "denom": denom_line,
+                "len": build_len,
+                "window": build_window,
+                "data": feed,
+            }
+        return state["pipeline"]
+
+    strategy._get_cross_feed = MethodType(
+        lambda self, sym, suffix, enable: feed, strategy
+    )
+    strategy._build_cross_zscore_pipeline = MethodType(fake_build, strategy)
+
+    meta: dict[str, object] = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "feed_suffix": feed_suffix,
+        "feature_key": feature_key,
+        "pipeline_feature_key": pipeline_key,
+        "enable_param": enable_param,
+        "len": length,
+        "window": window,
+        "line": None,
+        "data": None,
+        "denom": None,
+        "mean": None,
+        "std": None,
+    }
+    strategy.cross_zscore_meta = {enable_param: meta}
+
+    strategy.ml_features = ("ibsxatrz", "ibsxvolz", "6c_hourly_z_score")
+    strategy.ml_feature_param_keys = strategy._derive_ml_feature_param_keys()
+
+    cold_snapshot = strategy.collect_filter_values()
+
+    # The pipeline guard should let the strategy skip emitting cross-feed values
+    # until the resampled feed finishes warming up, so the initial snapshot
+    # naturally contains the requested keys but only ``None`` placeholders.
+    assert cold_snapshot.get(feature_key) is None
+    assert cold_snapshot.get("ibsxatrz") is None
+    assert cold_snapshot.get("ibsxvolz") is None
+    assert meta["line"] is None
+    assert added_periods == []
+
+    strategy.atr_z.append(0.5)
+    strategy.vol_z.append(0.3)
+    feed.close.append(1.3)
+    next_dt = bt.date2num(datetime(2024, 1, 2, 11, 0))
+    feed.datetime.append(next_dt)
+    hourly_dt.append(next_dt)
+    hourly_close.append(103.0)
+    strategy.atr_z_data.datetime.append(next_dt)
+    strategy.vol_z_data.datetime.append(next_dt)
+    warm_snapshot = strategy.collect_filter_values()
+
+    friendly_key = ibs_module.FRIENDLY_FILTER_NAMES[enable_param]
+
+    assert warm_snapshot[enable_param] == pytest.approx(0.42)
+    assert warm_snapshot[friendly_key] == pytest.approx(0.42)
+    assert warm_snapshot[pipeline_key] == pytest.approx(0.88)
+    assert warm_snapshot["ibsxatrz"] == pytest.approx(0.6 * 0.5)
+    assert warm_snapshot["ibsxvolz"] == pytest.approx(0.6 * 0.3)
+    assert meta["line"] is pipeline_line
+    assert strategy._periods[-2:] == [length, window]
+    assert added_periods == [window]
+    assert pipeline_line.last_request == (0, len(pipeline_line.values) - 1, pipeline_line.values)
 
 
 def _build_strategy_for_logging(features, snapshot):
