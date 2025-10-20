@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from runner.databento_bridge import DatabentoLiveData, QueueFanout, QueueSignal
 from runner.live_worker import LiveWorker, PreflightConfig, RuntimeConfig
@@ -280,3 +281,120 @@ def test_warmup_marks_ml_bundle_ready_without_live_ticks():
 
     collector.record_feature("f2", 0.25)
     assert worker.ml_feature_tracker.is_ready(symbol)
+
+
+class _StubWarmupFeed:
+    def __init__(self):
+        self._warmup: list = []
+
+    def extend_warmup(self, bars):
+        items = list(bars)
+        self._warmup.extend(items)
+        return len(items)
+
+    def warmup_backlog_size(self):  # pragma: no cover - convenience
+        return len(self._warmup)
+
+
+def test_indicator_warmup_populates_ml_features_without_live_bars():
+    symbol = "ES"
+    canonical = symbol.upper()
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.symbols = (symbol,)
+    worker.config = types.SimpleNamespace(
+        historical_warmup_batch_size=10,
+        historical_warmup_queue_soft_limit=10,
+    )
+    worker._data_feeds = {symbol: _StubWarmupFeed()}
+    worker._historical_warmup_counts = {}
+    worker._historical_warmup_wait_log_interval = 0.0
+    worker.ml_feature_tracker = MlFeatureTracker()
+    worker._ml_feature_lock = threading.Lock()
+    worker._pending_ml_warmup = set()
+    worker._ml_features_seen = {}
+    worker._ml_feature_collectors = {}
+    worker._ml_feature_requirements = {}
+    worker._ml_warmup_published = {}
+
+    features = ("feat_a", "feat_b")
+    collector = worker.ml_feature_tracker.register_bundle(symbol, features)
+    worker._ml_feature_collectors[canonical] = collector
+    worker._ml_feature_requirements[canonical] = features
+
+    index = pd.date_range("2024-01-01", periods=5, freq="1min", tz="UTC")
+    payload = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "open": [100.0, 100.5, 101.0, 101.5, 102.0],
+            "high": [100.5, 101.0, 101.5, 102.0, 102.5],
+            "low": [99.5, 100.0, 100.5, 101.0, 101.5],
+            "close": [100.25, 100.75, 101.25, 101.75, 102.25],
+            "volume": [1000, 1001, 1002, 1003, 1004],
+            "feat_a": [None, 0.2, 0.3, None, 0.45],
+            "feat_b": [None, None, 1.5, 1.75, 1.9],
+        }
+    )
+
+    LiveWorker._warmup_symbol_indicators(worker, symbol, payload)
+
+    snapshot = worker.ml_feature_tracker.snapshot(symbol)
+    assert snapshot["feat_a"] == pytest.approx(0.45)
+    assert snapshot["feat_b"] == pytest.approx(1.9)
+
+    report = worker.ml_feature_tracker.readiness_report().get(symbol, {})
+    assert report.get("feature_count") == 2
+    assert worker.ml_feature_tracker.is_ready(symbol)
+
+
+def test_indicator_warmup_skips_duplicate_feature_publication(monkeypatch):
+    symbol = "ES"
+    canonical = symbol.upper()
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.config = types.SimpleNamespace(
+        historical_warmup_batch_size=10,
+        historical_warmup_queue_soft_limit=10,
+    )
+    worker._data_feeds = {symbol: _StubWarmupFeed()}
+    worker._historical_warmup_counts = {}
+    worker._historical_warmup_wait_log_interval = 0.0
+    worker.ml_feature_tracker = MlFeatureTracker()
+    worker._ml_feature_lock = threading.Lock()
+    worker._pending_ml_warmup = set()
+    worker._ml_features_seen = {}
+    worker._ml_feature_collectors = {}
+    worker._ml_feature_requirements = {}
+    worker._ml_warmup_published = {}
+
+    features = ("feat_a", "feat_b")
+    collector = worker.ml_feature_tracker.register_bundle(symbol, features)
+    worker._ml_feature_collectors[canonical] = collector
+    worker._ml_feature_requirements[canonical] = features
+
+    call_count = {"feat_a": 0, "feat_b": 0}
+    original_record = collector.record_feature
+
+    def recording_record_feature(key, value):
+        call_count[key] += 1
+        original_record(key, value)
+
+    monkeypatch.setattr(collector, "record_feature", recording_record_feature)
+
+    index = pd.date_range("2024-01-01", periods=3, freq="1min", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "open": [100.0, 100.5, 101.0],
+            "high": [100.5, 101.0, 101.5],
+            "low": [99.5, 100.0, 100.5],
+            "close": [100.25, 100.75, 101.25],
+            "volume": [1000, 1001, 1002],
+            "feat_a": [0.1, 0.2, 0.3],
+            "feat_b": [0.4, 0.5, 0.6],
+        }
+    )
+
+    worker._publish_warmup_ml_features(symbol, frame)
+    worker._publish_warmup_ml_features(symbol, frame)
+
+    assert call_count == {"feat_a": 1, "feat_b": 1}
+

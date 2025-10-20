@@ -639,6 +639,9 @@ class LiveWorker:
         self._ml_feature_lock = threading.Lock()
         self._pending_ml_warmup: set[str] = set()
         self._ml_features_seen: dict[str, set[str]] = {}
+        self._ml_feature_collectors: dict[str, MlFeatureTracker.Collector] = {}
+        self._ml_feature_requirements: dict[str, tuple[str, ...]] = {}
+        self._ml_warmup_published: dict[str, set[str]] = {}
 
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook:
@@ -769,9 +772,16 @@ class LiveWorker:
             if ml_features is not None:
                 collector = self.ml_feature_tracker.register_bundle(symbol, ml_features)
                 if ml_features:
+                    canonical_symbol = symbol.strip().upper()
+                    if canonical_symbol:
+                        self._ml_feature_collectors[canonical_symbol] = collector
+                        normalised_features = tuple(
+                            str(feature).strip() for feature in ml_features if str(feature).strip()
+                        )
+                        self._ml_feature_requirements[canonical_symbol] = normalised_features
                     strategy_kwargs["ml_feature_collector"] = collector
-            else:
-                self.ml_feature_tracker.register_bundle(symbol, ())
+                else:
+                    self.ml_feature_tracker.register_bundle(symbol, ())
 
             order_callbacks: list[Callable[[NotifyingIbsStrategy, Any], None]] = []
             trade_callbacks: list[
@@ -988,6 +998,10 @@ class LiveWorker:
             return []
 
         df = df.copy()
+        try:
+            self._publish_warmup_ml_features(symbol, df)
+        except Exception:  # pragma: no cover - defensive guard
+            logger.debug("Failed to publish warmup ML features for %s", symbol, exc_info=True)
         if "ts_event" in df.columns:
             timestamps = pd.to_datetime(df["ts_event"], unit="ns", utc=True)
         elif df.index.name == "ts_event":
@@ -1107,6 +1121,83 @@ class LiveWorker:
                 )
             )
         return bars
+
+    def _publish_warmup_ml_features(self, symbol: str, frame: pd.DataFrame) -> None:
+        tracker = getattr(self, "ml_feature_tracker", None)
+        if tracker is None:
+            return
+
+        canonical = str(symbol or "").strip().upper()
+        if not canonical:
+            return
+
+        collectors = getattr(self, "_ml_feature_collectors", {})
+        collector = collectors.get(canonical)
+        if collector is None:
+            return
+
+        requirements = getattr(self, "_ml_feature_requirements", {})
+        required = requirements.get(canonical)
+        if not required:
+            return
+
+        if frame is None or frame.empty:
+            return
+
+        warmed_map = getattr(self, "_ml_warmup_published", None)
+        if warmed_map is None:
+            warmed_map = {}
+            setattr(self, "_ml_warmup_published", warmed_map)
+        warmed = warmed_map.setdefault(canonical, set())
+
+        try:
+            snapshot = tracker.snapshot(canonical)
+        except Exception:
+            snapshot = {}
+
+        lower_column_map: dict[str, str] = {}
+        for column in frame.columns:
+            if not isinstance(column, str):
+                continue
+            key = column.strip()
+            if not key:
+                continue
+            lower_column_map.setdefault(key.lower(), column)
+
+        for feature in required:
+            key = str(feature or "").strip()
+            if not key:
+                continue
+            if key in warmed:
+                continue
+
+            existing = snapshot.get(key)
+            if existing is not None:
+                warmed.add(key)
+                continue
+
+            if key in frame.columns:
+                column_name: Optional[str] = key
+            else:
+                column_name = lower_column_map.get(key.lower())
+
+            if column_name is None:
+                continue
+
+            series = frame[column_name]
+            try:
+                numeric_series = pd.to_numeric(series, errors="coerce")
+            except Exception:
+                continue
+
+            numeric_series = numeric_series.dropna()
+            if numeric_series.empty:
+                continue
+
+            value = float(numeric_series.iloc[-1])
+            collector.record_feature(key, value)
+            warmed.add(key)
+            snapshot[key] = value
 
     def _finalize_indicator_warmup(self) -> None:
         if not self._historical_warmup_counts:
