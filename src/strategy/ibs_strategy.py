@@ -1149,7 +1149,7 @@ class IbsStrategy(bt.Strategy):
             self._normalized_ml_features = ()
 
         self._cross_feature_enable_lookup: dict[str, str] = {}
-        self.ml_feature_param_keys: set[str] = set()
+        self.ml_feature_param_keys: set[str] = self._derive_ml_feature_param_keys()
 
         threshold_param = getattr(self.p, "ml_threshold", None)
         if threshold_param is None:
