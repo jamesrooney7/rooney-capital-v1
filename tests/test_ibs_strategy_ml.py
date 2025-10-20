@@ -550,6 +550,165 @@ def test_collect_filter_values_populates_ml_features_without_columns():
     assert normalized["secondary_rsi_entry_daily"] == pytest.approx(45.0)
 
 
+@pytest.mark.parametrize("mode", ["ml", "filters"])
+def test_collect_filter_values_populates_requested_optional_features(mode):
+    class DummyLine:
+        def __init__(self, current, prev=None, prev2=None):
+            self.current = current
+            self.prev = prev if prev is not None else current
+            self.prev2 = prev2 if prev2 is not None else self.prev
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            if idx >= 0:
+                return self.current
+            if idx == -1:
+                return self.prev
+            if idx == -2:
+                return self.prev2
+            return self.prev2
+
+    class DummyData:
+        def __init__(self, timeframe, **lines):
+            self._timeframe = timeframe
+            self._lines = lines
+
+        def __len__(self):
+            return 10
+
+        def __getattr__(self, name):
+            try:
+                return self._lines[name]
+            except KeyError as exc:  # pragma: no cover - defensive
+                raise AttributeError(name) from exc
+
+    class EchoPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return _args[1]
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    dt_num = bt.date2num(datetime(2024, 1, 3, 9, 30))
+    hourly = DummyData(
+        "Hourly",
+        datetime=DummyLine(dt_num),
+        close=DummyLine(102.0),
+        high=DummyLine(104.0),
+        low=DummyLine(100.0),
+    )
+    daily = DummyData(
+        "Daily",
+        close=DummyLine(100.0, 98.0, 96.0),
+        high=DummyLine(110.0, 108.0, 106.0),
+        low=DummyLine(90.0, 88.0, 86.0),
+    )
+
+    strategy.percentile_tracker = EchoPercentileTracker()
+    strategy.hourly = hourly
+    strategy.daily = daily
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_data = None
+    strategy.vix_median = DummyLine(None)
+    strategy.dom_threshold = None
+    strategy.datr_pct_pct = 55.0
+    strategy.hatr_pct_pct = 45.0
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy.ml_feature_collector = {}
+    strategy._ml_feature_snapshot = {}
+
+    strategy.atr_z = DummyLine(1.1)
+    strategy.atr_z_data = DummyData("Hourly", close=DummyLine(0.0))
+    strategy.vol_z = DummyLine(0.9)
+    strategy.vol_z_data = DummyData("Hourly", close=DummyLine(0.0))
+    strategy.rsi = DummyLine(45.0)
+    strategy.daily_rsi = DummyLine(40.0)
+    strategy.daily_rsi_data = daily
+
+    strategy.ma_spread_fast = DummyLine(105.0)
+    strategy.ma_spread_slow = DummyLine(100.0)
+    strategy.ma_spread_atr = DummyLine(2.0)
+    strategy.ma_spread_data = DummyData("Hourly", close=DummyLine(0.0))
+
+    strategy.donch_prox_data = DummyData("Hourly", close=DummyLine(100.0))
+    strategy.donch_prox_high = DummyLine(110.0, 110.0, 110.0)
+    strategy.donch_prox_low = DummyLine(90.0, 90.0, 90.0)
+    strategy.donch_prox_atr = DummyLine(10.0)
+
+    strategy.bbw = SimpleNamespace(
+        lines=SimpleNamespace(
+            top=DummyLine(110.0),
+            bot=DummyLine(90.0),
+            mid=DummyLine(100.0),
+        )
+    )
+    strategy.bbw_data = DummyData("Hourly", close=DummyLine(100.0))
+
+    strategy.filter_columns = []
+    strategy.filter_keys = set()
+    strategy.filter_column_keys = set()
+    strategy.filter_columns_by_param = {}
+    strategy.column_to_param = {}
+
+    features = (
+        "atrz_pct",
+        "volz_pct",
+        "rsi_pct",
+        "daily_rsi_pct",
+        "ma_spread_ribbon_tightness",
+        "donchian_proximity_to_nearest_band",
+        "bollinger_bandwidth_daily",
+    )
+
+    if mode == "ml":
+        strategy.ml_features = features
+        strategy.ml_feature_param_keys = strategy._derive_ml_feature_param_keys()
+    else:
+        params = [
+            "enableATRZ",
+            "enableVolZ",
+            "enableRSIEntry",
+            "enableDailyRSI",
+            "enableMASpread",
+            "enableDonchProx",
+            "enableBBW",
+        ]
+        filter_columns = [FilterColumn(param, "", "", param) for param in params]
+        strategy.filter_columns = filter_columns
+        strategy.filter_keys = {col.parameter for col in filter_columns}
+        strategy.filter_column_keys = {col.column_key for col in filter_columns}
+        strategy.filter_columns_by_param = {col.parameter: [col] for col in filter_columns}
+        strategy.column_to_param = {col.column_key: col.parameter for col in filter_columns}
+        strategy.ml_features = ()
+        strategy.ml_feature_param_keys = set()
+
+    strategy.p = SimpleNamespace(
+        atrTF="Hourly",
+        volTF="Hourly",
+        maSpreadTF="Hourly",
+        maSpreadUseATR=True,
+        donchProxTF="Hourly",
+        bbwTF="Hourly",
+        dailyRSITF="Daily",
+    )
+
+    snapshot = strategy.collect_filter_values()
+    normalized = {normalize_column_name(key): value for key, value in snapshot.items()}
+
+    assert normalized["atrz"] == pytest.approx(1.1)
+    assert normalized["volz"] == pytest.approx(0.9)
+    assert normalized["rsi"] == pytest.approx(45.0)
+    assert normalized["daily_rsi"] == pytest.approx(40.0)
+    assert normalized["ma_spread_ribbon_tightness"] == pytest.approx(2.5)
+    assert normalized["donchian_proximity_to_nearest_band"] == pytest.approx(1.0)
+    assert normalized["bollinger_bandwidth_daily"] == pytest.approx(0.2)
+
 def test_cross_return_updates_ml_feature_collector():
     class DummyLine:
         def __init__(self, current):
