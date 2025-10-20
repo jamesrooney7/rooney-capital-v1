@@ -5,6 +5,7 @@ import types
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from runner.live_worker import LiveWorker, RuntimeConfig
 from runner.ml_feature_tracker import MlFeatureTracker
@@ -114,6 +115,11 @@ def test_warmup_feature_snapshot_marks_tracker_ready():
     # First snapshot leaves one feature missing; pending set remains.
     worker._on_strategy_feature_snapshot(strategy)
     assert symbol in worker._pending_ml_warmup
+    first_report = tracker.readiness_report().get(symbol, {})
+    assert first_report.get("missing_features") == ["feat_b"]
+    features_snapshot = first_report.get("features") or {}
+    assert features_snapshot.get("feat_a") == pytest.approx(1.0)
+    assert features_snapshot.get("feat_b") is None
 
     tracker.update_feature(symbol, "feat_b", -0.25)
     strategy.ml_feature_collector.payload["feat_b"] = -0.25
@@ -123,4 +129,7 @@ def test_warmup_feature_snapshot_marks_tracker_ready():
     report = tracker.readiness_report().get(symbol, {})
     assert report.get("feature_count") == 2
     assert report.get("ready") is True
+    assert report.get("missing_features") == []
+    final_features_snapshot = report.get("features") or {}
+    assert final_features_snapshot.get("feat_b") == pytest.approx(-0.25)
     assert symbol not in worker._pending_ml_warmup

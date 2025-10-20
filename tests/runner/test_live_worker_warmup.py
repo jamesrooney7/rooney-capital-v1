@@ -343,6 +343,10 @@ def test_indicator_warmup_populates_ml_features_without_live_bars():
 
     report = worker.ml_feature_tracker.readiness_report().get(symbol, {})
     assert report.get("feature_count") == 2
+    assert report.get("missing_features") == []
+    features_snapshot = report.get("features") or {}
+    assert features_snapshot.get("feat_a") == pytest.approx(0.45)
+    assert features_snapshot.get("feat_b") == pytest.approx(1.9)
     assert worker.ml_feature_tracker.is_ready(symbol)
 
 
