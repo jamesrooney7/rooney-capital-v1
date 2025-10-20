@@ -484,6 +484,72 @@ def test_collect_filter_values_populates_alias_features():
     assert normalized["price_z_score_daily"] == pytest.approx(0.2)
 
 
+def test_collect_filter_values_populates_ml_features_without_columns():
+    class DummyLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.value
+
+    class DummyPercentileTracker:
+        def update(self, *args, **kwargs):
+            return 0.5
+
+    dt_num = bt.date2num(datetime(2024, 1, 2, 8, 15))
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = DummyPercentileTracker()
+    strategy.hourly = SimpleNamespace(
+        datetime=DummyLine(dt_num),
+        close=DummyLine(105.0),
+        high=DummyLine(106.0),
+        low=DummyLine(104.0),
+    )
+    strategy.daily = SimpleNamespace(
+        close=DummyLine(100.0),
+        high=DummyLine(110.0),
+        low=DummyLine(95.0),
+    )
+    strategy.signal_data = SimpleNamespace(close=DummyLine(105.0))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_data = None
+    strategy.vix_median = DummyLine(None)
+    strategy.dom_threshold = None
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy.filter_columns = []
+    strategy.filter_keys = set()
+    strategy.filter_column_keys = set()
+    strategy.filter_columns_by_param = {}
+    strategy.column_to_param = {}
+    strategy.ml_feature_collector = {}
+    strategy.ml_features = (
+        "open_close",
+        "prev_day_pctxvalue",
+        "secondary_rsi_entry_daily",
+    )
+    strategy.prev_day_pct = MethodType(lambda self: 10.0, strategy)
+    strategy.daily_rsi = DummyLine(45.0)
+    strategy.daily_rsi_data = SimpleNamespace()
+    strategy.p = SimpleNamespace(dailyRSITF="Daily")
+    strategy.ml_feature_param_keys = strategy._derive_ml_feature_param_keys()
+
+    snapshot = strategy.collect_filter_values()
+    normalized = {normalize_column_name(key): value for key, value in snapshot.items()}
+
+    assert normalized["open_close"] == 1
+    assert normalized["prev_day_pctxvalue"] == pytest.approx(10.0)
+    assert normalized["secondary_rsi_entry_daily"] == pytest.approx(45.0)
+
+
 def test_cross_return_updates_ml_feature_collector():
     class DummyLine:
         def __init__(self, current):
