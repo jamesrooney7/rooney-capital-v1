@@ -983,6 +983,7 @@ class IbsStrategy(bt.Strategy):
 
         self._periods: list[int] = []
         self.cross_data_cache: dict[tuple[str, str], bt.LineSeries] = {}
+        self.cross_data_missing: set[tuple[str, str]] = set()
         self.cross_zscore_cache: dict[tuple[str, str], dict[str, object]] = {}
         self.return_indicator_cache: dict[tuple[str, str], dict[str, object]] = {}
         self._ml_feature_snapshot: dict[str, float | None] = {}
@@ -2465,8 +2466,17 @@ class IbsStrategy(bt.Strategy):
         """Return and cache the requested cross-instrument data feed."""
 
         key = (symbol, feed_suffix)
+        missing_cache = getattr(self, "cross_data_missing", None)
+        if missing_cache is None:
+            missing_cache = set()
+            self.cross_data_missing = missing_cache
+        cached = self.cross_data_cache.get(key)
+        if cached is not None:
+            return cached
         if key in self.cross_data_cache:
-            return self.cross_data_cache[key]
+            # Drop stale ``None`` entries created by older strategy versions.
+            self.cross_data_cache.pop(key, None)
+        previously_missing = key in missing_cache
         feed_name = f"{symbol}_{feed_suffix}"
         alt_symbol = CROSS_FEED_ALIASES.get(symbol)
         names_to_try = [feed_name]
@@ -2490,23 +2500,26 @@ class IbsStrategy(bt.Strategy):
                 symbol, feed_suffix
             )
             if optional_vix:
-                logging.info(
-                    "Optional VIX feed %s is unavailable; using neutral defaults",
-                    feed_name,
-                )
-                self.cross_data_cache[key] = None
+                if not previously_missing:
+                    logging.info(
+                        "Optional VIX feed %s is unavailable; using neutral defaults",
+                        feed_name,
+                    )
+                missing_cache.add(key)
                 return None
             message = f"Missing data feed {feed_name} for {symbol} {feed_suffix} data"
             if alt_symbol:
                 message += f" (also tried {alt_symbol}_{feed_suffix})"
             if getattr(self.p, enable_param, False):
                 raise ValueError(message)
-            logging.warning(message)
-            self.cross_data_cache[key] = None
+            if not previously_missing:
+                logging.warning(message)
+            missing_cache.add(key)
             return None
         if actual_name and hasattr(self, "available_data_names"):
             self.available_data_names.add(actual_name)
         self.cross_data_cache[key] = data_feed
+        missing_cache.discard(key)
         return data_feed
 
     def _build_cross_zscore_pipeline(
