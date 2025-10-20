@@ -5279,9 +5279,33 @@ class IbsStrategy(bt.Strategy):
 
             # If many features are missing, log a warning
             if total_features > 0 and calculated_features < total_features * 0.8:
+                missing_features = [
+                    feature
+                    for feature in features
+                    if filter_snapshot.get(feature) is None
+                ]
+                max_display = 8
+                displayed_features = missing_features[:max_display]
+                if displayed_features:
+                    missing_display = ", ".join(displayed_features)
+                else:
+                    missing_display = "none"
+                if len(missing_features) > max_display:
+                    remaining = len(missing_features) - max_display
+                    missing_display = (
+                        f"{missing_display}, ... (+{remaining} more)"
+                    )
+                    logger.debug(
+                        "🤖 %s ML MISSING FEATURES | %d total | %s",
+                        self.p.symbol,
+                        len(missing_features),
+                        ", ".join(missing_features),
+                    )
+
                 logger.warning(
                     f"⚠️ {self.p.symbol} ML INCOMPLETE | Only {calculated_features}/{total_features} "
-                    f"features calculated ({100 * calculated_features / total_features:.1f}%)"
+                    f"features calculated ({100 * calculated_features / total_features:.1f}%) | "
+                    f"Missing: {missing_display}"
                 )
 
         except Exception as e:
