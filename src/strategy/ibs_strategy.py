@@ -987,6 +987,7 @@ class IbsStrategy(bt.Strategy):
         self.cross_zscore_cache: dict[tuple[str, str], dict[str, object]] = {}
         self.return_indicator_cache: dict[tuple[str, str], dict[str, object]] = {}
         self._ml_feature_snapshot: dict[str, float | None] = {}
+        self._ml_warmup_pending: dict[tuple[str, str, str], dict[str, object]] = {}
         self.ml_feature_collector: dict[str, float | None] = self._ml_feature_snapshot
 
         collector_param = getattr(self.p, "ml_feature_collector", None)
@@ -2467,6 +2468,50 @@ class IbsStrategy(bt.Strategy):
             return None
         return numeric
 
+    @staticmethod
+    def _cross_meta_identifier(meta: dict[str, object]) -> tuple[str, str, str]:
+        symbol = str(meta.get("symbol") or "")
+        timeframe = str(meta.get("timeframe") or "")
+        feed_suffix = str(meta.get("feed_suffix") or "")
+        return (symbol, timeframe, feed_suffix)
+
+    def _register_ml_warmup_pending(
+        self,
+        meta: dict[str, object],
+        *,
+        feed_len: int | None,
+        max_period: int,
+    ) -> None:
+        identifier = self._cross_meta_identifier(meta)
+        features: list[str] = []
+        for key_name in ("feature_key", "pipeline_feature_key"):
+            feature_key = meta.get(key_name)
+            if not isinstance(feature_key, str) or not feature_key:
+                continue
+            normalized = normalize_column_name(feature_key)
+            features.append(normalized)
+            self._publish_ml_feature(feature_key, None)
+
+        if features:
+            existing = self._ml_warmup_pending.get(identifier)
+            payload = {
+                "features": tuple(features),
+                "feed_len": feed_len,
+                "max_period": max_period,
+            }
+            if existing is None:
+                self._ml_warmup_pending[identifier] = payload
+            else:
+                existing.update(payload)
+
+        meta["warmup_pending"] = True
+
+    def _clear_ml_warmup_pending(self, meta: dict[str, object]) -> None:
+        identifier = self._cross_meta_identifier(meta)
+        if identifier in self._ml_warmup_pending:
+            self._ml_warmup_pending.pop(identifier, None)
+        meta.pop("warmup_pending", None)
+
     def _record_cross_zscore_snapshot(
         self,
         meta: dict[str, object],
@@ -2480,6 +2525,45 @@ class IbsStrategy(bt.Strategy):
 
         if meta.get("line") is None:
             self._ensure_cross_zscore_pipeline(meta)
+
+        length = meta.get("len")
+        window = meta.get("window")
+        try:
+            length_period = int(length) if length is not None else 0
+        except Exception:
+            length_period = 0
+        try:
+            window_period = int(window) if window is not None else 0
+        except Exception:
+            window_period = 0
+        max_period = max(length_period, window_period)
+
+        data_feed = meta.get("data")
+        feed_len: int | None = None
+        if max_period > 0 and data_feed is not None:
+            candidate = getattr(data_feed, "close", data_feed)
+            try:
+                feed_len = len(candidate)
+            except Exception:
+                try:
+                    feed_len = len(data_feed)
+                except Exception:
+                    feed_len = None
+            if feed_len is not None and feed_len < max_period:
+                if not meta.get("warmup_pending"):
+                    logger.info(
+                        "Cross Z-score feed %s/%s still warming (%s < %s)",
+                        meta.get("symbol"),
+                        meta.get("timeframe"),
+                        feed_len,
+                        max_period,
+                    )
+                self._register_ml_warmup_pending(
+                    meta,
+                    feed_len=feed_len,
+                    max_period=max_period,
+                )
+                return None, None
 
         line = meta.get("line")
         if line is not None:
@@ -2517,6 +2601,9 @@ class IbsStrategy(bt.Strategy):
             self._publish_ml_feature(pipeline_key, pipeline_val)
         else:
             pipeline_val = numeric
+
+        if numeric is not None or pipeline_val is not None:
+            self._clear_ml_warmup_pending(meta)
 
         return numeric, pipeline_val
 
@@ -4303,6 +4390,22 @@ class IbsStrategy(bt.Strategy):
     def _evaluate_ml_score(self) -> float | None:
         if self.ml_model is None or not self.ml_features:
             return None
+
+        pending = getattr(self, "_ml_warmup_pending", None)
+        if pending:
+            normalized_features = getattr(self, "_normalized_ml_features", ())
+            if normalized_features:
+                warming: set[str] = set()
+                for payload in pending.values():
+                    features = payload.get("features") if isinstance(payload, dict) else None
+                    if features:
+                        warming.update(features)
+                if warming.intersection(normalized_features):
+                    logger.debug(
+                        "Skipping ML scoring: waiting for %s warmup",
+                        ", ".join(sorted(warming.intersection(normalized_features))),
+                    )
+                    return None
 
         snapshot = self.collect_filter_values(intraday_ago=0)
         normalized_snapshot = {
