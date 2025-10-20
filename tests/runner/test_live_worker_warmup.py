@@ -8,6 +8,7 @@ import pandas as pd
 
 from runner.databento_bridge import DatabentoLiveData, QueueFanout, QueueSignal
 from runner.live_worker import LiveWorker, PreflightConfig, RuntimeConfig
+from runner.ml_feature_tracker import MlFeatureTracker
 
 
 def _runtime_config(symbols, batch_size, queue_limit) -> RuntimeConfig:
@@ -254,3 +255,28 @@ def test_large_warmup_batches_drain_without_stall():
     )
     assert below_limit_index is not None
     assert below_limit_index < queue_limit + batch_size
+
+
+def test_warmup_marks_ml_bundle_ready_without_live_ticks():
+    symbol = "ES"
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.symbols = (symbol,)
+    worker._historical_warmup_counts = {symbol: 3}
+    worker.ml_feature_tracker = MlFeatureTracker()
+
+    collector = worker.ml_feature_tracker.register_bundle(symbol, ("f1", "f2"))
+
+    # Warmup populates the feature snapshot without any live updates.
+    collector.record_feature("f1", 1.0)
+    collector.record_feature("f2", -0.5)
+
+    worker._finalize_indicator_warmup()
+
+    assert worker.ml_feature_tracker.is_ready(symbol)
+
+    # Subsequent updates should continue to refresh readiness.
+    collector.record_feature("f2", None)
+    assert not worker.ml_feature_tracker.is_ready(symbol)
+
+    collector.record_feature("f2", 0.25)
+    assert worker.ml_feature_tracker.is_ready(symbol)
