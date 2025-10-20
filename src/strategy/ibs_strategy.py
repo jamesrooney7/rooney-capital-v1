@@ -2,6 +2,7 @@ import bisect
 import backtrader as bt
 import logging
 import math
+import re
 import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -78,9 +79,11 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     # enableDailyIBS -> daily IBS percentile aliases
     "daily_ibs_pct": ("daily_ibs_pct", "daily_ibs_percentile"),
     # enablePairIBS -> paired IBS value and percentile
+    "enablePairIBS": ("pair_ibs", "pair_ibs_pct"),
     "pair_ibs": ("pair_ibs_daily",),
     "pair_ibs_pct": ("pair_ibs_pct", "pair_ibs_percentile"),
     # enablePairZ -> paired z-score value and percentile companion
+    "enablePairZ": ("pair_z", "pair_z_pct"),
     "pair_z": ("pair_z_score_daily",),
     "pair_z_pct": ("pair_z_pct",),
     # enableATRZ -> intraday ATR z-score percentile
@@ -100,20 +103,31 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     # enableTRATR -> TR/ATR compression percentile
     "tratr_pct": ("tratr_pct", "tr_atr_percentile"),
     # useValFilter -> valuation percentile band
+    "useValFilter": ("value", "value_pct"),
     "value_pct": ("value_pct",),
     # enableRSIEntry -> intraday RSI percentile
+    "enableRSIEntry": ("rsi", "rsi_pct"),
     "rsi_pct": ("rsi_pct",),
     # enableRSIEntry2 -> secondary RSI percentile
+    "enableRSIEntry2": ("rsi2", "rsi2_pct", "secondary_rsi_percentile"),
     "rsi2_pct": ("rsi2_pct", "secondary_rsi_percentile"),
     # enableRSIEntry2Len -> intraday RSI length percentile
+    "enableRSIEntry2Len": ("rsi_len2", "rsi_len2_pct", "rsi_len_2_percentile"),
     "rsi_len2_pct": ("rsi_len2_pct", "rsi_len_2_percentile"),
     # enableRSIEntry14Len -> intraday RSI length snapshot
-    "enableRSIEntry14Len": ("rsi_len_14",),
+    "enableRSIEntry14Len": ("rsi_len14", "rsi_len_14"),
     # enableDailyRSI -> daily secondary RSI snapshot and percentile
+    "enableDailyRSI": (
+        "daily_rsi",
+        "daily_rsi_pct",
+        "secondary_rsi_entry_daily",
+    ),
     "daily_rsi": ("secondary_rsi_entry_daily",),
     "daily_rsi_pct": ("daily_rsi_pct",),
+    # enableDailyRSI2Len -> daily RSI length snapshot
+    "enableDailyRSI2Len": ("daily_rsi2", "daily_rsi2_len", "daily_rsi2_pct"),
     # enableDailyRSI14Len -> daily RSI length snapshot
-    "enableDailyRSI14Len": ("daily_rsi_len_14",),
+    "enableDailyRSI14Len": ("daily_rsi14", "daily_rsi_len_14"),
     # enableADX -> hourly ADX reading
     "enableADX": ("adx_value",),
     # enableDADX -> daily ADX reading
@@ -127,6 +141,14 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
         "ma_spread_ribbon_tightness",
         "ma_spread_daily_ribbon_tightness",
     ),
+    # enableBB -> Bollinger Band oscillator
+    "enableBB": ("bb",),
+    # enableBBHigh -> Bollinger High
+    "enableBBHigh": ("bb_high",),
+    # enableBBHighD -> Bollinger High Daily
+    "enableBBHighD": ("bb_high_d",),
+    # enableDonch -> Donchian breakout proximity
+    "enableDonch": ("donch",),
     # enableDonchProx -> donchian proximity metrics
     "enableDonchProx": (
         "donchian_proximity_to_nearest_band",
@@ -1145,7 +1167,7 @@ class IbsStrategy(bt.Strategy):
 
         # RSI indicator (only constructed if used)
         self.rsi = None
-        if self.p.enable_rsi_entry or "enableRSIEntry" in self.filter_keys:
+        if self._is_feature_requested("enableRSIEntry"):
             tf = str(self.p.rsi_entry_tf).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1153,7 +1175,7 @@ class IbsStrategy(bt.Strategy):
                 self.rsi = bt.indicators.RSI(data.close, period=period)
 
         self.rsi_len2 = None
-        if self.p.enable_rsi_entry2_len or "enableRSIEntry2Len" in self.filter_keys:
+        if self._is_feature_requested("enableRSIEntry2Len"):
             tf = str(self.p.rsi_entry2_tf).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1161,7 +1183,7 @@ class IbsStrategy(bt.Strategy):
                 self.rsi_len2 = bt.indicators.RSI(data.close, period=period)
 
         self.rsi_len14 = None
-        if self.p.enable_rsi_entry14_len or "enableRSIEntry14Len" in self.filter_keys:
+        if self._is_feature_requested("enableRSIEntry14Len"):
             tf = str(self.p.rsi_entry14_tf).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1174,11 +1196,11 @@ class IbsStrategy(bt.Strategy):
         if not self.p.rsi2_symbol and self.p.symbol in PAIR_MAP:
             self.p.rsi2_symbol = PAIR_MAP[self.p.symbol]
         psym = self.p.pair_symbol.upper()
-        if (self.p.enable_pair_ibs or "enablePairIBS" in self.filter_keys) and not psym:
+        if self._is_feature_requested("enablePairIBS") and not psym:
             raise ValueError("pair_symbol must be set when enable_pair_ibs is True")
 
         self.pair_data = None
-        if self.p.enable_pair_ibs or "enablePairIBS" in self.filter_keys:
+        if self._is_feature_requested("enablePairIBS"):
             tf = str(self.p.pair_ibstf).lower()
             name = f"{psym}_day" if tf.startswith("d") else f"{psym}_hour"
             try:
@@ -1192,7 +1214,7 @@ class IbsStrategy(bt.Strategy):
         self.pair_z = None
         self.pair_z_data = None
         self.pair_z_denom = None
-        if self.p.enable_pair_z or "enablePairZ" in self.filter_keys:
+        if self._is_feature_requested("enablePairZ"):
             if not psym:
                 raise ValueError("pair_symbol must be set when enable_pair_z is True")
             tf = str(self.p.pair_z_tf).lower()
@@ -1402,7 +1424,7 @@ class IbsStrategy(bt.Strategy):
         # Secondary value filter
         self.val_data = None
         self.val_ma = None
-        if self.p.use_val_filter or "useValFilter" in self.filter_keys:
+        if self._is_feature_requested("useValFilter"):
             vsym = self.p.val_symbol.upper()
             if ":" in vsym:
                 vsym = vsym.split(":")[-1]
@@ -1424,7 +1446,7 @@ class IbsStrategy(bt.Strategy):
         # Regime filters
         self.vix_data = None
         self.vix_median = None
-        if self.p.enable_vix_reg or "enableVixReg" in self.filter_keys:
+        if self._is_feature_requested("enableVixReg"):
             if not self.has_vix:
                 logging.info(
                     "VIX regime filter enabled but no VIX data is available; "
@@ -1449,7 +1471,7 @@ class IbsStrategy(bt.Strategy):
 
         self.rsi2 = None
         self.rsi2_data = None
-        if self.p.enable_rsi_entry2 or "enableRSIEntry2" in self.filter_keys:
+        if self._is_feature_requested("enableRSIEntry2"):
             rsym = self.p.rsi2_symbol.upper()
             if not rsym:
                 raise ValueError(
@@ -1478,7 +1500,7 @@ class IbsStrategy(bt.Strategy):
         # Daily RSI filter
         self.daily_rsi = None
         self.daily_rsi_data = None
-        if self.p.enableDailyRSI or "enableDailyRSI" in self.filter_keys:
+        if self._is_feature_requested("enableDailyRSI"):
             tf = str(self.p.dailyRSITF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1488,7 +1510,7 @@ class IbsStrategy(bt.Strategy):
 
         self.daily_rsi2 = None
         self.daily_rsi2_data = None
-        if self.p.enableDailyRSI2Len or "enableDailyRSI2Len" in self.filter_keys:
+        if self._is_feature_requested("enableDailyRSI2Len"):
             tf = str(self.p.dailyRSI2TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1498,7 +1520,7 @@ class IbsStrategy(bt.Strategy):
 
         self.daily_rsi14 = None
         self.daily_rsi14_data = None
-        if self.p.enableDailyRSI14Len or "enableDailyRSI14Len" in self.filter_keys:
+        if self._is_feature_requested("enableDailyRSI14Len"):
             tf = str(self.p.dailyRSI14TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1508,7 +1530,7 @@ class IbsStrategy(bt.Strategy):
 
         # Bearish bar count data
         self.bear_data = None
-        if self.p.enableBearCount or "enableBearCount" in self.filter_keys:
+        if self._is_feature_requested("enableBearCount"):
             tf = str(self.p.bearTF).lower()
             self.bear_data = self.daily if tf.startswith("d") else self.hourly
 
@@ -1548,7 +1570,7 @@ class IbsStrategy(bt.Strategy):
         # ATR used for supply zone distance checks
         self.zone_atr = None
         self.supply_zone_data = select_base_data(self.p.supplyZoneTF)
-        if self.p.use_supply_zone or "useSupplyZone" in self.filter_keys:
+        if self._is_feature_requested("useSupplyZone"):
             if self.supply_zone_data is not None:
                 period = get_period(self.p.zoneATRLen)
                 self.zone_atr = bt.indicators.AverageTrueRange(
@@ -1559,7 +1581,7 @@ class IbsStrategy(bt.Strategy):
         self.atr_z = None
         self.atr_z_denom = None
         self.atr_z_data = None
-        if self.p.enableATRZ or "enableATRZ" in self.filter_keys:
+        if self._is_feature_requested("enableATRZ"):
             tf = str(self.p.atrTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1577,7 +1599,7 @@ class IbsStrategy(bt.Strategy):
         self.vol_z = None
         self.vol_z_denom = None
         self.vol_z_data = None
-        if self.p.enableVolZ or "enableVolZ" in self.filter_keys:
+        if self._is_feature_requested("enableVolZ"):
             tf = str(self.p.volTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1601,7 +1623,7 @@ class IbsStrategy(bt.Strategy):
         self.datr_z = None
         self.datr_z_denom = None
         self.datr_z_data = None
-        if self.p.enableDATRZ or "enableDATRZ" in self.filter_keys:
+        if self._is_feature_requested("enableDATRZ"):
             tf = str(self.p.dAtrTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1623,7 +1645,7 @@ class IbsStrategy(bt.Strategy):
         self.dvol_z = None
         self.dvol_z_denom = None
         self.dvol_z_data = None
-        if self.p.enableDVolZ or "enableDVolZ" in self.filter_keys:
+        if self._is_feature_requested("enableDVolZ"):
             tf = str(self.p.dVolTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1647,7 +1669,7 @@ class IbsStrategy(bt.Strategy):
         self.price_z = None
         self.price_z_denom = None
         self.price_z_data = None
-        if self.p.enableZScore or "enableZScore" in self.filter_keys:
+        if self._is_feature_requested("enableZScore"):
             tf = str(self.p.zScoreTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1667,7 +1689,7 @@ class IbsStrategy(bt.Strategy):
         self.dist_z = None
         self.dist_z_denom = None
         self.dist_z_data = None
-        if self.p.enableDistZ or "enableDistZ" in self.filter_keys:
+        if self._is_feature_requested("enableDistZ"):
             tf = str(self.p.distZTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1688,7 +1710,7 @@ class IbsStrategy(bt.Strategy):
         self.mom3_z = None
         self.mom3_z_denom = None
         self.mom3_z_data = None
-        if self.p.enableMom3 or "enableMom3" in self.filter_keys:
+        if self._is_feature_requested("enableMom3"):
             tf = str(self.p.mom3TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1712,7 +1734,7 @@ class IbsStrategy(bt.Strategy):
         self.tratr_ratio = None
         self.tratr_denom = None
         self.tratr_data = None
-        if self.p.enableTRATR or "enableTRATR" in self.filter_keys:
+        if self._is_feature_requested("enableTRATR"):
             tf = str(self.p.tratrTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1729,28 +1751,28 @@ class IbsStrategy(bt.Strategy):
         # Bollinger Bands
         self.bb_data = None
         self.bb = None
-        if self.p.enableBB or "enableBB" in self.filter_keys:
+        if self._is_feature_requested("enableBB"):
             self.bb_data, self.bb = init_bollinger(
                 self.p.bbTF, self.p.bbLen, self.p.bbMult
             )
 
         self.bb_high_data = None
         self.bb_high = None
-        if self.p.enable_bb_high or "enableBBHigh" in self.filter_keys:
+        if self._is_feature_requested("enableBBHigh"):
             self.bb_high_data, self.bb_high = init_bollinger(
                 self.p.bbHighTF, self.p.bbHighLen, self.p.bbHighMult
             )
 
         self.bb_high_d_data = None
         self.bb_high_d = None
-        if self.p.enable_bb_high_d or "enableBBHighD" in self.filter_keys:
+        if self._is_feature_requested("enableBBHighD"):
             self.bb_high_d_data, self.bb_high_d = init_bollinger(
                 self.p.bbHighDTF, self.p.bbHighDLen, self.p.bbHighDMult
             )
 
         # Donchian Channels
         self.donch_high = self.donch_low = None
-        if self.p.enableDonch or "enableDonch" in self.filter_keys:
+        if self._is_feature_requested("enableDonch"):
             tf = str(self.p.donchTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1762,7 +1784,7 @@ class IbsStrategy(bt.Strategy):
         # Intraday EMA filters
         self.ema8 = None
         self.ema8_data = None
-        if self.p.enableEMA8 or "enableEMA8" in self.filter_keys:
+        if self._is_feature_requested("enableEMA8"):
             tf = str(self.p.ema8TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1774,7 +1796,7 @@ class IbsStrategy(bt.Strategy):
 
         self.ema20 = None
         self.ema20_data = None
-        if self.p.enableEMA20 or "enableEMA20" in self.filter_keys:
+        if self._is_feature_requested("enableEMA20"):
             tf = str(self.p.ema20TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1786,7 +1808,7 @@ class IbsStrategy(bt.Strategy):
 
         self.ema50 = None
         self.ema50_data = None
-        if self.p.enableEMA50 or "enableEMA50" in self.filter_keys:
+        if self._is_feature_requested("enableEMA50"):
             tf = str(self.p.ema50TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1798,7 +1820,7 @@ class IbsStrategy(bt.Strategy):
 
         self.ema200 = None
         self.ema200_data = None
-        if self.p.enableEMA200 or "enableEMA200" in self.filter_keys:
+        if self._is_feature_requested("enableEMA200"):
             tf = str(self.p.ema200TF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1810,7 +1832,7 @@ class IbsStrategy(bt.Strategy):
 
         # Daily EMA filters
         self.ema20d = None
-        if self.p.enableEMA20D or "enableEMA20D" in self.filter_keys:
+        if self._is_feature_requested("enableEMA20D"):
             tf = str(self.p.ema20DTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1821,7 +1843,7 @@ class IbsStrategy(bt.Strategy):
                 )
 
         self.ema50d = None
-        if self.p.enableEMA50D or "enableEMA50D" in self.filter_keys:
+        if self._is_feature_requested("enableEMA50D"):
             tf = str(self.p.ema50DTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1832,7 +1854,7 @@ class IbsStrategy(bt.Strategy):
                 )
 
         self.ema200d = None
-        if self.p.enableEMA200D or "enableEMA200D" in self.filter_keys:
+        if self._is_feature_requested("enableEMA200D"):
             tf = str(self.p.ema200DTF).lower()
             data = self.daily if tf.startswith("d") else self.hourly
             if data is not None:
@@ -1844,19 +1866,19 @@ class IbsStrategy(bt.Strategy):
 
         # Range Compression ATR (hourly)
         self.rc_atr = None
-        if self.p.enableRangeCompressionATR or "enableRangeCompressionATR" in self.filter_keys:
+        if self._is_feature_requested("enableRangeCompressionATR"):
             period = get_period(self.p.rcLen)
             self.rc_atr = bt.indicators.AverageTrueRange(self.hourly, period=period)
 
         # Daily Range Compression ATR
         self.drc_atr = None
-        if self.p.enableDailyRangeCompression or "enableDailyRangeCompression" in self.filter_keys:
+        if self._is_feature_requested("enableDailyRangeCompression"):
             period = get_period(self.p.drcLen)
             self.drc_atr = bt.indicators.AverageTrueRange(self.daily, period=period)
 
         # Bullish bar count data
         self.bull_data = None
-        if self.p.enableBullishBarCount or "enableBullishBarCount" in self.filter_keys:
+        if self._is_feature_requested("enableBullishBarCount"):
             tf = str(self.p.bullTF).lower()
             self.bull_data = self.daily if tf.startswith("d") else self.hourly
 
@@ -1869,7 +1891,7 @@ class IbsStrategy(bt.Strategy):
         self.datr_pct_pct = None
         self.datr_pct_last_date = None  # track last daily bar processed
         self.datr_pct_val_date = None  # track last ATR value date
-        if self.p.enableDailyATRPercentile or "enableDailyATRPercentile" in self.filter_keys:
+        if self._is_feature_requested("enableDailyATRPercentile"):
             period = get_period(self.p.dAtrPercLen)
             self.datr_pct_atr = bt.indicators.AverageTrueRange(self.daily, period=period)
 
@@ -1879,7 +1901,7 @@ class IbsStrategy(bt.Strategy):
         self.hatr_pct_pct = None
         self.hatr_pct_last_dt = None  # track last hourly bar processed
         self.hatr_pct_val_dt = None  # track last ATR value timestamp
-        if self.p.enableHourlyATRPercentile or "enableHourlyATRPercentile" in self.filter_keys:
+        if self._is_feature_requested("enableHourlyATRPercentile"):
             period = get_period(self.p.hAtrPercLen)
             self.hatr_pct_atr = bt.indicators.AverageTrueRange(self.hourly, period=period)
 
@@ -1897,7 +1919,7 @@ class IbsStrategy(bt.Strategy):
         self.twrc_last_dt = None
         if (
             self.twrc_data is not None
-            and (self.p.enableTWRC or "enableTWRC" in self.filter_keys)
+            and self._is_feature_requested("enableTWRC")
         ):
             self.twrc_fast = bt.indicators.AverageTrueRange(
                 self.twrc_data, period=get_period(self.p.twrcFast)
@@ -1909,7 +1931,7 @@ class IbsStrategy(bt.Strategy):
         # MA Slope (fast)
         self.ma_slope_ema = None
         self.ma_slope_atr = None
-        if self.p.enableMASlope or "enableMASlope" in self.filter_keys:
+        if self._is_feature_requested("enableMASlope"):
             self.ma_slope_ema = bt.indicators.ExponentialMovingAverage(
                 self.hourly.close, period=get_period(self.p.maSlopeLen)
             )
@@ -1920,7 +1942,7 @@ class IbsStrategy(bt.Strategy):
         # Daily Slope (fast)
         self.d_slope_ema = None
         self.d_slope_atr = None
-        if self.p.enableDailySlope or "enableDailySlope" in self.filter_keys:
+        if self._is_feature_requested("enableDailySlope"):
             self.d_slope_ema = bt.indicators.ExponentialMovingAverage(
                 self.daily.close, period=get_period(self.p.dSlopeLen)
             )
@@ -1933,8 +1955,9 @@ class IbsStrategy(bt.Strategy):
         self.ma_spread_atr = None
         self.ma_spread_data = select_base_data(self.p.maSpreadTF)
         if (
-            self.p.enableMASpread or "enableMASpread" in self.filter_keys
-        ) and self.ma_spread_data is not None:
+            self._is_feature_requested("enableMASpread")
+            and self.ma_spread_data is not None
+        ):
             self.ma_spread_fast = bt.indicators.ExponentialMovingAverage(
                 self.ma_spread_data.close, period=get_period(self.p.maSpreadFast)
             )
@@ -1951,8 +1974,9 @@ class IbsStrategy(bt.Strategy):
         self.donch_prox_atr = None
         self.donch_prox_data = select_base_data(self.p.donchProxTF)
         if (
-            self.p.enableDonchProx or "enableDonchProx" in self.filter_keys
-        ) and self.donch_prox_data is not None:
+            self._is_feature_requested("enableDonchProx")
+            and self.donch_prox_data is not None
+        ):
             period = get_period(self.p.donchProxLen)
             self.donch_prox_high = bt.indicators.Highest(
                 self.donch_prox_data.high, period=period
@@ -1968,7 +1992,7 @@ class IbsStrategy(bt.Strategy):
         self.bbw = None
         self.bbw_data = select_base_data(self.p.bbwTF)
         if (
-            self.p.enableBBW or "enableBBW" in self.filter_keys
+            self._is_feature_requested("enableBBW")
         ) and self.bbw_data is not None:
             period = get_period(self.p.bbwLen)
             self.bbw = bt.indicators.BollingerBands(
@@ -1977,18 +2001,18 @@ class IbsStrategy(bt.Strategy):
 
         # ADX indicators
         self.adx = None
-        if self.p.enableADX or "enableADX" in self.filter_keys:
+        if self._is_feature_requested("enableADX"):
             self.adx = bt.indicators.ADX(self.hourly, period=get_period(self.p.adxLen))
 
         self.dadx = None
-        if self.p.enableDADX or "enableDADX" in self.filter_keys:
+        if self._is_feature_requested("enableDADX"):
             self.dadx = bt.indicators.ADX(self.daily, period=get_period(self.p.dAdxLen))
 
         # Parabolic SAR
         self.psar = None
         self.psar_data = select_base_data(self.p.psarTF)
         if (
-            self.p.enablePSAR or "enablePSAR" in self.filter_keys
+            self._is_feature_requested("enablePSAR")
         ) and self.psar_data is not None:
             self.psar = bt.indicators.ParabolicSAR(
                 self.psar_data, af=self.p.psarAF, afmax=self.p.psarAFmax
@@ -2748,6 +2772,9 @@ class IbsStrategy(bt.Strategy):
             for column in columns:
                 record_value(column.column_key, value)
 
+        def is_requested(*flag_names: str) -> bool:
+            return any(self._is_feature_requested(flag) for flag in flag_names)
+
         def record_continuous(
             base_key: str,
             param_key: str,
@@ -2919,6 +2946,8 @@ class IbsStrategy(bt.Strategy):
                 )
                 record_param(key, float(val) if val is not None else None)
             elif key in {"enablePairIBS", "pair_ibs"}:
+                if not is_requested("enablePairIBS", "pair_ibs"):
+                    continue
                 if self.pair_data is not None:
                     ago = timeframe_ago(
                         data=self.pair_data,
@@ -2937,6 +2966,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enablePairZ", "pair_z"}:
+                if not is_requested("enablePairZ", "pair_z"):
+                    continue
                 v = timeframed_line_val(
                     self.pair_z,
                     data=self.pair_z_data,
@@ -2976,6 +3007,8 @@ class IbsStrategy(bt.Strategy):
                 if pipeline_key:
                     record_value(pipeline_key, pipeline_val)
             elif key in {"useValFilter", "value"}:
+                if not is_requested("useValFilter", "value"):
+                    continue
                 v = (
                     timeframed_line_val(
                         self.val_data.close,
@@ -3007,6 +3040,8 @@ class IbsStrategy(bt.Strategy):
                 else:
                     record_param(key, 1)
             elif key in {"enableRSIEntry", "rsi"}:
+                if not is_requested("enableRSIEntry", "rsi"):
+                    continue
                 v = line_val(self.rsi, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -3018,6 +3053,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableRSIEntry2Len", "rsi_len2"}:
+                if not is_requested("enableRSIEntry2Len", "rsi_len2"):
+                    continue
                 v = line_val(self.rsi_len2, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -3029,9 +3066,13 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableRSIEntry14Len", "rsi_len14"}:
+                if not is_requested("enableRSIEntry14Len", "rsi_len14"):
+                    continue
                 v = line_val(self.rsi_len14, ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key in {"enableRSIEntry2", "rsi2"}:
+                if not is_requested("enableRSIEntry2", "rsi2"):
+                    continue
                 v = line_val(self.rsi2, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -3043,6 +3084,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableDailyRSI", "daily_rsi"}:
+                if not is_requested("enableDailyRSI", "daily_rsi"):
+                    continue
                 v = timeframed_line_val(
                     self.daily_rsi,
                     data=getattr(self, "daily_rsi_data", None),
@@ -3059,6 +3102,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableDailyRSI2Len", "daily_rsi2"}:
+                if not is_requested("enableDailyRSI2Len", "daily_rsi2"):
+                    continue
                 v = timeframed_line_val(
                     self.daily_rsi2,
                     data=getattr(self, "daily_rsi2_data", None),
@@ -3066,6 +3111,8 @@ class IbsStrategy(bt.Strategy):
                 intraday_ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key in {"enableDailyRSI14Len", "daily_rsi14"}:
+                if not is_requested("enableDailyRSI14Len", "daily_rsi14"):
+                    continue
                 v = timeframed_line_val(
                     self.daily_rsi14,
                     data=getattr(self, "daily_rsi14_data", None),
@@ -3073,6 +3120,8 @@ class IbsStrategy(bt.Strategy):
                 intraday_ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key == "useSupplyZone":
+                if not is_requested("useSupplyZone"):
+                    continue
                 v = timeframed_line_val(
                     self.zone_atr,
                     data=self.supply_zone_data,
@@ -3080,6 +3129,8 @@ class IbsStrategy(bt.Strategy):
                 intraday_ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key in {"enableATRZ", "atrz"}:
+                if not is_requested("enableATRZ", "atrz"):
+                    continue
                 v = timeframed_line_val(
                     self.atr_z,
                     data=self.atr_z_data,
@@ -3095,6 +3146,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableVolZ", "volz"}:
+                if not is_requested("enableVolZ", "volz"):
+                    continue
                 v = timeframed_line_val(
                     self.vol_z,
                     data=self.vol_z_data,
@@ -3110,6 +3163,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableDATRZ", "datrz"}:
+                if not is_requested("enableDATRZ", "datrz"):
+                    continue
                 v = timeframed_line_val(
                     self.datr_z,
                     data=self.datr_z_data,
@@ -3126,6 +3181,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableDVolZ", "dvolz"}:
+                if not is_requested("enableDVolZ", "dvolz"):
+                    continue
                 v = timeframed_line_val(
                     self.dvol_z,
                     data=self.dvol_z_data,
@@ -3142,6 +3199,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableZScore", "z_score"}:
+                if not is_requested("enableZScore", "z_score"):
+                    continue
                 v = timeframed_line_val(
                     self.price_z,
                     data=self.price_z_data,
@@ -3157,6 +3216,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableDistZ", "dist_z"}:
+                if not is_requested("enableDistZ", "dist_z"):
+                    continue
                 v = timeframed_line_val(
                     self.dist_z,
                     data=self.dist_z_data,
@@ -3172,6 +3233,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableMom3", "mom3_z"}:
+                if not is_requested("enableMom3", "mom3_z"):
+                    continue
                 v = timeframed_line_val(
                     self.mom3_z,
                     data=self.mom3_z_data,
@@ -3187,6 +3250,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key in {"enableTRATR", "tratr"}:
+                if not is_requested("enableTRATR", "tratr"):
+                    continue
                 v = timeframed_line_val(
                     self.tratr_ratio,
                     data=self.tratr_data,
@@ -3202,6 +3267,8 @@ class IbsStrategy(bt.Strategy):
                     pct_source=val,
                 )
             elif key == "enableBB":
+                if not is_requested("enableBB", "bb"):
+                    continue
                 if self.bb is not None:
                     price = (
                         timeframed_line_val(
@@ -3242,6 +3309,8 @@ class IbsStrategy(bt.Strategy):
                         pct_source=bb_val,
                     )
             elif key == "enableBBHigh":
+                if not is_requested("enableBBHigh"):
+                    continue
                 if self.bb_high is not None:
                     price = (
                         timeframed_line_val(
@@ -3272,6 +3341,8 @@ class IbsStrategy(bt.Strategy):
                     ):
                         record_param(key, safe_div(price - upper, upper - lower))
             elif key == "enableBBHighD":
+                if not is_requested("enableBBHighD"):
+                    continue
                 if self.bb_high_d is not None:
                     price = (
                         timeframed_line_val(
@@ -3302,6 +3373,8 @@ class IbsStrategy(bt.Strategy):
                     ):
                         record_param(key, safe_div(price - upper, upper - lower))
             elif key == "enableDonch":
+                if not is_requested("enableDonch", "donch"):
+                    continue
                 if self.donch_high is not None and self.donch_data is not None:
                     price = timeframed_line_val(
                         self.donch_data.close,
@@ -3503,12 +3576,20 @@ class IbsStrategy(bt.Strategy):
                 record_param(key, value)
                 record_value("open_close", value)
             elif key in {"enableRangeCompressionATR", "range_compression_atr"}:
+                if not is_requested(
+                    "enableRangeCompressionATR", "range_compression_atr"
+                ):
+                    continue
                 hi = line_val(self.hourly.high, ago=intraday_ago)
                 lo = line_val(self.hourly.low, ago=intraday_ago)
                 atr = line_val(self.rc_atr, ago=intraday_ago)
                 if None not in (hi, lo, atr) and atr not in (0, None) and not math.isnan(atr):
                     record_param(key, safe_div(hi - lo, atr))
             elif key in {"enableDailyRangeCompression", "daily_range_compression"}:
+                if not is_requested(
+                    "enableDailyRangeCompression", "daily_range_compression"
+                ):
+                    continue
                 hi = line_val(self.daily.high, ago=-1)
                 lo = line_val(self.daily.low, ago=-1)
                 atr = line_val(self.drc_atr, ago=-1)
@@ -3534,11 +3615,17 @@ class IbsStrategy(bt.Strategy):
                 if price is not None and prev is not None and not math.isnan(price) and not math.isnan(prev):
                     record_param(key, 1 if price > prev else 2)
             elif key == "enableDailyATRPercentile":
+                if not is_requested("enableDailyATRPercentile", "daily_atr_percentile"):
+                    continue
                 pct = self.datr_pct_pct
                 numeric = coerce_float(pct)
                 record_param(key, numeric)
                 record_value("daily_atr_percentile", numeric)
             elif key == "enableHourlyATRPercentile":
+                if not is_requested(
+                    "enableHourlyATRPercentile", "hourly_atr_percentile"
+                ):
+                    continue
                 pct = self.hatr_pct_pct
                 numeric = coerce_float(pct)
                 record_param(key, numeric)
@@ -3587,9 +3674,13 @@ class IbsStrategy(bt.Strategy):
                 val = self._compute_spiral_er()
                 record_param(key, float(val) if val is not None else None)
             elif key == "enableTWRC":
+                if not is_requested("enableTWRC"):
+                    continue
                 score = self._compute_twrc_score()
                 record_param(key, float(score) if score is not None else None)
             elif key == "enableMASlope":
+                if not is_requested("enableMASlope"):
+                    continue
                 shift = int(self.p.maSlopeShift)
                 base_ago = timeframe_ago(data=self.hourly, intraday_ago=intraday_ago)
                 ema = line_val(self.ma_slope_ema, ago=base_ago)
@@ -3598,6 +3689,8 @@ class IbsStrategy(bt.Strategy):
                 if None not in (ema, ema_prev, atr) and atr not in (0, None) and not math.isnan(atr):
                     record_param(key, (ema - ema_prev) / atr)
             elif key == "enableDailySlope":
+                if not is_requested("enableDailySlope"):
+                    continue
                 shift = int(self.p.dSlopeShift)
                 base_ago = timeframe_ago(data=self.daily, intraday_ago=intraday_ago)
                 ema = line_val(self.d_slope_ema, ago=base_ago)
@@ -3606,6 +3699,8 @@ class IbsStrategy(bt.Strategy):
                 if None not in (ema, ema_prev, atr) and atr not in (0, None) and not math.isnan(atr):
                     record_param(key, (ema - ema_prev) / atr)
             elif key == "enableMASpread":
+                if not is_requested("enableMASpread", "ma_spread_ribbon_tightness"):
+                    continue
                 e1 = timeframed_line_val(
                     self.ma_spread_fast,
                     data=self.ma_spread_data,
@@ -3628,6 +3723,8 @@ class IbsStrategy(bt.Strategy):
                             diff = diff / atr
                     record_param(key, diff)
             elif key == "enableDonchProx":
+                if not is_requested("enableDonchProx", "donchian_proximity_to_nearest_band"):
+                    continue
                 if self.donch_prox_high is not None and self.donch_prox_data is not None:
                     price = timeframed_line_val(
                         self.donch_prox_data.close,
@@ -3662,6 +3759,8 @@ class IbsStrategy(bt.Strategy):
                                 prox = prox / atr
                         record_param(key, prox)
             elif key == "enableBBW":
+                if not is_requested("enableBBW", "bollinger_bandwidth_daily"):
+                    continue
                 if self.bbw is not None:
                     up = timeframed_line_val(
                         self.bbw.lines.top,
@@ -3681,12 +3780,18 @@ class IbsStrategy(bt.Strategy):
                     if None not in (up, bot, mid) and mid not in (0, None) and not math.isnan(mid):
                         record_param(key, safe_div(up - bot, mid))
             elif key == "enableADX":
+                if not is_requested("enableADX"):
+                    continue
                 v = line_val(self.adx, ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key == "enableDADX":
+                if not is_requested("enableDADX"):
+                    continue
                 v = line_val(self.dadx, ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
             elif key == "enablePSAR":
+                if not is_requested("enablePSAR", "parabolic_sar_distance"):
+                    continue
                 price = (
                     timeframed_line_val(
                         self.psar_data.close,
@@ -3834,6 +3939,87 @@ class IbsStrategy(bt.Strategy):
             ):
                 param_key = self.column_to_param.get(key, key)
                 record[key] = fallbacks.get(param_key, 0)
+
+    @staticmethod
+    def _camel_to_snake(name: str) -> str:
+        if not name:
+            return ""
+        s1 = re.sub(r"(.)([A-Z][a-z]+)", r"\1_\2", name)
+        s2 = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s1)
+        return s2.lower()
+
+    def _expand_feature_keys(self, flag_name: str) -> set[str]:
+        candidates: set[str] = set()
+        queue: list[str] = [flag_name]
+        while queue:
+            current = queue.pop()
+            if not current or current in candidates:
+                continue
+            candidates.add(current)
+
+            normalized = normalize_column_name(current)
+            if normalized and normalized not in candidates:
+                queue.append(normalized)
+
+            snake = self._camel_to_snake(current)
+            if snake and snake not in candidates:
+                queue.append(snake)
+
+            alias_values = FEATURE_KEY_ALIASES.get(current)
+            if alias_values:
+                for alias_key in alias_values:
+                    if alias_key not in candidates:
+                        queue.append(alias_key)
+
+            override = ML_FEATURE_EVAL_OVERRIDES.get(current)
+            if override and override not in candidates:
+                queue.append(override)
+
+            if current.endswith("_pct"):
+                base = current[:-4]
+                if base and base not in candidates:
+                    queue.append(base)
+
+            lowered = current.lower()
+            if lowered.startswith("enable") and len(current) > len("enable"):
+                base = current[len("enable") :]
+                if base:
+                    if base not in candidates:
+                        queue.append(base)
+                    base_lower = base[0].lower() + base[1:]
+                    if base_lower not in candidates:
+                        queue.append(base_lower)
+            if lowered.startswith("use") and len(current) > len("use"):
+                base = current[len("use") :]
+                if base:
+                    if base not in candidates:
+                        queue.append(base)
+                    base_lower = base[0].lower() + base[1:]
+                    if base_lower not in candidates:
+                        queue.append(base_lower)
+
+        return candidates
+
+    def _is_feature_requested(self, flag_name: str) -> bool:
+        candidates = self._expand_feature_keys(flag_name)
+
+        for attr_name in candidates:
+            try:
+                value = getattr(self.p, attr_name)
+            except AttributeError:
+                continue
+            if value:
+                return True
+
+        filter_keys = getattr(self, "filter_keys", set())
+        if any(key in filter_keys for key in candidates):
+            return True
+
+        ml_keys = getattr(self, "ml_feature_param_keys", set())
+        if any(key in ml_keys for key in candidates):
+            return True
+
+        return False
 
     def _derive_ml_feature_param_keys(self) -> set[str]:
         if not self.ml_features:
@@ -5014,7 +5200,7 @@ class IbsStrategy(bt.Strategy):
 
         if (
             self.twrc_data is not None
-            and (self.p.enableTWRC or "enableTWRC" in self.filter_keys)
+            and self._is_feature_requested("enableTWRC")
         ):
             dt_num = timeframed_line_val(
                 self.twrc_data.datetime,
