@@ -312,3 +312,163 @@ def test_collect_filter_values_matches_model_bundle(monkeypatch):
     missing = seen_features - normalized_keys
 
     assert not missing, f"Missing features in snapshot: {sorted(missing)}"
+
+
+def test_collect_filter_values_populates_alias_features():
+    class DummyLine:
+        def __init__(self, current, prev=None, prev2=None):
+            self.current = current
+            self.prev = prev if prev is not None else current
+            self.prev2 = prev2 if prev2 is not None else self.prev
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            if idx >= 0:
+                return self.current
+            if idx == -1:
+                return self.prev
+            if idx == -2:
+                return self.prev2
+            return self.prev2
+
+    class DummyData:
+        def __init__(self, timeframe, **lines):
+            self._timeframe = timeframe
+            self._lines = lines
+
+        def __len__(self):
+            return 10
+
+        def __getattr__(self, name):
+            try:
+                return self._lines[name]
+            except KeyError as exc:  # pragma: no cover - defensive
+                raise AttributeError(name) from exc
+
+    class DummyPercentileTracker:
+        def __init__(self, mapping):
+            self.mapping = mapping
+
+        def update(self, key, value, marker):
+            return self.mapping.get(key, 0.5)
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    percentile_values = {
+        "atrz": 0.61,
+        "datrz": 0.31,
+        "volz": 0.27,
+        "dvolz": 0.41,
+        "mom3_z": 0.73,
+        "daily_rsi": 0.35,
+        "rsi": 0.57,
+        "rsi2": 0.29,
+        "ibs": 0.5,
+    }
+    strategy.percentile_tracker = DummyPercentileTracker(percentile_values)
+
+    dt_num = bt.date2num(datetime(2024, 1, 2, 8, 45))
+    hourly = DummyData(
+        "Hourly",
+        datetime=DummyLine(dt_num),
+        close=DummyLine(105.0, 100.0, 95.0),
+        high=DummyLine(110.0, 108.0, 107.0),
+        low=DummyLine(100.0, 98.0, 96.0),
+        open=DummyLine(101.0, 99.0, 97.0),
+    )
+    daily = DummyData(
+        "Daily",
+        close=DummyLine(120.0, 110.0, 100.0),
+        high=DummyLine(130.0, 120.0, 110.0),
+        low=DummyLine(110.0, 100.0, 90.0),
+    )
+
+    strategy.hourly = hourly
+    strategy.daily = daily
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_data = None
+    strategy.vix_median = DummyLine(None)
+    strategy.dom_threshold = None
+    strategy.datr_pct_pct = 62.0
+    strategy.hatr_pct_pct = 48.0
+    strategy.prev_ibs_val = None
+    strategy.prev_daily_ibs_val = None
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy.p = SimpleNamespace(
+        atrTF="Hourly",
+        dAtrTF="Daily",
+        volTF="Hourly",
+        dVolTF="Daily",
+        mom3TF="Daily",
+        distZTF="Daily",
+        dailyRSITF="Daily",
+        zScoreTF="Daily",
+    )
+
+    atr_data = DummyData("Hourly", close=DummyLine(0.0))
+    strategy.atr_z = DummyLine(1.5)
+    strategy.atr_z_data = atr_data
+    strategy.datr_z = DummyLine(1.2)
+    strategy.datr_z_data = DummyData("Daily", close=DummyLine(0.0))
+    strategy.vol_z = DummyLine(0.8)
+    strategy.vol_z_data = atr_data
+    strategy.dvol_z = DummyLine(0.6)
+    strategy.dvol_z_data = DummyData("Daily", close=DummyLine(0.0))
+    strategy.mom3_z = DummyLine(0.4)
+    strategy.mom3_z_data = DummyData("Daily", close=DummyLine(0.0))
+    strategy.dist_z = DummyLine(-0.2)
+    strategy.dist_z_data = DummyData("Daily", close=DummyLine(0.0))
+    strategy.rsi = DummyLine(55.0)
+    strategy.rsi2 = DummyLine(52.0)
+    strategy.daily_rsi = DummyLine(45.0)
+    strategy.daily_rsi_data = daily
+    strategy.price_z = DummyLine(0.2)
+    strategy.price_z_data = DummyData("Daily", close=DummyLine(0.0))
+
+    params = [
+        "enableATRZ",
+        "enableDATRZ",
+        "enableVolZ",
+        "enableDVolZ",
+        "enableMom3",
+        "enableDistZ",
+        "enableDailyRSI",
+        "enableRSIEntry",
+        "enableRSIEntry2",
+        "enableIBSEntry",
+        "enablePrevDayPct",
+        "enableZScore",
+    ]
+    filter_columns = [FilterColumn(param, "", "", param) for param in params]
+    strategy.filter_columns = filter_columns
+    strategy.filter_keys = {col.parameter for col in filter_columns}
+    strategy.filter_column_keys = {col.column_key for col in filter_columns}
+    strategy.filter_columns_by_param = {col.parameter: [col] for col in filter_columns}
+    strategy.column_to_param = {col.column_key: col.parameter for col in filter_columns}
+
+    snapshot = strategy.collect_filter_values()
+    normalized = {normalize_column_name(key): value for key, value in snapshot.items()}
+
+    assert normalized["atr_z_percentile"] == pytest.approx(0.61)
+    assert normalized["daily_atr_z_percentile"] == pytest.approx(0.31)
+    assert normalized["volume_z_percentile"] == pytest.approx(0.27)
+    assert normalized["daily_volume_z_percentile"] == pytest.approx(0.41)
+    assert normalized["momentum_z_entry_daily"] == pytest.approx(0.4)
+    assert normalized["momentum_z_percentile"] == pytest.approx(0.73)
+    assert normalized["distance_z_entry_daily"] == pytest.approx(-0.2)
+    assert normalized["prev_day_pctxvalue"] == pytest.approx(10.0)
+    assert normalized["secondary_rsi_entry_daily"] == pytest.approx(45.0)
+    assert normalized["secondary_rsi_percentile"] == pytest.approx(0.29)
+    assert normalized["ibsxatrz"] == pytest.approx(0.75)
+    assert normalized["ibsxvolz"] == pytest.approx(0.4)
+    assert normalized["rsixatrz"] == pytest.approx(82.5)
+    assert normalized["rsixvolz"] == pytest.approx(44.0)
+    assert normalized["price_usd"] == pytest.approx(105.0)
+    assert normalized["price_z_score_daily"] == pytest.approx(0.2)
