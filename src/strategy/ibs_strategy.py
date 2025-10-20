@@ -1119,7 +1119,15 @@ class IbsStrategy(bt.Strategy):
         if self.ml_features and len(self.ml_features) == 0:
             self.ml_features = None
 
-        self.ml_feature_param_keys: set[str] = self._derive_ml_feature_param_keys()
+        if self.ml_features:
+            self._normalized_ml_features: tuple[str, ...] = tuple(
+                normalize_column_name(feature) for feature in self.ml_features
+            )
+        else:
+            self._normalized_ml_features = ()
+
+        self._cross_feature_enable_lookup: dict[str, str] = {}
+        self.ml_feature_param_keys: set[str] = set()
 
         threshold_param = getattr(self.p, "ml_threshold", None)
         if threshold_param is None:
@@ -1243,6 +1251,7 @@ class IbsStrategy(bt.Strategy):
                 self.pair_z = safe_div(spread - mean, den, orig_den=self.pair_z_denom)
 
         self.cross_zscore_meta: dict[str, dict[str, object]] = {}
+        normalized_ml_features = set(self._normalized_ml_features)
         for symbol in CROSS_Z_INSTRUMENTS:
             prefixes = _param_prefixes(symbol)
             for tf_key, feed_suffix, _friendly in CROSS_Z_TIMEFRAMES:
@@ -1273,11 +1282,20 @@ class IbsStrategy(bt.Strategy):
                         symbol, tf_key, "z_pipeline"
                     ),
                 }
-                self.cross_zscore_meta[enable_param] = meta
+                self._register_cross_feature_meta(
+                    self.cross_zscore_meta, enable_param, meta
+                )
+                feature_key = meta["feature_key"]
+                pipeline_key = meta["pipeline_feature_key"]
+                matches_ml_feature = (
+                    feature_key in normalized_ml_features
+                    or pipeline_key in normalized_ml_features
+                )
                 need_indicator = (
                     getattr(self.p, enable_param, False)
                     or (enable_param in self.filter_keys)
                     or symbol in METAL_ENERGY_SYMBOLS
+                    or matches_ml_feature
                 )
                 if not need_indicator:
                     continue
@@ -1333,11 +1351,18 @@ class IbsStrategy(bt.Strategy):
                         symbol, tf_key, "return_pipeline"
                     ),
                 }
-                self.return_meta[enable_param] = meta
+                self._register_cross_feature_meta(self.return_meta, enable_param, meta)
+                feature_key = meta["feature_key"]
+                pipeline_key = meta["pipeline_feature_key"]
+                matches_ml_feature = (
+                    feature_key in normalized_ml_features
+                    or pipeline_key in normalized_ml_features
+                )
                 need_value = (
                     getattr(self.p, enable_param, False)
                     or (enable_param in self.filter_keys)
                     or symbol in METAL_ENERGY_SYMBOLS
+                    or matches_ml_feature
                 )
                 if not need_value:
                     continue
@@ -1420,6 +1445,8 @@ class IbsStrategy(bt.Strategy):
                     data_feed,
                 )
                 store_return_pipeline(meta, data_feed, pipeline, lookback)
+
+        self.ml_feature_param_keys = self._derive_ml_feature_param_keys()
 
         # Secondary value filter
         self.val_data = None
@@ -4021,14 +4048,41 @@ class IbsStrategy(bt.Strategy):
 
         return False
 
+    def _register_cross_feature_meta(
+        self,
+        storage: dict[str, dict[str, object]],
+        enable_param: str,
+        meta: dict[str, object],
+    ) -> None:
+        storage[enable_param] = meta
+        lookup = getattr(self, "_cross_feature_enable_lookup", None)
+        if lookup is None:
+            lookup = {}
+            self._cross_feature_enable_lookup = lookup
+        for key_name in ("feature_key", "pipeline_feature_key"):
+            feature_key = meta.get(key_name)
+            if not isinstance(feature_key, str) or not feature_key:
+                continue
+            normalized = normalize_column_name(feature_key)
+            lookup[normalized] = enable_param
+
     def _derive_ml_feature_param_keys(self) -> set[str]:
         if not self.ml_features:
             return set()
 
         resolved: set[str] = set()
-        for feature in self.ml_features:
-            normalized = normalize_column_name(feature)
+        lookup = getattr(self, "_cross_feature_enable_lookup", {})
+        normalized_features = getattr(self, "_normalized_ml_features", None)
+        if not normalized_features:
+            normalized_features = tuple(
+                normalize_column_name(feature) for feature in self.ml_features
+            )
+        for normalized in normalized_features:
             base_key = FEATURE_ALIAS_LOOKUP.get(normalized, normalized)
+            enable_param = lookup.get(base_key)
+            if enable_param:
+                resolved.add(enable_param)
+                continue
             eval_key = ML_FEATURE_EVAL_OVERRIDES.get(base_key)
             if eval_key is None and base_key.endswith("_pct") and base_key not in {
                 "prev_day_pct",
