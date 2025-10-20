@@ -66,9 +66,50 @@ FRIENDLY_FILTER_NAMES: dict[str, str] = {
 
 
 FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
-    "enableOpenClose": ("open_close",),
+    "atrz_pct": ("atrz_pct", "atr_z_percentile"),
+    "daily_rsi": ("secondary_rsi_entry_daily",),
+    "daily_rsi_pct": ("secondary_rsi_percentile",),
+    "daily_ibs_pct": ("daily_ibs_pct", "daily_ibs_percentile"),
+    "datrz_pct": ("datrz_pct", "daily_atr_z_percentile"),
+    "dist_z": ("distance_z_entry_daily",),
+    "dvolz_pct": ("dvolz_pct", "daily_volume_z_percentile"),
+    "enableADX": ("adx_value",),
+    "enableBBW": ("bollinger_bandwidth_daily",),
     "enableDailyATRPercentile": ("daily_atr_percentile",),
+    "enableDailyRangeCompression": ("daily_range_compression",),
+    "enableDailyRSI14Len": ("daily_rsi_len_14",),
+    "enableDailySlope": ("daily_slope_fast",),
+    "enableDirDrift": ("hourly_directional_draft", "hourly_directional_drift"),
+    "enableDirDriftD": ("daily_directional_drift",),
+    "enableDonchProx": (
+        "donchian_proximity_to_nearest_band",
+        "donchian_proximity_daily_to_nearest_band",
+    ),
+    "enableDADX": ("daily_adx_value",),
+    "enableMASlope": ("ma_slope_fast",),
+    "enableMASpread": (
+        "ma_spread_ribbon_tightness",
+        "ma_spread_daily_ribbon_tightness",
+    ),
+    "enableOpenClose": ("open_close",),
     "enableHourlyATRPercentile": ("hourly_atr_percentile",),
+    "enablePSAR": ("parabolic_sar_distance", "parabolic_sar_distance_daily"),
+    "enableRangeCompressionATR": ("range_compression_atr",),
+    "enableRSIEntry14Len": ("rsi_len_14",),
+    "enableSpiralER": ("spiral_efficiency_ratio", "spiral_efficiency_ratio_daily"),
+    "ibs_pct": ("ibs_pct", "ibs_percentile"),
+    "mom3_z": ("momentum_z_entry_daily",),
+    "mom3_z_pct": ("mom3_z_pct", "momentum_z_percentile"),
+    "pair_ibs": ("pair_ibs_daily",),
+    "pair_ibs_pct": ("pair_ibs_pct", "pair_ibs_percentile"),
+    "pair_z": ("pair_z_score_daily",),
+    "prev_day_pct": ("prev_day_pctxvalue",),
+    "rsi2_pct": ("secondary_rsi_percentile",),
+    "rsi_len2_pct": ("rsi_len2_pct", "rsi_len_2_percentile"),
+    "tratr_pct": ("tratr_pct", "tr_atr_percentile"),
+    "value_pct": ("value_pct",),
+    "volz_pct": ("volz_pct", "volume_z_percentile"),
+    "z_score": ("price_z_score_daily",),
 }
 
 
@@ -2458,6 +2499,17 @@ class IbsStrategy(bt.Strategy):
         else:
             vix_med = 0.0
         values["vix_med"] = vix_med
+        price = None
+        try:
+            price = line_val(self.hourly.close, ago=intraday_ago)
+        except Exception:
+            price = None
+        if price is None:
+            try:
+                price = line_val(self.daily.close, ago=-1)
+            except Exception:
+                price = None
+        record_value("price_usd", coerce_float(price))
         if not self.filter_columns:
             self.ensure_filter_keys(values)
             return values
@@ -3503,6 +3555,19 @@ class IbsStrategy(bt.Strategy):
                     _metadata_feature_key(symbol, timeframe, "return_pipeline"),
                     pipeline_val,
                 )
+
+        derived_pairs: dict[str, tuple[str, str]] = {
+            "ibsxatrz": ("ibs", "atrz"),
+            "ibsxvolz": ("ibs", "volz"),
+            "rsixatrz": ("rsi", "atrz"),
+            "rsixvolz": ("rsi", "volz"),
+        }
+        for combo_key, (lhs_key, rhs_key) in derived_pairs.items():
+            lhs = coerce_float(values.get(lhs_key))
+            rhs = coerce_float(values.get(rhs_key))
+            if lhs is None or rhs is None:
+                continue
+            record_value(combo_key, lhs * rhs)
 
         self.ensure_filter_keys(values)
         return values
