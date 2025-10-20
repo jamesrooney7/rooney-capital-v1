@@ -1002,6 +1002,7 @@ class IbsStrategy(bt.Strategy):
                     "window": window,
                 }
             )
+            self._record_cross_zscore_snapshot(meta)
 
         def store_return_pipeline(
             meta: dict[str, object],
@@ -1015,6 +1016,7 @@ class IbsStrategy(bt.Strategy):
             meta["lookback"] = lookback
             meta["indicator"] = pipeline.get("indicator")
             meta["line"] = pipeline.get("line")
+            self._record_cross_return_snapshot(meta)
 
         # Data series used for pivot calculations
         tf = str(self.p.signal_tf).lower()
@@ -2191,7 +2193,13 @@ class IbsStrategy(bt.Strategy):
             self._publish_ml_feature(pipeline_key, pct)
         return pct
 
-    def _publish_ml_feature(self, key: object | None, value) -> None:
+    def _publish_ml_feature(
+        self,
+        key: object | None,
+        value,
+        *,
+        _propagating: bool = False,
+    ) -> None:
         """Record ``value`` for ``key`` in the ML feature collector."""
 
         if not isinstance(key, str) or not key:
@@ -2217,29 +2225,129 @@ class IbsStrategy(bt.Strategy):
         collector = getattr(self, "ml_feature_collector", None)
         if collector is None:
             self.ml_feature_collector = snapshot
-            return
-        if collector is snapshot:
+        elif collector is not snapshot:
+            try:
+                if hasattr(collector, "record_feature"):
+                    collector.record_feature(key, numeric)
+                elif hasattr(collector, "update_feature"):
+                    collector.update_feature(key, numeric)
+                elif hasattr(collector, "publish"):
+                    collector.publish(key, numeric)
+                elif hasattr(collector, "record"):
+                    collector.record(key, numeric)
+                elif hasattr(collector, "update"):
+                    collector.update({key: numeric})
+                else:
+                    collector[key] = numeric  # type: ignore[index]
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to forward ML feature %s", key)
+
+        if _propagating:
             return
 
+        aliases = FEATURE_KEY_ALIASES.get(key)
+        if not aliases:
+            return
+
+        for alias_key in dict.fromkeys(aliases):
+            if alias_key == key:
+                continue
+            self._publish_ml_feature(alias_key, numeric, _propagating=True)
+
+    @staticmethod
+    def _coerce_numeric(value) -> float | None:
+        if value is None:
+            return None
         try:
-            if hasattr(collector, "record_feature"):
-                collector.record_feature(key, numeric)
-                return
-            if hasattr(collector, "update_feature"):
-                collector.update_feature(key, numeric)
-                return
-            if hasattr(collector, "publish"):
-                collector.publish(key, numeric)
-                return
-            if hasattr(collector, "record"):
-                collector.record(key, numeric)
-                return
-            if hasattr(collector, "update"):
-                collector.update({key: numeric})
-                return
-            collector[key] = numeric  # type: ignore[index]
-        except Exception:  # pragma: no cover - defensive guard
-            logger.exception("Failed to forward ML feature %s", key)
+            numeric = float(value)
+        except Exception:
+            return None
+        if math.isnan(numeric):
+            return None
+        return numeric
+
+    def _record_cross_zscore_snapshot(
+        self,
+        meta: dict[str, object],
+        *,
+        intraday_ago: int = 0,
+    ) -> tuple[float | None, float | None]:
+        """Publish the latest cross Z-score values and return them."""
+
+        numeric: float | None = None
+        pipeline_val: float | None = None
+
+        line = meta.get("line")
+        if line is not None:
+            try:
+                raw_val = timeframed_line_val(
+                    line,
+                    data=meta.get("data"),
+                    timeframe=meta.get("timeframe"),
+                    intraday_ago=intraday_ago,
+                )
+            except Exception:
+                raw_val = None
+            numeric = self._coerce_numeric(raw_val)
+
+        feature_key = meta.get("feature_key")
+        if feature_key:
+            self._publish_ml_feature(feature_key, numeric)
+
+        pipeline_key = meta.get("pipeline_feature_key")
+        denom_line = meta.get("denom")
+        if pipeline_key:
+            if denom_line is not None:
+                try:
+                    raw_denom = timeframed_line_val(
+                        denom_line,
+                        data=meta.get("data"),
+                        timeframe=meta.get("timeframe"),
+                        intraday_ago=intraday_ago,
+                    )
+                except Exception:
+                    raw_denom = None
+                pipeline_val = self._coerce_numeric(raw_denom)
+            else:
+                pipeline_val = numeric
+            self._publish_ml_feature(pipeline_key, pipeline_val)
+        else:
+            pipeline_val = numeric
+
+        return numeric, pipeline_val
+
+    def _record_cross_return_snapshot(
+        self,
+        meta: dict[str, object],
+        *,
+        intraday_ago: int = 0,
+    ) -> tuple[float | None, float | None]:
+        """Publish the latest cross return values and return them."""
+
+        raw_val = self._calc_return_value(meta)
+        numeric = self._coerce_numeric(raw_val)
+
+        pipeline_line = meta.get("line")
+        pipeline_val: float | None
+        if pipeline_line is not None:
+            try:
+                raw_pipeline = timeframed_line_val(
+                    pipeline_line,
+                    data=meta.get("data"),
+                    timeframe=meta.get("timeframe"),
+                    intraday_ago=intraday_ago,
+                )
+            except Exception:
+                raw_pipeline = None
+            pipeline_val = self._coerce_numeric(raw_pipeline)
+        else:
+            pipeline_val = numeric
+
+        pipeline_key = meta.get("pipeline_feature_key")
+        if pipeline_key:
+            self._publish_ml_feature(pipeline_key, pipeline_val)
+
+        return numeric, pipeline_val
 
     def _has_feed_name(self, symbol: str, feed_suffix: str) -> bool:
         names_to_try = [f"{symbol}_{feed_suffix}"]
@@ -2796,64 +2904,28 @@ class IbsStrategy(bt.Strategy):
                 )
             elif key in self.cross_zscore_meta:
                 meta = self.cross_zscore_meta[key]
-                line = meta.get("line")
-                val = (
-                    timeframed_line_val(
-                        line,
-                        data=meta.get("data"),
-                        timeframe=meta.get("timeframe"),
-                        intraday_ago=intraday_ago,
-                    )
-                    if line is not None
-                    else None
+                numeric, pipeline_val = self._record_cross_zscore_snapshot(
+                    meta, intraday_ago=intraday_ago
                 )
-                numeric = coerce_float(val)
                 record_param(key, numeric)
                 feature_key = meta.get("feature_key")
                 if feature_key:
                     record_value(feature_key, numeric)
-                    self._publish_ml_feature(feature_key, numeric)
-                    denom_line = meta.get("denom")
-                    denom_val = None
-                    if denom_line is not None:
-                        raw_denom = timeframed_line_val(
-                            denom_line,
-                            data=meta.get("data"),
-                            timeframe=meta.get("timeframe"),
-                            intraday_ago=intraday_ago,
-                        )
-                        denom_val = coerce_float(raw_denom)
-                    pipeline_key = meta.get("pipeline_feature_key")
-                    if pipeline_key:
-                        record_value(pipeline_key, denom_val)
-                        self._publish_ml_feature(pipeline_key, denom_val)
+                pipeline_key = meta.get("pipeline_feature_key")
+                if pipeline_key:
+                    record_value(pipeline_key, pipeline_val)
             elif key in self.return_meta:
                 meta = self.return_meta[key]
-                val = self._calc_return_value(meta)
-                numeric = coerce_float(val)
+                numeric, pipeline_val = self._record_cross_return_snapshot(
+                    meta, intraday_ago=intraday_ago
+                )
                 record_param(key, numeric)
                 feature_key = meta.get("feature_key")
                 if feature_key:
                     record_value(feature_key, numeric)
-                    pipeline_line = meta.get("line")
-                    pipeline_val = None
-                    if pipeline_line is not None:
-                        raw_pipeline = timeframed_line_val(
-                            pipeline_line,
-                            data=meta.get("data"),
-                            timeframe=meta.get("timeframe"),
-                            intraday_ago=intraday_ago,
-                        )
-                        pipeline_val = coerce_float(raw_pipeline)
-                    else:
-                        pipeline_val = numeric
-                    pipeline_key = meta.get("pipeline_feature_key")
-                    if pipeline_key:
-                        record_value(pipeline_key, pipeline_val)
-                    if feature_key:
-                        self._publish_ml_feature(feature_key, numeric)
-                    if pipeline_key:
-                        self._publish_ml_feature(pipeline_key, pipeline_val)
+                pipeline_key = meta.get("pipeline_feature_key")
+                if pipeline_key:
+                    record_value(pipeline_key, pipeline_val)
             elif key == "useValFilter":
                 v = (
                     timeframed_line_val(
@@ -3643,66 +3715,31 @@ class IbsStrategy(bt.Strategy):
             existing = values.get(param_key)
             if isinstance(existing, (int, float)) and not math.isnan(existing):
                 continue
-            line = meta.get("line")
-            val = (
-                timeframed_line_val(
-                    line,
-                    data=meta.get("data"),
-                    timeframe=meta.get("timeframe"),
-                intraday_ago=intraday_ago)
-                if line is not None
-                else None
+            numeric, pipeline_val = self._record_cross_zscore_snapshot(
+                meta, intraday_ago=intraday_ago
             )
-            numeric = coerce_float(val)
             record_param(param_key, numeric)
             feature_key = meta.get("feature_key")
             if feature_key:
                 record_value(feature_key, numeric)
-                self._publish_ml_feature(feature_key, numeric)
-                denom_line = meta.get("denom")
-                denom_val = None
-                if denom_line is not None:
-                    raw_denom = timeframed_line_val(
-                        denom_line,
-                        data=meta.get("data"),
-                        timeframe=meta.get("timeframe"),
-                        intraday_ago=intraday_ago,
-                    )
-                    denom_val = coerce_float(raw_denom)
-                pipeline_key = meta.get("pipeline_feature_key")
-                if pipeline_key:
-                    record_value(pipeline_key, denom_val)
-                    self._publish_ml_feature(pipeline_key, denom_val)
+            pipeline_key = meta.get("pipeline_feature_key")
+            if pipeline_key:
+                record_value(pipeline_key, pipeline_val)
 
         for param_key, meta in self.return_meta.items():
             existing = values.get(param_key)
             if isinstance(existing, (int, float)) and not math.isnan(existing):
                 continue
-            val = self._calc_return_value(meta)
-            numeric = coerce_float(val)
+            numeric, pipeline_val = self._record_cross_return_snapshot(
+                meta, intraday_ago=intraday_ago
+            )
             record_param(param_key, numeric)
             feature_key = meta.get("feature_key")
             if feature_key:
                 record_value(feature_key, numeric)
-            pipeline_line = meta.get("line")
-            pipeline_val = None
-            if pipeline_line is not None:
-                raw_pipeline = timeframed_line_val(
-                    pipeline_line,
-                        data=meta.get("data"),
-                        timeframe=meta.get("timeframe"),
-                        intraday_ago=intraday_ago,
-                    )
-                pipeline_val = coerce_float(raw_pipeline)
-            else:
-                pipeline_val = numeric
             pipeline_key = meta.get("pipeline_feature_key")
             if pipeline_key:
                 record_value(pipeline_key, pipeline_val)
-            if feature_key:
-                self._publish_ml_feature(feature_key, numeric)
-            if pipeline_key:
-                self._publish_ml_feature(pipeline_key, pipeline_val)
 
         derived_pairs: dict[str, tuple[str, str]] = {
             "ibsxatrz": ("ibs", "atrz"),
@@ -3937,28 +3974,10 @@ class IbsStrategy(bt.Strategy):
                 line = meta.get("line")
                 if line is None:
                     return False
-                val = timeframed_line_val(
-                    line,
-                    data=meta.get("data"),
-                    timeframe=meta.get("timeframe"),
-                )
+                numeric, pipeline_val = self._record_cross_zscore_snapshot(meta)
+                val = numeric
                 if val is None or math.isnan(val):
                     return False
-                feature_key = meta.get("feature_key")
-                if feature_key:
-                    self._publish_ml_feature(feature_key, val)
-                pipeline_key = meta.get("pipeline_feature_key")
-                if pipeline_key:
-                    denom_line = meta.get("denom")
-                    if denom_line is not None:
-                        denom_val = timeframed_line_val(
-                            denom_line,
-                            data=meta.get("data"),
-                            timeframe=meta.get("timeframe"),
-                        )
-                    else:
-                        denom_val = None
-                    self._publish_ml_feature(pipeline_key, denom_val)
                 low = self._resolve_param_value(
                     meta.get("low_aliases", (meta["low_param"],))
                 )
@@ -3971,7 +3990,8 @@ class IbsStrategy(bt.Strategy):
                     return False
         for param_key, meta in self.return_meta.items():
             if getattr(self.p, param_key):
-                value = self._calc_return_value(meta)
+                numeric, _ = self._record_cross_return_snapshot(meta)
+                value = numeric
                 if value is None or math.isnan(value):
                     return False
                 low_raw = self._resolve_param_value(
