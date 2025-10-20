@@ -516,6 +516,7 @@ class IbsStrategy(bt.Strategy):
         ml_model=None,
         ml_features=None,
         ml_threshold=None,
+        ml_feature_collector=None,
         trade_start=date(2010, 1, 1),
         # Session window defaults
         use_window1=True,
@@ -863,6 +864,10 @@ class IbsStrategy(bt.Strategy):
         self.return_indicator_cache: dict[tuple[str, str], dict[str, object]] = {}
         self._ml_feature_snapshot: dict[str, float | None] = {}
         self.ml_feature_collector: dict[str, float | None] = self._ml_feature_snapshot
+
+        collector_param = getattr(self.p, "ml_feature_collector", None)
+        if collector_param is not None:
+            self.ml_feature_collector = collector_param
 
         def get_period(val):
             cp = clamp_period(val)

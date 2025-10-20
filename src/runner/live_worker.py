@@ -34,6 +34,7 @@ from models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import Bar, DatabentoLiveData, DatabentoSubscriber, QueueFanout
 from runner.historical_loader import load_historical_data
+from runner.ml_feature_tracker import MlFeatureTracker
 from runner.traderspost_client import (
     TradersPostClient,
     TradersPostError,
@@ -609,6 +610,8 @@ class LiveWorker:
             "last_error": None,
         }
 
+        self.ml_feature_tracker = MlFeatureTracker()
+
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook:
             try:
@@ -716,20 +719,31 @@ class LiveWorker:
         for symbol in self.symbols:
             instrument_cfg = self.config.instrument(symbol)
 
+            ml_features: Sequence[str] | None = None
             try:
                 bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
                 bundle_kwargs = strategy_kwargs_from_bundle(bundle)
+                ml_features = bundle_kwargs.get("ml_features")
                 logger.info("Loaded ML bundle for %s with features=%s", symbol, bundle.features)
             except FileNotFoundError:
                 logger.warning("No ML bundle found for %s; running without ML filter", symbol)
                 bundle_kwargs = {}
+                ml_features = ()
             except Exception as exc:  # pragma: no cover - defensive guard
                 logger.exception("Failed to load ML bundle for %s: %s", symbol, exc)
                 bundle_kwargs = {}
+                ml_features = ()
 
             strategy_kwargs: Dict[str, Any] = {"symbol": symbol, "size": instrument_cfg.size}
             strategy_kwargs.update(bundle_kwargs)
             strategy_kwargs.update(instrument_cfg.strategy_overrides)
+
+            if ml_features is not None:
+                collector = self.ml_feature_tracker.register_bundle(symbol, ml_features)
+                if ml_features:
+                    strategy_kwargs["ml_feature_collector"] = collector
+            else:
+                self.ml_feature_tracker.register_bundle(symbol, ())
 
             order_callbacks: list[Callable[[NotifyingIbsStrategy, Any], None]] = []
             trade_callbacks: list[
@@ -1071,6 +1085,10 @@ class LiveWorker:
             )
 
         self._historical_warmup_counts.clear()
+
+        tracker = getattr(self, "ml_feature_tracker", None)
+        if tracker is not None:
+            tracker.refresh_all(self.symbols)
 
     def validate_policy_killswitch(self) -> bool:
         if getattr(self.config, "killswitch", False):
@@ -1454,6 +1472,10 @@ class LiveWorker:
 
         if self.traderspost_client:
             details["traderspost"] = copy.deepcopy(self._traderspost_status)
+
+        tracker = getattr(self, "ml_feature_tracker", None)
+        if tracker is not None:
+            details["ml_features"] = tracker.readiness_report()
 
         return details
 
