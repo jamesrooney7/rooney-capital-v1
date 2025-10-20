@@ -165,6 +165,34 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
 }
 
 
+FEATURE_ALIAS_LOOKUP: dict[str, str] = {}
+for _base_key, _aliases in FEATURE_KEY_ALIASES.items():
+    FEATURE_ALIAS_LOOKUP.setdefault(normalize_column_name(_base_key), _base_key)
+    for _alias in _aliases:
+        FEATURE_ALIAS_LOOKUP.setdefault(normalize_column_name(_alias), _base_key)
+
+
+ML_FEATURE_EVAL_OVERRIDES: dict[str, str] = {
+    "ibs_pct": "ibs",
+    "daily_ibs_pct": "daily_ibs",
+    "pair_ibs_pct": "pair_ibs",
+    "pair_z_pct": "pair_z",
+    "atrz_pct": "atrz",
+    "volz_pct": "volz",
+    "datrz_pct": "datrz",
+    "dvolz_pct": "dvolz",
+    "dist_z_pct": "dist_z",
+    "mom3_z_pct": "mom3_z",
+    "tratr_pct": "tratr",
+    "daily_rsi_pct": "daily_rsi",
+    "rsi_pct": "rsi",
+    "rsi2_pct": "rsi2",
+    "rsi_len2_pct": "rsi_len2",
+    "prev_bar_pct_pct": "prev_bar_pct",
+    "value_pct": "value",
+}
+
+
 CROSS_Z_INSTRUMENTS = [
     "ES",
     "NQ",
@@ -1068,6 +1096,8 @@ class IbsStrategy(bt.Strategy):
             self.ml_features = None
         if self.ml_features and len(self.ml_features) == 0:
             self.ml_features = None
+
+        self.ml_feature_param_keys: set[str] = self._derive_ml_feature_param_keys()
 
         threshold_param = getattr(self.p, "ml_threshold", None)
         if threshold_param is None:
@@ -2774,7 +2804,23 @@ class IbsStrategy(bt.Strategy):
             except Exception:
                 price = None
         record_value("price_usd", coerce_float(price))
-        if not self.filter_columns:
+
+        param_candidates: list[str] = []
+        seen_params: set[str] = set()
+        for column in self.filter_columns:
+            key = column.parameter
+            if not key or key in seen_params:
+                continue
+            seen_params.add(key)
+            param_candidates.append(key)
+        ml_param_keys = getattr(self, "ml_feature_param_keys", set())
+        for key in ml_param_keys:
+            if not key or key in seen_params or key == "price_usd":
+                continue
+            seen_params.add(key)
+            param_candidates.append(key)
+
+        if not param_candidates:
             self.ensure_filter_keys(values)
             return values
         dt_num = line_val(self.hourly.datetime, ago=intraday_ago)
@@ -2783,9 +2829,12 @@ class IbsStrategy(bt.Strategy):
             return values
         dt = bt.num2date(dt_num)
         dom_threshold = self.dom_threshold
-        for column in self.filter_columns:
-            key = column.parameter
-            if isinstance(key, str) and key.endswith("_pct"):
+        for key in param_candidates:
+            if (
+                isinstance(key, str)
+                and key.endswith("_pct")
+                and key not in {"prev_day_pct", "prev_bar_pct"}
+            ):
                 # Percentile columns are populated alongside their base filters.
                 # Avoid overwriting the recorded percentile with ``None`` when
                 # iterating over the synthetic parameter itself.
@@ -2810,7 +2859,7 @@ class IbsStrategy(bt.Strategy):
                 record_param(key, 1 if dt.weekday() <= 1 else 2)
             elif key == "enableEvenOdd":
                 record_param(key, 1 if dt.day % 2 == 0 else 2)
-            elif key == "enablePrevDayPct":
+            elif key in {"enablePrevDayPct", "prev_day_pct"}:
                 raw = self.prev_day_pct()
                 stored = float(raw) if raw is not None else float("nan")
                 record_continuous(
@@ -2821,7 +2870,7 @@ class IbsStrategy(bt.Strategy):
                     align_to_date=True,
                     pct_source=raw,
                 )
-            elif key == "enablePrevBarPct":
+            elif key in {"enablePrevBarPct", "prev_bar_pct"}:
                 raw = self.prev_bar_pct()
                 stored = float(raw) if raw is not None else float("nan")
                 record_continuous(
@@ -2832,7 +2881,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.prev_bar_pct_tf,
                     pct_source=raw,
                 )
-            elif key in {"enableIBSEntry", "enableIBSExit"}:
+            elif key in {"enableIBSEntry", "enableIBSExit", "ibs"}:
                 raw = self.ibs()
                 record_continuous(
                     "ibs",
@@ -2842,7 +2891,7 @@ class IbsStrategy(bt.Strategy):
                     intraday_offset=0,
                     pct_source=raw,
                 )
-            elif key == "enableDailyIBS":
+            elif key in {"enableDailyIBS", "daily_ibs"}:
                 raw = self.daily_ibs()
                 record_continuous(
                     "daily_ibs",
@@ -2852,7 +2901,7 @@ class IbsStrategy(bt.Strategy):
                     align_to_date=True,
                     pct_source=raw,
                 )
-            elif key == "enablePrevIBS":
+            elif key in {"enablePrevIBS", "prev_ibs"}:
                 raw = self.prev_ibs_val
                 record_continuous(
                     "prev_ibs",
@@ -2862,14 +2911,14 @@ class IbsStrategy(bt.Strategy):
                     intraday_offset=0,
                     pct_source=raw,
                 )
-            elif key == "enablePrevIBSDaily":
+            elif key in {"enablePrevIBSDaily", "prev_daily_ibs"}:
                 val = (
                     self.prev_daily_ibs_val
                     if self.prev_daily_ibs_val is not None
                     else self.prev_daily_ibs()
                 )
                 record_param(key, float(val) if val is not None else None)
-            elif key == "enablePairIBS":
+            elif key in {"enablePairIBS", "pair_ibs"}:
                 if self.pair_data is not None:
                     ago = timeframe_ago(
                         data=self.pair_data,
@@ -2887,7 +2936,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.pair_ibstf,
                     pct_source=val,
                 )
-            elif key == "enablePairZ":
+            elif key in {"enablePairZ", "pair_z"}:
                 v = timeframed_line_val(
                     self.pair_z,
                     data=self.pair_z_data,
@@ -2926,7 +2975,7 @@ class IbsStrategy(bt.Strategy):
                 pipeline_key = meta.get("pipeline_feature_key")
                 if pipeline_key:
                     record_value(pipeline_key, pipeline_val)
-            elif key == "useValFilter":
+            elif key in {"useValFilter", "value"}:
                 v = (
                     timeframed_line_val(
                         self.val_data.close,
@@ -2957,7 +3006,7 @@ class IbsStrategy(bt.Strategy):
                         record_param(key, 1 if vval < vix_med else 2)
                 else:
                     record_param(key, 1)
-            elif key == "enableRSIEntry":
+            elif key in {"enableRSIEntry", "rsi"}:
                 v = line_val(self.rsi, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -2968,7 +3017,7 @@ class IbsStrategy(bt.Strategy):
                     intraday_offset=intraday_ago,
                     pct_source=val,
                 )
-            elif key == "enableRSIEntry2Len":
+            elif key in {"enableRSIEntry2Len", "rsi_len2"}:
                 v = line_val(self.rsi_len2, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -2979,10 +3028,10 @@ class IbsStrategy(bt.Strategy):
                     intraday_offset=intraday_ago,
                     pct_source=val,
                 )
-            elif key == "enableRSIEntry14Len":
+            elif key in {"enableRSIEntry14Len", "rsi_len14"}:
                 v = line_val(self.rsi_len14, ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
-            elif key == "enableRSIEntry2":
+            elif key in {"enableRSIEntry2", "rsi2"}:
                 v = line_val(self.rsi2, ago=intraday_ago)
                 val = float(v) if v is not None else None
                 record_continuous(
@@ -2993,7 +3042,7 @@ class IbsStrategy(bt.Strategy):
                     intraday_offset=intraday_ago,
                     pct_source=val,
                 )
-            elif key == "enableDailyRSI":
+            elif key in {"enableDailyRSI", "daily_rsi"}:
                 v = timeframed_line_val(
                     self.daily_rsi,
                     data=getattr(self, "daily_rsi_data", None),
@@ -3009,14 +3058,14 @@ class IbsStrategy(bt.Strategy):
                     align_to_date=True,
                     pct_source=val,
                 )
-            elif key == "enableDailyRSI2Len":
+            elif key in {"enableDailyRSI2Len", "daily_rsi2"}:
                 v = timeframed_line_val(
                     self.daily_rsi2,
                     data=getattr(self, "daily_rsi2_data", None),
                     timeframe=self.p.dailyRSI2TF,
                 intraday_ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
-            elif key == "enableDailyRSI14Len":
+            elif key in {"enableDailyRSI14Len", "daily_rsi14"}:
                 v = timeframed_line_val(
                     self.daily_rsi14,
                     data=getattr(self, "daily_rsi14_data", None),
@@ -3030,7 +3079,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.supplyZoneTF,
                 intraday_ago=intraday_ago)
                 record_param(key, float(v) if v is not None else None)
-            elif key == "enableATRZ":
+            elif key in {"enableATRZ", "atrz"}:
                 v = timeframed_line_val(
                     self.atr_z,
                     data=self.atr_z_data,
@@ -3045,7 +3094,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.atrTF,
                     pct_source=val,
                 )
-            elif key == "enableVolZ":
+            elif key in {"enableVolZ", "volz"}:
                 v = timeframed_line_val(
                     self.vol_z,
                     data=self.vol_z_data,
@@ -3060,7 +3109,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.volTF,
                     pct_source=val,
                 )
-            elif key == "enableDATRZ":
+            elif key in {"enableDATRZ", "datrz"}:
                 v = timeframed_line_val(
                     self.datr_z,
                     data=self.datr_z_data,
@@ -3076,7 +3125,7 @@ class IbsStrategy(bt.Strategy):
                     align_to_date=_is_daily_timeframe(self.p.dAtrTF),
                     pct_source=val,
                 )
-            elif key == "enableDVolZ":
+            elif key in {"enableDVolZ", "dvolz"}:
                 v = timeframed_line_val(
                     self.dvol_z,
                     data=self.dvol_z_data,
@@ -3092,7 +3141,7 @@ class IbsStrategy(bt.Strategy):
                     align_to_date=_is_daily_timeframe(self.p.dVolTF),
                     pct_source=val,
                 )
-            elif key == "enableZScore":
+            elif key in {"enableZScore", "z_score"}:
                 v = timeframed_line_val(
                     self.price_z,
                     data=self.price_z_data,
@@ -3107,7 +3156,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.zScoreTF,
                     pct_source=val,
                 )
-            elif key == "enableDistZ":
+            elif key in {"enableDistZ", "dist_z"}:
                 v = timeframed_line_val(
                     self.dist_z,
                     data=self.dist_z_data,
@@ -3122,7 +3171,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.distZTF,
                     pct_source=val,
                 )
-            elif key == "enableMom3":
+            elif key in {"enableMom3", "mom3_z"}:
                 v = timeframed_line_val(
                     self.mom3_z,
                     data=self.mom3_z_data,
@@ -3137,7 +3186,7 @@ class IbsStrategy(bt.Strategy):
                     timeframe=self.p.mom3TF,
                     pct_source=val,
                 )
-            elif key == "enableTRATR":
+            elif key in {"enableTRATR", "tratr"}:
                 v = timeframed_line_val(
                     self.tratr_ratio,
                     data=self.tratr_data,
@@ -3444,7 +3493,7 @@ class IbsStrategy(bt.Strategy):
                     record_param(key, 3)
                 else:
                     record_param(key, 0)
-            elif key == "enableOpenClose":
+            elif key in {"enableOpenClose", "open_close"}:
                 t = dt.hour * 100 + dt.minute
                 value = 0
                 if 800 <= t < 900:
@@ -3453,13 +3502,13 @@ class IbsStrategy(bt.Strategy):
                     value = 2
                 record_param(key, value)
                 record_value("open_close", value)
-            elif key == "enableRangeCompressionATR":
+            elif key in {"enableRangeCompressionATR", "range_compression_atr"}:
                 hi = line_val(self.hourly.high, ago=intraday_ago)
                 lo = line_val(self.hourly.low, ago=intraday_ago)
                 atr = line_val(self.rc_atr, ago=intraday_ago)
                 if None not in (hi, lo, atr) and atr not in (0, None) and not math.isnan(atr):
                     record_param(key, safe_div(hi - lo, atr))
-            elif key == "enableDailyRangeCompression":
+            elif key in {"enableDailyRangeCompression", "daily_range_compression"}:
                 hi = line_val(self.daily.high, ago=-1)
                 lo = line_val(self.daily.low, ago=-1)
                 atr = line_val(self.drc_atr, ago=-1)
@@ -3785,6 +3834,25 @@ class IbsStrategy(bt.Strategy):
             ):
                 param_key = self.column_to_param.get(key, key)
                 record[key] = fallbacks.get(param_key, 0)
+
+    def _derive_ml_feature_param_keys(self) -> set[str]:
+        if not self.ml_features:
+            return set()
+
+        resolved: set[str] = set()
+        for feature in self.ml_features:
+            normalized = normalize_column_name(feature)
+            base_key = FEATURE_ALIAS_LOOKUP.get(normalized, normalized)
+            eval_key = ML_FEATURE_EVAL_OVERRIDES.get(base_key)
+            if eval_key is None and base_key.endswith("_pct") and base_key not in {
+                "prev_day_pct",
+                "prev_bar_pct",
+            }:
+                eval_key = base_key[:-4]
+            if eval_key is None:
+                eval_key = base_key
+            resolved.add(eval_key)
+        return resolved
 
     def _ml_default_for_feature(self, key: str) -> float:
         if key in {"enableInsideBar", "enableN7Bar"}:
