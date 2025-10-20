@@ -623,7 +623,7 @@ def test_collect_filter_values_populates_ml_features_without_columns():
 
 
 @pytest.mark.parametrize("mode", ["ml", "filters"])
-def test_collect_filter_values_populates_requested_optional_features(mode):
+def test_collect_filter_values_populates_requested_optional_percentile_features(mode):
     class DummyLine:
         def __init__(self, current, prev=None, prev2=None):
             self.current = current
@@ -774,9 +774,13 @@ def test_collect_filter_values_populates_requested_optional_features(mode):
     normalized = {normalize_column_name(key): value for key, value in snapshot.items()}
 
     assert normalized["atrz"] == pytest.approx(1.1)
+    assert normalized["atrz_pct"] == pytest.approx(1.1)
     assert normalized["volz"] == pytest.approx(0.9)
+    assert normalized["volz_pct"] == pytest.approx(0.9)
     assert normalized["rsi"] == pytest.approx(45.0)
+    assert normalized["rsi_pct"] == pytest.approx(45.0)
     assert normalized["daily_rsi"] == pytest.approx(40.0)
+    assert normalized["daily_rsi_pct"] == pytest.approx(40.0)
     assert normalized["ma_spread_ribbon_tightness"] == pytest.approx(2.5)
     assert normalized["donchian_proximity_to_nearest_band"] == pytest.approx(1.0)
     assert normalized["bollinger_bandwidth_daily"] == pytest.approx(0.2)
