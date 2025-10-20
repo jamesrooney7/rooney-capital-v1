@@ -67,14 +67,20 @@ class SafeDivision(btfunc.DivByZero):
         eps: float = EPS,
         log: bool = False,
         logger: Optional[logging.Logger] = None,
+        _owner=None,
     ):
         num_line = a if hasattr(a, "lines") else bt.LineNum(a)
         den_line = b if hasattr(b, "lines") else bt.LineNum(b)
         super().__init__(num_line, den_line, zero=zero)
+        if _owner is not None:
+            self.owner = self._owner = _owner
         self.p.zero = zero
         self.eps = eps
         self.log = log
         self.logger = (logger or LOGGER) if log else None
+
+    def nextstart(self):
+        self.next()
 
     def next(self):
         den = self.b[0]
