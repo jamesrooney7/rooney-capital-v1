@@ -1055,26 +1055,21 @@ class IbsStrategy(bt.Strategy):
             return data, indicator
 
         def store_zscore_pipeline(
-            meta: dict[str, object],
-            data_feed: bt.LineSeries,
-            pipeline: dict[str, object] | None,
-            length: int,
-            window: int,
+                meta: dict[str, object],
+                data_feed: bt.LineSeries,
+                pipeline: dict[str, object] | None,
+                length: int,
+                window: int,
+                publish: bool = True,
         ) -> None:
-            if not pipeline:
-                return
-            meta.update(
-                {
-                    "line": pipeline["line"],
-                    "data": data_feed,
-                    "mean": pipeline["mean"],
-                    "std": pipeline["std"],
-                    "denom": pipeline["denom"],
-                    "len": length,
-                    "window": window,
-                }
+            self._store_zscore_pipeline(
+                meta,
+                data_feed,
+                pipeline,
+                length,
+                window,
+                publish=publish,
             )
-            self._record_cross_zscore_snapshot(meta)
 
         def store_return_pipeline(
             meta: dict[str, object],
@@ -1299,6 +1294,7 @@ class IbsStrategy(bt.Strategy):
                     "window_aliases": tuple(window_aliases),
                     "low_aliases": tuple(low_aliases),
                     "high_aliases": tuple(high_aliases),
+                    "enable_param": enable_param,
                     "feature_key": _metadata_feature_key(symbol, tf_key, "z_score"),
                     "pipeline_feature_key": _metadata_feature_key(
                         symbol, tf_key, "z_pipeline"
@@ -2357,6 +2353,108 @@ class IbsStrategy(bt.Strategy):
                 continue
             self._publish_ml_feature(alias_key, numeric, _propagating=True)
 
+    def _store_zscore_pipeline(
+        self,
+        meta: dict[str, object],
+        data_feed: bt.LineSeries,
+        pipeline: dict[str, object] | None,
+        length: int,
+        window: int,
+        *,
+        publish: bool = True,
+    ) -> None:
+        if not pipeline:
+            return
+        meta.update(
+            {
+                "line": pipeline.get("line"),
+                "data": data_feed,
+                "mean": pipeline.get("mean"),
+                "std": pipeline.get("std"),
+                "denom": pipeline.get("denom"),
+                "len": length,
+                "window": window,
+            }
+        )
+        if publish:
+            self._record_cross_zscore_snapshot(meta)
+
+    def _ensure_cross_zscore_pipeline(self, meta: dict[str, object]) -> None:
+        if meta.get("line") is not None:
+            return
+
+        symbol = meta.get("symbol")
+        timeframe = meta.get("timeframe")
+        feed_suffix = meta.get("feed_suffix")
+        if not (
+            isinstance(symbol, str)
+            and isinstance(timeframe, str)
+            and isinstance(feed_suffix, str)
+        ):
+            return
+
+        enable_param = meta.get("enable_param")
+        if not isinstance(enable_param, str) or not enable_param:
+            enable_param = f"enable{symbol}ZScore{timeframe}"
+
+        data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
+        if data_feed is None:
+            return
+
+        length = meta.get("len")
+        if not isinstance(length, int) or length <= 0:
+            default_len = getattr(self.p, meta.get("len_param", ""), 20)
+            aliases = meta.get("len_aliases")
+            if aliases:
+                length_raw = self._resolve_param_value(aliases, default_len)
+            else:
+                length_raw = default_len
+            length = clamp_period(length_raw)
+
+        window = meta.get("window")
+        if not isinstance(window, int) or window <= 0:
+            default_window = getattr(self.p, meta.get("window_param", ""), 252)
+            aliases = meta.get("window_aliases")
+            if aliases:
+                window_raw = self._resolve_param_value(aliases, default_window)
+            else:
+                window_raw = default_window
+            window = clamp_period(window_raw)
+
+        pipeline = self._build_cross_zscore_pipeline(
+            symbol,
+            timeframe,
+            feed_suffix,
+            length,
+            window,
+            data_feed,
+        )
+        if not pipeline:
+            return
+
+        self._store_zscore_pipeline(
+            meta,
+            data_feed,
+            pipeline,
+            length,
+            window,
+            publish=False,
+        )
+
+        periods = getattr(self, "_periods", None)
+        if isinstance(periods, list):
+            periods.append(length)
+            periods.append(window)
+
+        current_max = getattr(self, "max_period", 0)
+        new_max = max(current_max, length, window)
+        if new_max > current_max:
+            self.max_period = new_max
+            try:
+                self.addminperiod(new_max)
+            except Exception:  # pragma: no cover - defensive guard
+                logger.exception("Failed to extend min period to %s", new_max)
+
     @staticmethod
     def _coerce_numeric(value) -> float | None:
         if value is None:
@@ -2379,6 +2477,9 @@ class IbsStrategy(bt.Strategy):
 
         numeric: float | None = None
         pipeline_val: float | None = None
+
+        if meta.get("line") is None:
+            self._ensure_cross_zscore_pipeline(meta)
 
         line = meta.get("line")
         if line is not None:
