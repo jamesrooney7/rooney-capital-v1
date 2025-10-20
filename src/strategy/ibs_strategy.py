@@ -91,12 +91,20 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "pair_z": ("pair_z_score_daily",),
     "pair_z_pct": ("pair_z_pct",),
     # enableATRZ -> intraday ATR z-score percentile
+    "enableATRZ": ("enableATRZ", "atrz", "atrz_pct", "atr_z_percentile"),
+    "atrz": ("atrz", "atrz_pct", "atr_z_percentile"),
     "atrz_pct": ("atrz_pct", "atr_z_percentile"),
     # enableVolZ -> intraday volume z-score percentile
+    "enableVolZ": ("enableVolZ", "volz", "volz_pct", "volume_z_percentile"),
+    "volz": ("volz", "volz_pct", "volume_z_percentile"),
     "volz_pct": ("volz_pct", "volume_z_percentile"),
     # enableDATRZ -> daily ATR z-score percentile
+    "enableDATRZ": ("enableDATRZ", "datrz", "datrz_pct", "daily_atr_z_percentile"),
+    "datrz": ("datrz", "datrz_pct", "daily_atr_z_percentile"),
     "datrz_pct": ("datrz_pct", "daily_atr_z_percentile"),
     # enableDVolZ -> daily volume z-score percentile
+    "enableDVolZ": ("enableDVolZ", "dvolz", "dvolz_pct", "daily_volume_z_percentile"),
+    "dvolz": ("dvolz", "dvolz_pct", "daily_volume_z_percentile"),
     "dvolz_pct": ("dvolz_pct", "daily_volume_z_percentile"),
     # enableDistZ -> distance-from-high/low z-score and percentile
     "dist_z": ("distance_z_entry_daily",),
@@ -105,6 +113,8 @@ FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
     "mom3_z": ("momentum_z_entry_daily",),
     "mom3_z_pct": ("mom3_z_pct", "momentum_z_percentile"),
     # enableTRATR -> TR/ATR compression percentile
+    "enableTRATR": ("enableTRATR", "tratr", "tratr_pct", "tr_atr_percentile"),
+    "tratr": ("tratr", "tratr_pct", "tr_atr_percentile"),
     "tratr_pct": ("tratr_pct", "tr_atr_percentile"),
     # useValFilter -> valuation percentile band
     "useValFilter": ("value", "value_pct"),
@@ -2792,6 +2802,17 @@ class IbsStrategy(bt.Strategy):
             feature_aliases = FEATURE_KEY_ALIASES.get(column_key)
             if feature_aliases:
                 for alias_key in dict.fromkeys(feature_aliases):
+                    if alias_key == column_key:
+                        continue
+                    if (
+                        not column_key.endswith("_pct")
+                        and "percentile" not in column_key.lower()
+                        and (
+                            alias_key.endswith("_pct")
+                            or "percentile" in alias_key.lower()
+                        )
+                    ):
+                        continue
                     values[alias_key] = value
                     self._publish_ml_feature(alias_key, value)
 
@@ -2834,6 +2855,18 @@ class IbsStrategy(bt.Strategy):
                 align_to_date=align_to_date,
                 marker=marker,
             )
+            percentile_aliases = [
+                alias_key
+                for alias_key in FEATURE_KEY_ALIASES.get(base_key, ())
+                if alias_key != base_key
+                and (
+                    alias_key.endswith("_pct")
+                    or "percentile" in alias_key.lower()
+                )
+            ]
+            for alias_key in dict.fromkeys(percentile_aliases):
+                values[alias_key] = pct
+                self._publish_ml_feature(alias_key, pct)
             record_param(f"{base_key}_pct", pct)
 
         sig_close = line_val(self.signal_data.close, ago=intraday_ago)
