@@ -1,5 +1,6 @@
 import json
 import sys
+import math
 import warnings
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ if str(SRC) not in sys.path:
 
 from models import loader as loader_module  # noqa: E402
 from models.loader import load_model_bundle  # noqa: E402
+from strategy import ibs_strategy as ibs_module  # noqa: E402
 from strategy.ibs_strategy import IbsStrategy, _metadata_feature_key  # noqa: E402
 from strategy.filter_column import FilterColumn  # noqa: E402
 from strategy.feature_utils import normalize_column_name  # noqa: E402
@@ -526,3 +528,118 @@ def test_cross_return_updates_ml_feature_collector():
     assert new_value == pytest.approx(0.58)
     assert strategy.ml_feature_collector["cl_hourly_return"] == pytest.approx(0.58)
     assert strategy.ml_feature_collector["cl_hourly_return_pipeline"] == pytest.approx(0.58)
+
+
+def test_collect_filter_values_updates_ml_collector(monkeypatch):
+    class DummyLine:
+        def __init__(self, value):
+            self.value = value
+
+        def __len__(self):
+            return 10
+
+        def __getitem__(self, idx):
+            return self.value
+
+    def fake_line_val(line, ago=0):
+        if line is None:
+            return None
+        return getattr(line, "value", line)
+
+    def fake_timeframed_line_val(line, *, data=None, timeframe=None, daily_ago=-1, intraday_ago=0):
+        return fake_line_val(line)
+
+    monkeypatch.setattr(ibs_module, "line_val", fake_line_val)
+    monkeypatch.setattr(ibs_module, "timeframed_line_val", fake_timeframed_line_val)
+
+    class EchoPercentileTracker:
+        def update(self, *_args, **_kwargs):
+            return _args[1] if len(_args) > 1 else None
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.percentile_tracker = EchoPercentileTracker()
+    dt_num = bt.date2num(datetime(2024, 1, 2, 9, 0))
+    daily_dt = bt.date2num(datetime(2024, 1, 1))
+
+    hourly = SimpleNamespace(
+        datetime=DummyLine(dt_num),
+        close=DummyLine(105.0),
+        high=DummyLine(110.0),
+        low=DummyLine(100.0),
+    )
+    strategy.hourly = hourly
+    strategy.prev_bar_pct_data = hourly
+    strategy.daily = SimpleNamespace(datetime=DummyLine(daily_dt), close=DummyLine(100.0))
+    strategy.signal_data = SimpleNamespace(close=DummyLine(float("nan")))
+    strategy.last_pivot_high = None
+    strategy.last_pivot_low = None
+    strategy.prev_pivot_high = None
+    strategy.prev_pivot_low = None
+    strategy.has_vix = False
+    strategy.vix_median = None
+    strategy.vix_data = None
+    strategy.dom_threshold = None
+
+    strategy.vol_z = DummyLine(0.27)
+    strategy.vol_z_data = SimpleNamespace(datetime=DummyLine(dt_num))
+    strategy.atr_z = DummyLine(0.5)
+    strategy.atr_z_data = SimpleNamespace(datetime=DummyLine(dt_num))
+    strategy.rsi = DummyLine(0.4)
+
+    strategy.prev_day_pct = MethodType(lambda self: 0.34, strategy)
+    strategy.prev_bar_pct = MethodType(lambda self: 0.12, strategy)
+    strategy.ibs = MethodType(lambda self: 0.55, strategy)
+
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+
+    params = [
+        "enablePrevDayPct",
+        "enablePrevBarPct",
+        "enableIBSEntry",
+        "enableATRZ",
+        "enableVolZ",
+        "enableRSIEntry",
+    ]
+    filter_columns = [FilterColumn(param, "", "", param) for param in params]
+    strategy.filter_columns = filter_columns
+    strategy.filter_keys = {col.parameter for col in filter_columns}
+    strategy.filter_column_keys = {col.column_key for col in filter_columns}
+    strategy.filter_columns_by_param = {col.parameter: [col] for col in filter_columns}
+    strategy.column_to_param = {col.column_key: col.parameter for col in filter_columns}
+
+    strategy.p = SimpleNamespace(
+        prev_bar_pct_tf="Hour",
+        atrTF="Hour",
+        volTF="Hour",
+    )
+
+    strategy.collect_filter_values()
+    collector = strategy.ml_feature_collector
+
+    expected_ibs = 0.55
+    expected_volz = 0.27
+    expected_atrz = 0.5
+    expected_rsi = 0.4
+
+    assert collector["price_usd"] == pytest.approx(105.0)
+    assert collector["prev_day_pctxvalue"] == pytest.approx(0.34)
+    assert collector["prev_bar_pct"] == pytest.approx(0.12)
+    assert collector["prev_bar_pct_pct"] == pytest.approx(0.12)
+    assert collector["ibs_pct"] == pytest.approx(expected_ibs)
+    assert collector["ibs_percentile"] == pytest.approx(expected_ibs)
+    assert collector["volz_pct"] == pytest.approx(expected_volz)
+    assert collector["volume_z_percentile"] == pytest.approx(expected_volz)
+    assert collector["atrz_pct"] == pytest.approx(expected_atrz)
+    assert collector["atr_z_percentile"] == pytest.approx(expected_atrz)
+    assert collector["rsi_pct"] == pytest.approx(expected_rsi)
+    assert collector["ibsxvolz"] == pytest.approx(expected_ibs * expected_volz)
+    assert collector["ibsxatrz"] == pytest.approx(expected_ibs * expected_atrz)
+    assert collector["rsixvolz"] == pytest.approx(expected_rsi * expected_volz)
+    assert collector["rsixatrz"] == pytest.approx(expected_rsi * expected_atrz)
+
+    for key, value in collector.items():
+        if value is not None:
+            assert not isinstance(value, float) or not math.isnan(value)
