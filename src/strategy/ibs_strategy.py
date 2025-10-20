@@ -215,6 +215,7 @@ ML_FEATURE_EVAL_OVERRIDES: dict[str, str] = {
     "pair_z_pct": "pair_z",
     "atrz_pct": "atrz",
     "ibsxatrz": "ibs",
+    "ibsxvolz": "ibs",
     "volz_pct": "volz",
     "datrz_pct": "datrz",
     "dvolz_pct": "dvolz",
@@ -231,6 +232,7 @@ ML_FEATURE_EVAL_OVERRIDES: dict[str, str] = {
 
 ML_FEATURE_DEPENDENCIES: dict[str, tuple[str, ...]] = {
     "ibsxatrz": ("enableATRZ",),
+    "ibsxvolz": ("enableVolZ",),
 }
 
 
