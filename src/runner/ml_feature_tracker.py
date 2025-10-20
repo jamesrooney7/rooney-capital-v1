@@ -180,10 +180,17 @@ class MlFeatureTracker:
         with self._lock:
             report: Dict[str, Mapping[str, object]] = {}
             for symbol, snapshot in self._snapshots.items():
+                missing_features = [
+                    feature
+                    for feature in snapshot.required
+                    if snapshot.features.get(feature) is None
+                ]
                 report[symbol] = {
                     "ready": snapshot.ready,
                     "required_features": snapshot.required,
                     "feature_count": len(snapshot.features),
+                    "missing_features": list(missing_features),
+                    "features": dict(snapshot.features),
                 }
             return report
 
