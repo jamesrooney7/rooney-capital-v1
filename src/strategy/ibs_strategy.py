@@ -2429,7 +2429,7 @@ class IbsStrategy(bt.Strategy):
             window,
             data_feed,
         )
-        if not pipeline:
+        if pipeline is None:
             return
 
         self._store_zscore_pipeline(
@@ -2643,10 +2643,40 @@ class IbsStrategy(bt.Strategy):
             data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
         if data_feed is None:
             return None
-        mean = bt.indicators.SimpleMovingAverage(data_feed.close, period=length)
-        std = bt.indicators.StandardDeviation(data_feed.close, period=window)
-        denom = bt.Max(std, 1e-12)
-        line = safe_div(data_feed.close - mean, denom, orig_den=std)
+
+        max_period = max(length, window)
+        feed_len: int | None = None
+        if max_period > 0:
+            try:
+                feed_len = len(getattr(data_feed, "close", data_feed))
+            except Exception:
+                try:
+                    feed_len = len(data_feed)
+                except Exception:
+                    feed_len = None
+            if feed_len is not None and feed_len < max_period:
+                logger.info(
+                    "Cross Z-score feed %s/%s not warm (%s < %s); deferring pipeline",
+                    symbol,
+                    timeframe,
+                    feed_len,
+                    max_period,
+                )
+                return None
+
+        try:
+            mean = bt.indicators.SimpleMovingAverage(data_feed.close, period=length)
+            std = bt.indicators.StandardDeviation(data_feed.close, period=window)
+            denom = bt.Max(std, 1e-12)
+            line = safe_div(data_feed.close - mean, denom, orig_den=std)
+        except (IndexError, ValueError) as exc:
+            logger.info(
+                "Cross Z-score feed %s/%s not ready (%s); deferring pipeline",
+                symbol,
+                timeframe,
+                exc,
+            )
+            return None
         pipeline = {
             "line": line,
             "mean": mean,
