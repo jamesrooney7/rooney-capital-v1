@@ -66,49 +66,101 @@ FRIENDLY_FILTER_NAMES: dict[str, str] = {
 
 
 FEATURE_KEY_ALIASES: dict[str, tuple[str, ...]] = {
-    "atrz_pct": ("atrz_pct", "atr_z_percentile"),
-    "daily_rsi": ("secondary_rsi_entry_daily",),
-    "daily_rsi_pct": ("secondary_rsi_percentile",),
+    # collect_filter_values price snapshot -> price_usd ML feature
+    "price_usd": ("price_usd",),
+    # enablePrevDayPct -> previous day return delta
+    "prev_day_pct": ("prev_day_pctxvalue",),
+    # enablePrevBarPct -> intraday return vs previous bar and its percentile
+    "prev_bar_pct": ("prev_bar_pct",),
+    "prev_bar_pct_pct": ("prev_bar_pct_pct",),
+    # enableIBSEntry/enableIBSExit -> hourly IBS percentile aliases
+    "ibs_pct": ("ibs_pct", "ibs_percentile"),
+    # enableDailyIBS -> daily IBS percentile aliases
     "daily_ibs_pct": ("daily_ibs_pct", "daily_ibs_percentile"),
+    # enablePairIBS -> paired IBS value and percentile
+    "pair_ibs": ("pair_ibs_daily",),
+    "pair_ibs_pct": ("pair_ibs_pct", "pair_ibs_percentile"),
+    # enablePairZ -> paired z-score value and percentile companion
+    "pair_z": ("pair_z_score_daily",),
+    "pair_z_pct": ("pair_z_pct",),
+    # enableATRZ -> intraday ATR z-score percentile
+    "atrz_pct": ("atrz_pct", "atr_z_percentile"),
+    # enableVolZ -> intraday volume z-score percentile
+    "volz_pct": ("volz_pct", "volume_z_percentile"),
+    # enableDATRZ -> daily ATR z-score percentile
     "datrz_pct": ("datrz_pct", "daily_atr_z_percentile"),
-    "dist_z": ("distance_z_entry_daily",),
+    # enableDVolZ -> daily volume z-score percentile
     "dvolz_pct": ("dvolz_pct", "daily_volume_z_percentile"),
-    "enableADX": ("adx_value",),
-    "enableBBW": ("bollinger_bandwidth_daily",),
-    "enableDailyATRPercentile": ("daily_atr_percentile",),
-    "enableDailyRangeCompression": ("daily_range_compression",),
+    # enableDistZ -> distance-from-high/low z-score and percentile
+    "dist_z": ("distance_z_entry_daily",),
+    "dist_z_pct": ("dist_z_pct",),
+    # enableMom3 -> three-period momentum z-score and percentile
+    "mom3_z": ("momentum_z_entry_daily",),
+    "mom3_z_pct": ("mom3_z_pct", "momentum_z_percentile"),
+    # enableTRATR -> TR/ATR compression percentile
+    "tratr_pct": ("tratr_pct", "tr_atr_percentile"),
+    # useValFilter -> valuation percentile band
+    "value_pct": ("value_pct",),
+    # enableRSIEntry -> intraday RSI percentile
+    "rsi_pct": ("rsi_pct",),
+    # enableRSIEntry2 -> secondary RSI percentile
+    "rsi2_pct": ("rsi2_pct", "secondary_rsi_percentile"),
+    # enableRSIEntry2Len -> intraday RSI length percentile
+    "rsi_len2_pct": ("rsi_len2_pct", "rsi_len_2_percentile"),
+    # enableRSIEntry14Len -> intraday RSI length snapshot
+    "enableRSIEntry14Len": ("rsi_len_14",),
+    # enableDailyRSI -> daily secondary RSI snapshot and percentile
+    "daily_rsi": ("secondary_rsi_entry_daily",),
+    "daily_rsi_pct": ("daily_rsi_pct",),
+    # enableDailyRSI14Len -> daily RSI length snapshot
     "enableDailyRSI14Len": ("daily_rsi_len_14",),
-    "enableDailySlope": ("daily_slope_fast",),
-    "enableDirDrift": ("hourly_directional_draft", "hourly_directional_drift"),
-    "enableDirDriftD": ("daily_directional_drift",),
-    "enableDonchProx": (
-        "donchian_proximity_to_nearest_band",
-        "donchian_proximity_daily_to_nearest_band",
-    ),
+    # enableADX -> hourly ADX reading
+    "enableADX": ("adx_value",),
+    # enableDADX -> daily ADX reading
     "enableDADX": ("daily_adx_value",),
+    # enableMASlope -> hourly moving-average slope
     "enableMASlope": ("ma_slope_fast",),
+    # enableDailySlope -> daily moving-average slope
+    "enableDailySlope": ("daily_slope_fast",),
+    # enableMASpread -> MA ribbon tightness (hourly & daily variants)
     "enableMASpread": (
         "ma_spread_ribbon_tightness",
         "ma_spread_daily_ribbon_tightness",
     ),
-    "enableOpenClose": ("open_close",),
-    "enableHourlyATRPercentile": ("hourly_atr_percentile",),
-    "enablePSAR": ("parabolic_sar_distance", "parabolic_sar_distance_daily"),
+    # enableDonchProx -> donchian proximity metrics
+    "enableDonchProx": (
+        "donchian_proximity_to_nearest_band",
+        "donchian_proximity_daily_to_nearest_band",
+    ),
+    # enableBBW -> Bollinger bandwidth percentile
+    "enableBBW": ("bollinger_bandwidth_daily",),
+    # enableRangeCompressionATR -> intraday range compression percentile
     "enableRangeCompressionATR": ("range_compression_atr",),
-    "enableRSIEntry14Len": ("rsi_len_14",),
+    # enableDailyRangeCompression -> daily range compression percentile
+    "enableDailyRangeCompression": ("daily_range_compression",),
+    # enableDirDrift -> hourly directional drift metrics
+    "enableDirDrift": ("hourly_directional_draft", "hourly_directional_drift"),
+    # enableDirDriftD -> daily directional drift metric
+    "enableDirDriftD": ("daily_directional_drift",),
+    # enablePSAR -> parabolic SAR distance (intraday & daily)
+    "enablePSAR": ("parabolic_sar_distance", "parabolic_sar_distance_daily"),
+    # enableSpiralER -> spiral efficiency ratio (intraday & daily)
     "enableSpiralER": ("spiral_efficiency_ratio", "spiral_efficiency_ratio_daily"),
-    "ibs_pct": ("ibs_pct", "ibs_percentile"),
-    "mom3_z": ("momentum_z_entry_daily",),
-    "mom3_z_pct": ("mom3_z_pct", "momentum_z_percentile"),
-    "pair_ibs": ("pair_ibs_daily",),
-    "pair_ibs_pct": ("pair_ibs_pct", "pair_ibs_percentile"),
-    "pair_z": ("pair_z_score_daily",),
-    "prev_day_pct": ("prev_day_pctxvalue",),
-    "rsi2_pct": ("secondary_rsi_percentile",),
-    "rsi_len2_pct": ("rsi_len2_pct", "rsi_len_2_percentile"),
-    "tratr_pct": ("tratr_pct", "tr_atr_percentile"),
-    "value_pct": ("value_pct",),
-    "volz_pct": ("volz_pct", "volume_z_percentile"),
+    # enableOpenClose -> session proximity flag
+    "enableOpenClose": ("open_close",),
+    # enableDailyATRPercentile -> direct percentile feed
+    "enableDailyATRPercentile": ("daily_atr_percentile",),
+    # enableHourlyATRPercentile -> direct percentile feed
+    "enableHourlyATRPercentile": ("hourly_atr_percentile",),
+    # percentile columns recorded directly from tracker snapshots
+    "daily_atr_percentile": ("daily_atr_percentile",),
+    "hourly_atr_percentile": ("hourly_atr_percentile",),
+    # Derived combos emitted after the filter loop
+    "ibsxatrz": ("ibsxatrz",),
+    "ibsxvolz": ("ibsxvolz",),
+    "rsixatrz": ("rsixatrz",),
+    "rsixvolz": ("rsixvolz",),
+    # z-score filter -> normalized price percentile
     "z_score": ("price_z_score_daily",),
 }
 
@@ -2546,8 +2598,9 @@ class IbsStrategy(bt.Strategy):
                 values[alias] = value
             feature_aliases = FEATURE_KEY_ALIASES.get(column_key)
             if feature_aliases:
-                for alias_key in feature_aliases:
+                for alias_key in dict.fromkeys(feature_aliases):
                     values[alias_key] = value
+                    self._publish_ml_feature(alias_key, value)
 
         def record_param(param_key: str, value):
             columns = self.filter_columns_by_param.get(param_key)
