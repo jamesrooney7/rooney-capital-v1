@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from runner.databento_bridge import DatabentoLiveData, QueueFanout, QueueSignal
+from runner.databento_bridge import Bar, DatabentoLiveData, QueueFanout, QueueSignal
 from runner.live_worker import LiveWorker, PreflightConfig, RuntimeConfig
 from runner.ml_feature_tracker import MlFeatureTracker
 
@@ -257,6 +257,66 @@ def test_large_warmup_batches_drain_without_stall():
     assert below_limit_index is not None
     assert below_limit_index < queue_limit + batch_size
 
+
+def test_wait_for_warmup_backlog_drain_blocks_until_empty():
+    symbol = "ES"
+    queue_manager = QueueFanout({symbol: symbol}, maxsize=256)
+    feed = DatabentoLiveData(symbol=symbol, queue_manager=queue_manager, backfill=False)
+
+    class _DummyLine:
+        def __setitem__(self, index, value):
+            return None
+
+    feed.lines = types.SimpleNamespace(
+        datetime=_DummyLine(),
+        open=_DummyLine(),
+        high=_DummyLine(),
+        low=_DummyLine(),
+        close=_DummyLine(),
+        volume=_DummyLine(),
+    )
+
+    worker = LiveWorker.__new__(LiveWorker)
+    worker._data_feeds = {symbol: feed}
+    worker._stop_event = threading.Event()
+    worker._historical_warmup_wait_log_interval = 0.0
+
+    index = pd.date_range("2024-01-01", periods=200, freq="1min", tz="UTC")
+    bars = [
+        Bar(
+            symbol=symbol,
+            timestamp=ts.to_pydatetime(),
+            open=100.0,
+            high=100.5,
+            low=99.5,
+            close=100.25,
+            volume=1000.0,
+        )
+        for ts in index
+    ]
+
+    feed.extend_warmup(bars)
+    assert feed.warmup_backlog_size() == len(bars)
+
+    drained = 0
+
+    def consumer() -> None:
+        nonlocal drained
+        time.sleep(0.05)
+        while feed.warmup_backlog_size() > 0:
+            result = feed._load()
+            if result:
+                drained += 1
+            time.sleep(0.0005)
+
+    thread = threading.Thread(target=consumer, daemon=True)
+    thread.start()
+
+    assert LiveWorker._wait_for_warmup_backlog_drain(worker, [symbol]) is True
+
+    thread.join(timeout=2)
+    assert feed.warmup_backlog_size() == 0
+    assert drained == len(bars)
 
 def test_warmup_marks_ml_bundle_ready_without_live_ticks():
     symbol = "ES"

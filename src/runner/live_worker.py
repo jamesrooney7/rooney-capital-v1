@@ -861,6 +861,20 @@ class LiveWorker:
             return
 
         logger.info("Historical data loaded, warming up indicators...")
+
+        drained_symbols = [
+            symbol
+            for symbol, count in self._historical_warmup_counts.items()
+            if int(count or 0) > 0
+        ]
+        if drained_symbols:
+            drained = self._wait_for_warmup_backlog_drain(drained_symbols)
+            if not drained:
+                logger.info(
+                    "Warmup backlog drain aborted before completion; skip indicator finalization"
+                )
+                return
+
         self._finalize_indicator_warmup()
 
     def _warmup_symbol_indicators(self, symbol: str, data: Any) -> None:
@@ -982,6 +996,53 @@ class LiveWorker:
             return len(deque_obj)
         except Exception:  # pragma: no cover - defensive guard
             return 0
+
+    def _wait_for_warmup_backlog_drain(self, symbols: Sequence[str]) -> bool:
+        if not symbols:
+            return True
+
+        tracked: dict[str, Any] = {}
+        for raw_symbol in symbols:
+            if raw_symbol is None:
+                continue
+            symbol = str(raw_symbol)
+            if not symbol:
+                continue
+            feed = self._data_feeds.get(symbol)
+            if feed is None:
+                continue
+            tracked[symbol] = feed
+
+        if not tracked:
+            return True
+
+        log_interval = max(float(self._historical_warmup_wait_log_interval), 0.0)
+        next_log = time.monotonic() + log_interval if log_interval else None
+
+        while not self._stop_event.is_set():
+            pending: list[tuple[str, int]] = []
+            for symbol, feed in tracked.items():
+                backlog = self._warmup_backlog_size(feed)
+                if backlog > 0:
+                    pending.append((symbol, backlog))
+
+            if not pending:
+                return True
+
+            if next_log is not None:
+                now = time.monotonic()
+                if now >= next_log:
+                    summary = ", ".join(f"{symbol}:{size}" for symbol, size in pending)
+                    logger.info(
+                        "Waiting for warmup backlog to drain (%s)",
+                        summary,
+                    )
+                    next_log = now + log_interval
+
+            time.sleep(0.05)
+
+        logger.debug("Warmup backlog drain aborted: stop requested")
+        return False
 
     def _convert_databento_to_bt_bars(self, symbol: str, data: Any) -> list[Bar]:
         if data is None:
