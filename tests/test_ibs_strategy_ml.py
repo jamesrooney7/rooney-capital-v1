@@ -21,7 +21,11 @@ if str(SRC) not in sys.path:
 from models import loader as loader_module  # noqa: E402
 from models.loader import load_model_bundle  # noqa: E402
 from strategy import ibs_strategy as ibs_module  # noqa: E402
-from strategy.ibs_strategy import IbsStrategy, _metadata_feature_key  # noqa: E402
+from strategy.ibs_strategy import (  # noqa: E402
+    IbsStrategy,
+    _metadata_feature_key,
+    clamp_period,
+)
 from strategy.filter_column import FilterColumn  # noqa: E402
 from strategy.feature_utils import normalize_column_name  # noqa: E402
 
@@ -279,6 +283,120 @@ def test_ml_features_request_cross_zscore_populates_snapshot():
 
     assert normalized["tlt_daily_z_score"] == pytest.approx(0.75)
     assert normalized["tlt_daily_z_pipeline"] == pytest.approx(1.5)
+
+
+def test_cross_zscore_recovers_after_missing_feed(monkeypatch):
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    strategy.p = SimpleNamespace()
+    strategy._periods = []
+    strategy.max_period = 0
+    strategy.cross_zscore_cache = {}
+    strategy.cross_data_cache = {}
+    strategy.cross_data_missing = set()
+    strategy._ml_feature_snapshot = {}
+    strategy.ml_feature_collector = {}
+    strategy.cross_zscore_meta = {}
+    strategy.return_meta = {}
+
+    published: dict[str, list[float | None]] = {}
+
+    def fake_publish(self, key, value, _propagating=False):
+        if isinstance(key, str):
+            published.setdefault(key, []).append(value)
+
+    strategy._publish_ml_feature = MethodType(fake_publish, strategy)
+
+    symbol = "6E"
+    timeframe = "Hour"
+    enable_param = "enable6EZScoreHour"
+    feature_key = _metadata_feature_key(symbol, timeframe, "z_score")
+    pipeline_key = _metadata_feature_key(symbol, timeframe, "z_pipeline")
+    meta: dict[str, object] = {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "feed_suffix": "hour",
+        "len_param": "sixEZLenHour",
+        "window_param": "sixEZWindowHour",
+        "len_aliases": ("sixEZLenHour",),
+        "window_aliases": ("sixEZWindowHour",),
+        "feature_key": feature_key,
+        "pipeline_feature_key": pipeline_key,
+        "enable_param": enable_param,
+        "line": None,
+        "data": None,
+        "denom": None,
+    }
+    strategy.cross_zscore_meta[enable_param] = meta
+
+    setattr(strategy.p, "sixEZLenHour", 20)
+    setattr(strategy.p, "sixEZWindowHour", 252)
+
+    feed = SimpleNamespace(close=object())
+    sentinel_line = object()
+    sentinel_denom = object()
+    get_calls = {"count": 0}
+    build_calls = {"count": 0}
+    added_periods: list[int] = []
+
+    def fake_get(self, sym, suffix, enable):
+        get_calls["count"] += 1
+        if get_calls["count"] == 1:
+            return None
+        assert sym == symbol
+        assert suffix == "hour"
+        assert enable == enable_param
+        return feed
+
+    def fake_build(
+        self,
+        sym,
+        tf,
+        suffix,
+        length,
+        window,
+        data_feed=None,
+    ):
+        build_calls["count"] += 1
+        assert sym == symbol
+        assert tf == timeframe
+        assert suffix == "hour"
+        assert data_feed is feed
+        assert length == clamp_period(20)
+        assert window == clamp_period(252)
+        return {
+            "line": sentinel_line,
+            "mean": object(),
+            "std": object(),
+            "denom": sentinel_denom,
+            "data": data_feed,
+        }
+
+    def fake_addminperiod(self, period):
+        added_periods.append(period)
+
+    monkeypatch.setattr(ibs_module, "timeframed_line_val", lambda line, **_: 1.23 if line is sentinel_line else (2.34 if line is sentinel_denom else None))
+
+    strategy._get_cross_feed = MethodType(fake_get, strategy)
+    strategy._build_cross_zscore_pipeline = MethodType(fake_build, strategy)
+    strategy.addminperiod = MethodType(fake_addminperiod, strategy)
+
+    result_first = strategy._record_cross_zscore_snapshot(meta)
+    assert result_first == (None, None)
+    assert meta["line"] is None
+    assert build_calls["count"] == 0
+
+    result_second = strategy._record_cross_zscore_snapshot(meta)
+    assert result_second == (pytest.approx(1.23), pytest.approx(2.34))
+    assert meta["line"] is sentinel_line
+    assert meta["denom"] is sentinel_denom
+    assert meta["data"] is feed
+    assert build_calls["count"] == 1
+    assert get_calls["count"] >= 2
+    assert strategy._periods[-2:] == [clamp_period(20), clamp_period(252)]
+    assert strategy.max_period == clamp_period(252)
+    assert added_periods == [clamp_period(252)]
+    assert published[feature_key][-1] == pytest.approx(1.23)
+    assert published[pipeline_key][-1] == pytest.approx(2.34)
 
 
 def test_derive_ml_feature_keys_adds_enable_atrz_for_ibsxatrz():
