@@ -1,8 +1,9 @@
 import json
+import logging
 import sys
 import math
 import warnings
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
@@ -944,3 +945,160 @@ def test_collect_filter_values_updates_ml_collector(monkeypatch):
     for key, value in collector.items():
         if value is not None:
             assert not isinstance(value, float) or not math.isnan(value)
+
+
+def _build_strategy_for_logging(features, snapshot):
+    class DummyLine:
+        def __init__(self, values):
+            self.values = list(values)
+
+        def __len__(self):
+            return len(self.values)
+
+        def __getitem__(self, idx):
+            if idx < 0:
+                idx = len(self.values) + idx
+            return self.values[idx]
+
+    class DummyDateLine:
+        def __init__(self, dt):
+            self.dt = dt
+
+        def __len__(self):
+            return 1
+
+        def __getitem__(self, idx):
+            return 0.0
+
+        def date(self, idx=None):
+            return self.dt.date()
+
+        def datetime(self, idx=None):
+            return self.dt
+
+    class DummyData:
+        def __init__(self, dt_line, price_line):
+            self.datetime = dt_line
+            self.close = price_line
+            self.open = price_line
+            self.high = price_line
+            self.low = price_line
+
+        def __len__(self):
+            return len(self.close)
+
+    class DummyParams:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+        def __getattr__(self, name):  # pragma: no cover - default fallback
+            return False
+
+    strategy = IbsStrategy.__new__(IbsStrategy)
+    now = datetime(2024, 1, 2, 12, 0)
+    hourly = DummyData(DummyDateLine(now), DummyLine([101.0]))
+    daily = DummyData(DummyDateLine(now), DummyLine([100.0]))
+
+    strategy.hourly = hourly
+    strategy.daily = daily
+    strategy.signal_data = SimpleNamespace(close=DummyLine([float("nan")]))
+    strategy.update_pivots = MethodType(lambda self: None, strategy)
+    strategy.datr_pct_last_date = None
+    strategy.hatr_pct_last_dt = None
+    strategy._update_datr_pct = MethodType(lambda self: 0.0, strategy)
+    strategy._update_hatr_pct = MethodType(lambda self: 0.0, strategy)
+    strategy.datr_pct_pct = 0.0
+    strategy.hatr_pct_pct = 0.0
+    strategy.order = None
+    strategy.cancel = MethodType(lambda self, _order: None, strategy)
+    strategy.ibs = MethodType(lambda self: 0.5, strategy)
+    strategy.prev_daily_ibs = MethodType(lambda self: 0.4, strategy)
+    strategy.prev_daily_ibs_val = None
+    strategy.prev_ibs_val = None
+    strategy.twrc_data = None
+    strategy.twrc_last_dt = None
+    strategy.twrc_fast = None
+    strategy.twrc_base = None
+    strategy.pair_z_denom = None
+    strategy.atr_z_denom = None
+    strategy.vol_z_denom = None
+    strategy.dist_z_denom = None
+    strategy.mom3_z_denom = None
+    strategy.price_z_denom = None
+    strategy.datr_z_denom = None
+    strategy.dvol_z_denom = None
+    strategy.tratr_denom = None
+    strategy.can_execute = False
+    strategy.bar_executed = None
+    strategy.pending_exit = {}
+    strategy.trades_log = []
+    strategy.current_signal = None
+    strategy._ml_last_score = 0.42
+    strategy.collect_filter_values = MethodType(
+        lambda self, intraday_ago=0: snapshot,
+        strategy,
+    )
+
+    strategy.p = DummyParams(
+        symbol="ES",
+        trade_start=now.date() - timedelta(days=1),
+        ml_threshold=0.5,
+        ml_features=features,
+        enable_ibs_exit=False,
+    )
+
+    return strategy
+
+
+def test_next_logs_missing_ml_features_in_warning(caplog):
+    features = ["feat_a", "feat_b", "feat_c", "feat_d", "feat_e"]
+    snapshot = {
+        "feat_a": 1.0,
+        "feat_b": None,
+        "feat_c": None,
+        "feat_d": None,
+        "feat_e": None,
+        "ml_passed": False,
+    }
+    strategy = _build_strategy_for_logging(features, snapshot)
+
+    caplog.clear()
+    caplog.set_level(logging.WARNING, logger=ibs_module.logger.name)
+    strategy.next()
+
+    warning_records = [
+        record for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert warning_records, "Expected a warning record"
+    message = warning_records[-1].message
+    assert "Missing: feat_b, feat_c, feat_d, feat_e" in message
+
+
+def test_next_logs_full_missing_feature_list_in_debug(caplog):
+    features = [f"feat_{idx}" for idx in range(15)]
+    snapshot = {features[0]: 1.0, "ml_passed": False}
+    for feature in features[1:]:
+        snapshot[feature] = None
+
+    strategy = _build_strategy_for_logging(features, snapshot)
+
+    caplog.clear()
+    caplog.set_level(logging.DEBUG, logger=ibs_module.logger.name)
+    strategy.next()
+
+    warning_records = [
+        record for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert warning_records, "Expected a warning record"
+    warning_message = warning_records[-1].message
+    expected_remaining = len(features) - 1 - 8
+    assert expected_remaining > 0
+    assert f"... (+{expected_remaining} more)" in warning_message
+
+    debug_records = [
+        record for record in caplog.records if record.levelno == logging.DEBUG
+    ]
+    assert debug_records, "Expected debug log for missing features"
+    debug_message = debug_records[-1].message
+    for feature in features[1:]:
+        assert feature in debug_message
