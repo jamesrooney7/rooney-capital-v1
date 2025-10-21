@@ -507,6 +507,11 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     historical_warmup_compression = _normalise_warmup_compression(
         payload.get("historical_warmup_compression")
     )
+    logger.info(
+        "Historical warmup compression configured: %s (raw value: %r)",
+        historical_warmup_compression,
+        payload.get("historical_warmup_compression"),
+    )
 
     traderspost_payload = payload.get("traderspost") or {}
     webhook_url = (
@@ -798,14 +803,30 @@ class LiveWorker:
     def _symbol_requires_minute_warmup(self, symbol: str) -> bool:
         canonical = str(symbol or "").strip().upper()
         if not canonical:
+            logger.debug("Empty symbol requires minute warmup")
             return True
         minute_symbols = getattr(self, "_minute_warmup_symbols", set())
         if canonical in minute_symbols:
+            logger.debug(
+                "%s requires minute warmup (strategy uses minute timeframe)",
+                canonical,
+            )
             return True
         requirements = getattr(self, "_ml_feature_requirements", {})
         for feature in requirements.get(canonical, ()):  # type: ignore[arg-type]
             if self._feature_name_implies_minute(feature):
+                logger.debug(
+                    "%s requires minute warmup (ML feature %s implies minute data)",
+                    canonical,
+                    feature,
+                )
                 return True
+        logger.debug(
+            "%s does not require minute warmup (strategy timeframes: %s, ML features: %s)",
+            canonical,
+            "minute" if canonical in minute_symbols else "hourly/daily",
+            len(requirements.get(canonical, ())),
+        )
         return False
 
     def _build_dataset_groups(
@@ -1038,13 +1059,18 @@ class LiveWorker:
         if self._symbol_requires_minute_warmup(symbol):
             compression = "1min"
             if configured_compression != "1min":
-                logger.debug(
-                    "Minute warmup enforced for %s despite configured compression %s",
+                logger.warning(
+                    "Minute warmup enforced for %s despite configured compression %s (reason: strategy or ML features require minute data)",
                     symbol,
                     configured_compression,
                 )
         else:
             compression = configured_compression
+            logger.info(
+                "Using %s compression for %s historical warmup",
+                compression,
+                symbol,
+            )
 
         try:
             bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
@@ -1055,6 +1081,13 @@ class LiveWorker:
         if not bars:
             logger.info("No historical bars available for %s warmup", symbol)
             return
+
+        logger.info(
+            "Converted %s historical data to %d bars using %s compression",
+            symbol,
+            len(bars),
+            compression,
+        )
 
         if not hasattr(feed, "extend_warmup"):
             logger.debug("Data feed for %s does not support warmup extension", symbol)
