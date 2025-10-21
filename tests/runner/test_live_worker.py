@@ -43,6 +43,34 @@ def test_convert_databento_preaggregated_skips_resample(monkeypatch):
     assert resample_calls == []
 
 
+def test_convert_databento_hourly_compression_resamples_once():
+    worker = LiveWorker.__new__(LiveWorker)
+
+    periods = 120
+    index = pd.date_range("2024-01-01", periods=periods, freq="1min", tz="UTC")
+    increments = pd.Series(range(periods), dtype=float)
+    payload = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "open": 100.0 + increments,
+            "high": 100.5 + increments,
+            "low": 99.5 + increments,
+            "close": 100.25 + increments,
+            "volume": 1000 + increments,
+        }
+    )
+
+    hourly_bars = LiveWorker._convert_databento_to_bt_bars(
+        worker, "ES", payload, compression="1h"
+    )
+
+    assert len(hourly_bars) == periods // 60
+    assert hourly_bars[0].timestamp == index[0].to_pydatetime()
+    assert hourly_bars[1].timestamp == index[60].to_pydatetime()
+    assert hourly_bars[0].close == pytest.approx(payload["close"].iloc[59])
+    assert hourly_bars[1].close == pytest.approx(payload["close"].iloc[-1])
+
+
 def test_live_worker_clamps_backfill_start(monkeypatch, caplog):
     boundary = dt.datetime.now(dt.timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -63,6 +91,7 @@ def test_live_worker_clamps_backfill_start(monkeypatch, caplog):
         backfill=True,
         backfill_lookback=7 * 24 * 60,
         traderspost_webhook=None,
+        historical_warmup_compression="1min",
     )
 
     caplog.set_level(logging.INFO)

@@ -38,6 +38,7 @@ starting_cash: 250000          # Initial cash balance used for risk sizing.
 # Historical data loading (uses Historical API)
 load_historical_warmup: true
 historical_lookback_days: 252
+historical_warmup_compression: 1min  # Use 1h/1d to aggregate warmup bars when strategies allow.
 
 # Live streaming backfill (uses Live API - max 4 days)
 backfill: true                 # Hydrate recent historical bars before trading.

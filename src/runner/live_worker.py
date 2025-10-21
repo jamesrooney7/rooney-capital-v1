@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import logging
 import os
+import re
 import signal
 import socket
 import time
@@ -49,6 +50,26 @@ logger = logging.getLogger(__name__)
 
 
 LIVE_BACKFILL_MAX_DAYS = 4
+
+_VALID_WARMUP_COMPRESSIONS = {"1min", "1h", "1d"}
+_WARMUP_COMPRESSION_ALIASES = {
+    "minute": "1min",
+    "minutes": "1min",
+    "1minute": "1min",
+    "1m": "1min",
+    "min": "1min",
+    "mins": "1min",
+    "hour": "1h",
+    "hours": "1h",
+    "1hour": "1h",
+    "1hr": "1h",
+    "hourly": "1h",
+    "60m": "1h",
+    "day": "1d",
+    "1day": "1d",
+    "daily": "1d",
+}
+_MINUTE_FEATURE_PATTERN = re.compile(r"(^|[^a-z0-9])(\d{1,3}m|min|mins|minute|minutes)([^a-z0-9]|$)")
 
 __all__ = [
     "InstrumentRuntimeConfig",
@@ -201,6 +222,7 @@ class RuntimeConfig:
     historical_lookback_days: int = 252
     historical_warmup_batch_size: int = 5000
     historical_warmup_queue_soft_limit: int = 20000
+    historical_warmup_compression: str = "1min"
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     heartbeat_file: Optional[Path] = None
@@ -311,6 +333,28 @@ def _parse_time_of_day(value: Any) -> Optional[dt.time]:
             logger.warning("Invalid session start sequence %r; ignoring", value)
             return None
     return None
+
+
+def _normalise_warmup_compression(value: Any) -> str:
+    """Coerce ``value`` into one of the supported warmup compressions."""
+
+    if value is None:
+        return "1min"
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if not raw:
+            return "1min"
+        mapped = _WARMUP_COMPRESSION_ALIASES.get(raw, raw)
+        return mapped if mapped in _VALID_WARMUP_COMPRESSIONS else "1min"
+    if isinstance(value, (int, float)):
+        # Treat common numeric aliases (e.g. 60 -> 1h, 1440 -> 1d).
+        numeric = int(value)
+        if numeric == 60:
+            return "1h"
+        if numeric == 1440:
+            return "1d"
+        return "1min"
+    return "1min"
 
 
 def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
@@ -460,6 +504,10 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     if historical_warmup_queue_soft_limit < historical_warmup_batch_size:
         historical_warmup_queue_soft_limit = historical_warmup_batch_size
 
+    historical_warmup_compression = _normalise_warmup_compression(
+        payload.get("historical_warmup_compression")
+    )
+
     traderspost_payload = payload.get("traderspost") or {}
     webhook_url = (
         payload.get("traderspost_webhook")
@@ -511,6 +559,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         historical_lookback_days=historical_lookback_days,
         historical_warmup_batch_size=historical_warmup_batch_size,
         historical_warmup_queue_soft_limit=historical_warmup_queue_soft_limit,
+        historical_warmup_compression=historical_warmup_compression,
         queue_maxsize=queue_maxsize,
         heartbeat_interval=heartbeat_interval,
         heartbeat_file=heartbeat_file,
@@ -642,6 +691,7 @@ class LiveWorker:
         self._ml_feature_collectors: dict[str, MlFeatureTracker.Collector] = {}
         self._ml_feature_requirements: dict[str, tuple[str, ...]] = {}
         self._ml_warmup_published: dict[str, set[str]] = {}
+        self._minute_warmup_symbols: set[str] = set()
 
         self.traderspost_client: Optional[TradersPostClient]
         if config.traderspost_webhook:
@@ -672,6 +722,91 @@ class LiveWorker:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _strategy_uses_minute_timeframe(
+        self,
+        strategy_cls: type,
+        strategy_kwargs: Mapping[str, Any],
+    ) -> bool:
+        """Return ``True`` when timeframe params require minute warmup bars."""
+
+        for candidate in self._iter_timeframe_values(strategy_cls, strategy_kwargs):
+            if self._timeframe_value_requires_minutes(candidate):
+                return True
+        return False
+
+    @staticmethod
+    def _iter_timeframe_values(
+        strategy_cls: type | None,
+        overrides: Mapping[str, Any],
+    ) -> Sequence[Any]:
+        values: list[Any] = []
+        params = getattr(strategy_cls, "params", None) if strategy_cls is not None else None
+        values.extend(LiveWorker._extract_timeframe_values(params))
+        values.extend(LiveWorker._extract_timeframe_values(overrides))
+        return values
+
+    @staticmethod
+    def _extract_timeframe_values(source: Any) -> list[Any]:
+        extracted: list[Any] = []
+        if isinstance(source, Mapping):
+            for key, value in source.items():
+                key_str = str(key).lower()
+                if key_str.endswith("tf") or "timeframe" in key_str:
+                    extracted.append(value)
+        elif isinstance(source, Sequence) and not isinstance(source, (str, bytes)):
+            for item in source:
+                if isinstance(item, tuple) and len(item) >= 2:
+                    key = str(item[0]).lower()
+                    if key.endswith("tf") or "timeframe" in key:
+                        extracted.append(item[1])
+        return extracted
+
+    @staticmethod
+    def _timeframe_value_requires_minutes(value: Any) -> bool:
+        if isinstance(value, str):
+            label = value.strip().lower()
+            if not label:
+                return False
+            if label in {"minute", "minutes"}:
+                return True
+            if _MINUTE_FEATURE_PATTERN.search(label):
+                return True
+        try:
+            timeframe_value = int(value)
+        except Exception:
+            timeframe_value = None
+        if timeframe_value is not None:
+            try:
+                if timeframe_value == int(bt.TimeFrame.Minutes):
+                    return True
+            except Exception:  # pragma: no cover - defensive guard
+                return False
+        return value == bt.TimeFrame.Minutes
+
+    @staticmethod
+    def _feature_name_implies_minute(feature: Any) -> bool:
+        if not isinstance(feature, str):
+            return False
+        label = feature.strip().lower()
+        if not label:
+            return False
+        if label in {"minute", "minutes"}:
+            return True
+        return bool(_MINUTE_FEATURE_PATTERN.search(label))
+
+    def _symbol_requires_minute_warmup(self, symbol: str) -> bool:
+        canonical = str(symbol or "").strip().upper()
+        if not canonical:
+            return True
+        minute_symbols = getattr(self, "_minute_warmup_symbols", set())
+        if canonical in minute_symbols:
+            return True
+        requirements = getattr(self, "_ml_feature_requirements", {})
+        for feature in requirements.get(canonical, ()):  # type: ignore[arg-type]
+            if self._feature_name_implies_minute(feature):
+                return True
+        return False
 
     def _build_dataset_groups(
         self,
@@ -768,6 +903,10 @@ class LiveWorker:
             strategy_kwargs: Dict[str, Any] = {"symbol": symbol, "size": instrument_cfg.size}
             strategy_kwargs.update(bundle_kwargs)
             strategy_kwargs.update(instrument_cfg.strategy_overrides)
+
+            canonical_symbol = symbol.strip().upper()
+            if self._strategy_uses_minute_timeframe(NotifyingIbsStrategy, strategy_kwargs):
+                self._minute_warmup_symbols.add(canonical_symbol)
 
             if ml_features is not None:
                 collector = self.ml_feature_tracker.register_bundle(symbol, ml_features)
@@ -880,9 +1019,8 @@ class LiveWorker:
             )
             if not drained:
                 logger.info(
-                    "Warmup backlog drain aborted before completion; skip indicator finalization"
+                    "Warmup backlog drain aborted before completion; proceeding with available data"
                 )
-                return
 
         self._finalize_indicator_warmup()
 
@@ -894,8 +1032,22 @@ class LiveWorker:
             )
             return
 
+        configured_compression = _normalise_warmup_compression(
+            getattr(self.config, "historical_warmup_compression", "1min")
+        )
+        if self._symbol_requires_minute_warmup(symbol):
+            compression = "1min"
+            if configured_compression != "1min":
+                logger.debug(
+                    "Minute warmup enforced for %s despite configured compression %s",
+                    symbol,
+                    configured_compression,
+                )
+        else:
+            compression = configured_compression
+
         try:
-            bars = self._convert_databento_to_bt_bars(symbol, data)
+            bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
         except Exception as exc:
             logger.error("Failed to convert warmup data for %s: %s", symbol, exc)
             raise
@@ -1099,7 +1251,13 @@ class LiveWorker:
         )
         return False
 
-    def _convert_databento_to_bt_bars(self, symbol: str, data: Any) -> list[Bar]:
+    def _convert_databento_to_bt_bars(
+        self,
+        symbol: str,
+        data: Any,
+        *,
+        compression: str = "1min",
+    ) -> list[Bar]:
         if data is None:
             return []
 
@@ -1198,10 +1356,21 @@ class LiveWorker:
             ohlcv.columns = ["open", "high", "low", "close", "volume"]
             ohlcv = ohlcv.sort_index()
 
-        start = ohlcv.index.min()
-        end = ohlcv.index.max()
-        full_index = pd.date_range(start=start, end=end, freq="1min", tz=ohlcv.index.tz)
-        ohlcv = ohlcv.reindex(full_index)
+        ohlcv = ohlcv.loc[~ohlcv.index.duplicated(keep="last")]
+
+        compression_norm = _normalise_warmup_compression(compression)
+        if compression_norm != "1min":
+            aggregation = ohlcv.resample(compression_norm).agg(
+                {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+            )
+            if aggregation.empty:
+                return []
+            ohlcv = aggregation
+        else:
+            start = ohlcv.index.min()
+            end = ohlcv.index.max()
+            full_index = pd.date_range(start=start, end=end, freq="1min", tz=ohlcv.index.tz)
+            ohlcv = ohlcv.reindex(full_index)
 
         bars: list[Bar] = []
         last_close: Optional[float] = None
@@ -1560,6 +1729,8 @@ class LiveWorker:
         logger.info("Waiting for initial data from Databento feeds...")
 
         if not self._wait_for_initial_data():
+            self._stop_event.set()
+            logger.info("Cerebro runtime aborted: initial data unavailable")
             return
 
         try:

@@ -22,6 +22,7 @@ def _runtime_config(symbol: str) -> RuntimeConfig:
         historical_lookback_days=1,
         historical_warmup_batch_size=1,
         historical_warmup_queue_soft_limit=1,
+        historical_warmup_compression="1min",
         queue_maxsize=8,
         heartbeat_interval=None,
         heartbeat_file=None,

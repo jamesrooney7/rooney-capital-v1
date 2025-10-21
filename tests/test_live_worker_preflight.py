@@ -58,6 +58,7 @@ def _successful_config(preflight: PreflightConfig | None = None) -> RuntimeConfi
         heartbeat_write_interval=30.0,
         poll_interval=0.1,
         traderspost_webhook="https://example.com/webhook",
+        historical_warmup_compression="1min",
         instruments={},
         preflight=preflight or PreflightConfig(),
         killswitch=False,
