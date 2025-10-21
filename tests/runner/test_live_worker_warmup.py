@@ -14,7 +14,7 @@ from runner.live_worker import LiveWorker, PreflightConfig, RuntimeConfig
 from runner.ml_feature_tracker import MlFeatureTracker
 
 
-def _runtime_config(symbols, batch_size, queue_limit) -> RuntimeConfig:
+def _runtime_config(symbols, batch_size, queue_limit, compression: str = "1min") -> RuntimeConfig:
     return RuntimeConfig(
         databento_api_key="demo-key",
         contract_map_path=Path("Data/Databento_contract_map.yml"),
@@ -28,6 +28,7 @@ def _runtime_config(symbols, batch_size, queue_limit) -> RuntimeConfig:
         historical_lookback_days=1,
         historical_warmup_batch_size=batch_size,
         historical_warmup_queue_soft_limit=queue_limit,
+        historical_warmup_compression=compression,
         queue_maxsize=64,
         heartbeat_interval=None,
         heartbeat_file=None,
@@ -126,6 +127,153 @@ def test_historical_warmup_batches_respect_queue_limit():
         assert (
             max_backlog[symbol] <= expected_limit
         ), f"Warmup backlog exceeded limit for {symbol}"
+
+
+def test_warmup_symbol_indicators_hourly_compression_reduces_bars():
+    symbol = "ES"
+    batch_size = 100
+    queue_limit = 200
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.config = _runtime_config([symbol], batch_size, queue_limit, compression="1h")
+    worker.symbols = (symbol,)
+    worker._data_feeds = {}
+    worker._historical_warmup_counts = {}
+    worker._stop_event = threading.Event()
+    worker._historical_warmup_wait_log_interval = 0.0
+    worker._historical_warmup_lock = threading.Lock()
+    worker._historical_warmup_started = False
+
+    class _Feed:
+        def __init__(self) -> None:
+            self.batches: list[list[Bar]] = []
+
+        def extend_warmup(self, bars):
+            batch = list(bars)
+            self.batches.append(batch)
+            return len(batch)
+
+        def warmup_backlog_size(self):
+            return 0
+
+    feed = _Feed()
+    worker._data_feeds[symbol] = feed
+
+    periods = 180
+    index = pd.date_range("2024-01-01", periods=periods, freq="1min", tz="UTC")
+    increments = pd.Series(range(periods), dtype=float)
+    payload = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "open": 100.0 + increments,
+            "high": 100.5 + increments,
+            "low": 99.5 + increments,
+            "close": 100.25 + increments,
+            "volume": 1000 + increments,
+        }
+    )
+
+    LiveWorker._warmup_symbol_indicators(worker, symbol, payload)
+
+    total_bars = sum(len(batch) for batch in feed.batches)
+    assert total_bars == periods // 60
+    assert worker._historical_warmup_counts[symbol] == periods // 60
+    assert feed.batches
+    assert feed.batches[0][0].timestamp == index[0].to_pydatetime()
+
+
+def test_warmup_symbol_indicators_forces_minute_when_required():
+    symbol = "ES"
+    batch_size = 100
+    queue_limit = 200
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.config = _runtime_config([symbol], batch_size, queue_limit, compression="1h")
+    worker.symbols = (symbol,)
+    worker._data_feeds = {}
+    worker._historical_warmup_counts = {}
+    worker._stop_event = threading.Event()
+    worker._historical_warmup_wait_log_interval = 0.0
+    worker._historical_warmup_lock = threading.Lock()
+    worker._historical_warmup_started = False
+    worker._minute_warmup_symbols = {symbol}
+
+    class _Feed:
+        def __init__(self) -> None:
+            self.counts: list[int] = []
+
+        def extend_warmup(self, bars):
+            batch = list(bars)
+            self.counts.append(len(batch))
+            return len(batch)
+
+        def warmup_backlog_size(self):
+            return 0
+
+    feed = _Feed()
+    worker._data_feeds[symbol] = feed
+
+    periods = 90
+    index = pd.date_range("2024-01-01", periods=periods, freq="1min", tz="UTC")
+    payload = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "price": 100.0 + pd.Series(range(periods), dtype=float) * 0.1,
+            "volume": 1000 + pd.Series(range(periods), dtype=float),
+        }
+    )
+
+    LiveWorker._warmup_symbol_indicators(worker, symbol, payload)
+
+    assert sum(feed.counts) == periods
+    assert worker._historical_warmup_counts[symbol] == periods
+
+
+def test_warmup_symbol_indicators_ml_feature_minute_detection():
+    symbol = "ES"
+    batch_size = 100
+    queue_limit = 200
+    worker = LiveWorker.__new__(LiveWorker)
+    worker.config = _runtime_config([symbol], batch_size, queue_limit, compression="1h")
+    worker.symbols = (symbol,)
+    worker._data_feeds = {}
+    worker._historical_warmup_counts = {}
+    worker._stop_event = threading.Event()
+    worker._historical_warmup_wait_log_interval = 0.0
+    worker._historical_warmup_lock = threading.Lock()
+    worker._historical_warmup_started = False
+    worker._ml_feature_requirements = {symbol: ("es_1m_return",)}
+
+    class _Feed:
+        def __init__(self) -> None:
+            self.counts: list[int] = []
+
+        def extend_warmup(self, bars):
+            batch = list(bars)
+            self.counts.append(len(batch))
+            return len(batch)
+
+        def warmup_backlog_size(self):
+            return 0
+
+    feed = _Feed()
+    worker._data_feeds[symbol] = feed
+
+    periods = 60
+    index = pd.date_range("2024-01-01", periods=periods, freq="1min", tz="UTC")
+    payload = pd.DataFrame(
+        {
+            "ts_event": index.view("int64"),
+            "open": 100.0,
+            "high": 100.5,
+            "low": 99.5,
+            "close": 100.25,
+            "volume": 1000,
+        }
+    )
+
+    LiveWorker._warmup_symbol_indicators(worker, symbol, payload)
+
+    assert sum(feed.counts) == periods
+    assert worker._historical_warmup_counts[symbol] == periods
 
 
 def test_large_warmup_batches_drain_without_stall():
