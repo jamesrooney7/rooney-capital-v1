@@ -1,3 +1,5 @@
+import datetime as dt
+import logging
 import math
 import threading
 import time
@@ -258,7 +260,7 @@ def test_large_warmup_batches_drain_without_stall():
     assert below_limit_index < queue_limit + batch_size
 
 
-def test_wait_for_warmup_backlog_drain_blocks_until_empty():
+def test_drain_warmup_backlog_blocks_until_empty():
     symbol = "ES"
     queue_manager = QueueFanout({symbol: symbol}, maxsize=256)
     feed = DatabentoLiveData(symbol=symbol, queue_manager=queue_manager, backfill=False)
@@ -312,11 +314,84 @@ def test_wait_for_warmup_backlog_drain_blocks_until_empty():
     thread = threading.Thread(target=consumer, daemon=True)
     thread.start()
 
-    assert LiveWorker._wait_for_warmup_backlog_drain(worker, [symbol]) is True
+    assert LiveWorker._drain_warmup_backlog(worker, [symbol]) is True
 
     thread.join(timeout=2)
     assert feed.warmup_backlog_size() == 0
     assert drained == len(bars)
+
+
+def test_drain_warmup_backlog_handles_large_queue(caplog):
+    symbol = "ES"
+    queue_manager = QueueFanout({symbol: symbol}, maxsize=400000)
+    feed = DatabentoLiveData(symbol=symbol, queue_manager=queue_manager, backfill=False)
+
+    class _DummyLine:
+        def __setitem__(self, index, value):
+            return None
+
+    feed.lines = types.SimpleNamespace(
+        datetime=_DummyLine(),
+        open=_DummyLine(),
+        high=_DummyLine(),
+        low=_DummyLine(),
+        close=_DummyLine(),
+        volume=_DummyLine(),
+    )
+
+    worker = LiveWorker.__new__(LiveWorker)
+    worker._data_feeds = {symbol: feed}
+    worker._stop_event = threading.Event()
+    worker._historical_warmup_wait_log_interval = 0.0
+
+    total_bars = 310_000
+    start = dt.datetime(2024, 1, 1, tzinfo=dt.timezone.utc)
+    bars = [
+        Bar(
+            symbol=symbol,
+            timestamp=start + dt.timedelta(minutes=index),
+            open=100.0,
+            high=100.5,
+            low=99.5,
+            close=100.25,
+            volume=1000.0,
+        )
+        for index in range(total_bars)
+    ]
+
+    feed.extend_warmup(bars)
+    assert feed.warmup_backlog_size() == total_bars
+
+    drained = 0
+
+    def consumer() -> None:
+        nonlocal drained
+        while feed.warmup_backlog_size() > 0:
+            result = feed._load()
+            if result:
+                drained += 1
+
+    thread = threading.Thread(target=consumer, daemon=True)
+    thread.start()
+
+    caplog.set_level(logging.INFO)
+
+    assert LiveWorker._drain_warmup_backlog(
+        worker,
+        [symbol],
+        poll_interval=0.001,
+        timeout=30.0,
+    )
+
+    thread.join(timeout=5)
+    assert feed.warmup_backlog_size() == 0
+    assert drained == total_bars
+    assert not any(
+        "Warmup backlog drain aborted" in record.message
+        or "Warmup backlog drain timed out" in record.message
+        for record in caplog.records
+    )
+
 
 def test_warmup_marks_ml_bundle_ready_without_live_ticks():
     symbol = "ES"
