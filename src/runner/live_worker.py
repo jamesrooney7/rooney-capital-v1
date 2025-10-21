@@ -69,7 +69,8 @@ _WARMUP_COMPRESSION_ALIASES = {
     "1day": "1d",
     "daily": "1d",
 }
-_MINUTE_FEATURE_PATTERN = re.compile(r"(^|[^a-z0-9])(\d{1,3}m|min|mins|minute|minutes)([^a-z0-9]|$)")
+_MINUTE_FEATURE_PATTERN = re.compile(r"(?<!\d)\d{2,3}m\b|\b(?:min|mins|minute|minutes)\b")
+
 
 __all__ = [
     "InstrumentRuntimeConfig",
