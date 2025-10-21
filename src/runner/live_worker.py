@@ -868,7 +868,16 @@ class LiveWorker:
             if int(count or 0) > 0
         ]
         if drained_symbols:
-            drained = self._wait_for_warmup_backlog_drain(drained_symbols)
+            total_backlog = sum(
+                int(self._historical_warmup_counts.get(symbol, 0))
+                for symbol in drained_symbols
+            )
+            timeout = max(60.0, min(total_backlog * 0.001, 600.0))
+            drained = self._drain_warmup_backlog(
+                drained_symbols,
+                poll_interval=0.05,
+                timeout=timeout,
+            )
             if not drained:
                 logger.info(
                     "Warmup backlog drain aborted before completion; skip indicator finalization"
@@ -997,7 +1006,14 @@ class LiveWorker:
         except Exception:  # pragma: no cover - defensive guard
             return 0
 
-    def _wait_for_warmup_backlog_drain(self, symbols: Sequence[str]) -> bool:
+    def _drain_warmup_backlog(
+        self,
+        symbols: Sequence[str],
+        *,
+        poll_interval: Optional[float] = None,
+        max_backlog_poll_iterations: Optional[int] = None,
+        timeout: Optional[float] = None,
+    ) -> bool:
         if not symbols:
             return True
 
@@ -1016,32 +1032,71 @@ class LiveWorker:
         if not tracked:
             return True
 
+        sleep_interval = 0.05 if poll_interval is None else max(float(poll_interval), 0.0)
         log_interval = max(float(self._historical_warmup_wait_log_interval), 0.0)
         next_log = time.monotonic() + log_interval if log_interval else None
+        start_time = time.monotonic()
+        iterations = 0
 
         while not self._stop_event.is_set():
-            pending: list[tuple[str, int]] = []
+            pending: dict[str, int] = {}
             for symbol, feed in tracked.items():
                 backlog = self._warmup_backlog_size(feed)
                 if backlog > 0:
-                    pending.append((symbol, backlog))
+                    pending[symbol] = backlog
 
             if not pending:
                 return True
 
-            if next_log is not None:
-                now = time.monotonic()
-                if now >= next_log:
-                    summary = ", ".join(f"{symbol}:{size}" for symbol, size in pending)
-                    logger.info(
-                        "Waiting for warmup backlog to drain (%s)",
-                        summary,
-                    )
-                    next_log = now + log_interval
+            iterations += 1
+            now = time.monotonic()
 
-            time.sleep(0.05)
+            if timeout is not None and now - start_time >= timeout:
+                summary = ", ".join(
+                    f"{symbol}:{size}" for symbol, size in sorted(pending.items())
+                )
+                logger.warning(
+                    "Warmup backlog drain timed out after %.1f seconds; outstanding=%s",
+                    now - start_time,
+                    summary or "none",
+                )
+                return False
 
-        logger.debug("Warmup backlog drain aborted: stop requested")
+            if (
+                max_backlog_poll_iterations is not None
+                and iterations >= max_backlog_poll_iterations
+            ):
+                summary = ", ".join(
+                    f"{symbol}:{size}" for symbol, size in sorted(pending.items())
+                )
+                logger.warning(
+                    "Warmup backlog drain aborted after %s iterations; outstanding=%s",
+                    iterations,
+                    summary or "none",
+                )
+                return False
+
+            if next_log is not None and now >= next_log:
+                summary = ", ".join(
+                    f"{symbol}:{size}" for symbol, size in sorted(pending.items())
+                )
+                logger.info(
+                    "Waiting for warmup backlog to drain (%s)",
+                    summary,
+                )
+                next_log = now + log_interval
+
+            time.sleep(sleep_interval)
+
+        summary = ", ".join(
+            f"{symbol}:{self._warmup_backlog_size(feed)}"
+            for symbol, feed in sorted(tracked.items())
+            if self._warmup_backlog_size(feed) > 0
+        )
+        logger.debug(
+            "Warmup backlog drain aborted: stop requested; outstanding=%s",
+            summary or "none",
+        )
         return False
 
     def _convert_databento_to_bt_bars(self, symbol: str, data: Any) -> list[Bar]:
