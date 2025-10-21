@@ -1034,11 +1034,19 @@ class LiveWorker:
                 for symbol in drained_symbols
             )
             timeout = max(60.0, min(total_backlog * 0.001, 600.0))
+
+            # Enable fast warmup mode - skip expensive strategy processing
+            self._set_strategies_warmup_mode(enabled=True)
+
             drained = self._drain_warmup_backlog(
                 drained_symbols,
                 poll_interval=0.05,
                 timeout=timeout,
             )
+
+            # Disable warmup mode - resume full strategy processing
+            self._set_strategies_warmup_mode(enabled=False)
+
             if not drained:
                 logger.info(
                     "Warmup backlog drain aborted before completion; proceeding with available data"
@@ -1517,6 +1525,26 @@ class LiveWorker:
             collector.record_feature(key, value)
             warmed.add(key)
             snapshot[key] = value
+
+    def _set_strategies_warmup_mode(self, enabled: bool) -> None:
+        """Enable or disable historical warmup mode on all strategies."""
+        runstrats = getattr(self.cerebro, "runstrats", None)
+        if not runstrats:
+            return
+
+        for strat_list in runstrats:
+            if not strat_list:
+                continue
+            for strategy in strat_list:
+                try:
+                    setattr(strategy, "_in_historical_warmup", enabled)
+                except Exception:  # pragma: no cover - defensive guard
+                    logger.debug("Failed to set warmup mode on strategy", exc_info=True)
+
+        if enabled:
+            logger.info("Historical warmup mode ENABLED on all strategies (fast mode)")
+        else:
+            logger.info("Historical warmup mode DISABLED on all strategies (full processing)")
 
     def _finalize_indicator_warmup(self) -> None:
         if not self._historical_warmup_counts:

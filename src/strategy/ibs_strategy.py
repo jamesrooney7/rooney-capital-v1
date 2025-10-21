@@ -989,6 +989,7 @@ class IbsStrategy(bt.Strategy):
         self._ml_feature_snapshot: dict[str, float | None] = {}
         self._ml_warmup_pending: dict[tuple[str, str, str], dict[str, object]] = {}
         self.ml_feature_collector: dict[str, float | None] = self._ml_feature_snapshot
+        self._in_historical_warmup: bool = False  # Set by live_worker during backlog drain
 
         collector_param = getattr(self.p, "ml_feature_collector", None)
         if collector_param is not None:
@@ -5499,6 +5500,11 @@ class IbsStrategy(bt.Strategy):
         if ibs_val is None:
             self.prev_ibs_val = None
             self.prev_daily_ibs_val = None
+            return
+
+        # Skip expensive ML and filter processing during historical warmup
+        # Indicators still update automatically, but we don't run strategy logic
+        if self._in_historical_warmup:
             return
 
         price = line_val(self.hourly.close)
