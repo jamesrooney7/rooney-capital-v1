@@ -1094,13 +1094,6 @@ class LiveWorker:
         self._finalize_indicator_warmup()
 
     def _warmup_symbol_indicators(self, symbol: str, data: Any, compression: str = None) -> None:
-        feed = self._data_feeds.get(symbol)
-        if feed is None:
-            logger.warning(
-                "Skipping warmup for %s: no matching data feed initialised", symbol
-            )
-            return
-
         # If compression not specified, use configured compression (for backward compatibility)
         if compression is None:
             configured_compression = _normalise_warmup_compression(
@@ -1126,6 +1119,35 @@ class LiveWorker:
             symbol,
         )
 
+        # Determine which feed to queue bars to based on compression
+        # Daily bars must go to the daily resampled feed, hourly to hourly resampled feed,
+        # and minute/raw data goes to the base feed for Backtrader to resample
+        if compression == "1d":
+            feed_name = f"{symbol}_day"
+            feed = self._get_resampled_feed(symbol, "_day")
+            if feed is None:
+                logger.warning(
+                    "Skipping daily warmup for %s: no daily resampled feed found", symbol
+                )
+                return
+        elif compression == "1h":
+            feed_name = f"{symbol}_hour"
+            feed = self._get_resampled_feed(symbol, "_hour")
+            if feed is None:
+                logger.warning(
+                    "Skipping hourly warmup for %s: no hourly resampled feed found", symbol
+                )
+                return
+        else:
+            # Minute or raw data goes to base feed for resampling
+            feed_name = symbol
+            feed = self._data_feeds.get(symbol)
+            if feed is None:
+                logger.warning(
+                    "Skipping warmup for %s: no matching data feed initialised", symbol
+                )
+                return
+
         try:
             bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
         except Exception as exc:
@@ -1137,14 +1159,15 @@ class LiveWorker:
             return
 
         logger.info(
-            "Converted %s historical data to %d bars using %s compression",
+            "Converted %s historical data to %d bars using %s compression (targeting feed: %s)",
             symbol,
             len(bars),
             compression,
+            feed_name,
         )
 
         if not hasattr(feed, "extend_warmup"):
-            logger.debug("Data feed for %s does not support warmup extension", symbol)
+            logger.debug("Data feed %s does not support warmup extension", feed_name)
             return
 
         batch_size = max(int(self.config.historical_warmup_batch_size), 1)
@@ -1177,7 +1200,7 @@ class LiveWorker:
         previous = int(self._historical_warmup_counts.get(symbol, 0))
         self._historical_warmup_counts[symbol] = previous + total_appended
         logger.info(
-            "Buffered %d historical bars for %s warmup", total_appended, symbol
+            "Buffered %d historical bars for %s (feed: %s)", total_appended, symbol, feed_name
         )
         if total_appended:
             self._mark_warmup_features_pending(symbol)
@@ -1590,6 +1613,20 @@ class LiveWorker:
             logger.info("Historical warmup mode ENABLED on all strategies (fast mode)")
         else:
             logger.info("Historical warmup mode DISABLED on all strategies (full processing)")
+
+    def _get_resampled_feed(self, symbol: str, suffix: str) -> Any:
+        """Get a resampled feed (e.g., {symbol}_day or {symbol}_hour).
+
+        Returns the resampled feed if found, otherwise None.
+        """
+        feed_name = f"{symbol}{suffix}"
+        try:
+            for data in self.cerebro.datas:
+                if getattr(data, '_name', None) == feed_name:
+                    return data
+        except Exception as exc:
+            logger.debug("Error accessing resampled feed %s: %s", feed_name, exc)
+        return None
 
     def _finalize_indicator_warmup(self) -> None:
         if not self._historical_warmup_counts:
