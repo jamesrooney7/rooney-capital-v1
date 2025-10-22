@@ -1388,6 +1388,13 @@ class IbsStrategy(bt.Strategy):
                     continue
                 data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
                 if data_feed is None:
+                    if matches_ml_feature:
+                        logging.debug(
+                            "Return indicator %s needed for ML but data feed %s_%s not found",
+                            feature_key or enable_param,
+                            symbol,
+                            feed_suffix,
+                        )
                     continue
                 default_len = getattr(self.p, meta["len_param"], 1)
                 lookback_raw = self._resolve_param_value(
@@ -1401,13 +1408,23 @@ class IbsStrategy(bt.Strategy):
                     lookback,
                     data_feed,
                 )
-                store_return_pipeline(meta, data_feed, pipeline, lookback)
+                if pipeline is None:
+                    logging.warning(
+                        "Failed to build return pipeline for %s (%s/%s)",
+                        feature_key or enable_param,
+                        symbol,
+                        tf_key,
+                    )
+                else:
+                    store_return_pipeline(meta, data_feed, pipeline, lookback)
 
         preload_symbols = {
             "6A",
             "6B",
             "6C",
             "6E",
+            "6J",
+            "6M",
             "6N",
             "6S",
             "TLT",
@@ -1451,6 +1468,13 @@ class IbsStrategy(bt.Strategy):
                     continue
                 data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
                 if data_feed is None:
+                    feature_key = meta.get("feature_key")
+                    logging.debug(
+                        "Return indicator %s skipped: data feed %s_%s not found",
+                        feature_key or enable_param,
+                        symbol,
+                        feed_suffix,
+                    )
                     continue
                 default_len = getattr(self.p, meta["len_param"], 1)
                 lookback_raw = self._resolve_param_value(
@@ -1464,7 +1488,16 @@ class IbsStrategy(bt.Strategy):
                     lookback,
                     data_feed,
                 )
-                store_return_pipeline(meta, data_feed, pipeline, lookback)
+                if pipeline is None:
+                    feature_key = meta.get("feature_key")
+                    logging.warning(
+                        "Failed to build return pipeline for %s (%s/%s)",
+                        feature_key or enable_param,
+                        symbol,
+                        tf_key,
+                    )
+                else:
+                    store_return_pipeline(meta, data_feed, pipeline, lookback)
 
         self.ml_feature_param_keys = self._derive_ml_feature_param_keys()
 
