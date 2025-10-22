@@ -1119,16 +1119,29 @@ class LiveWorker:
             symbol,
         )
 
-        # Queue all bars to the base feed regardless of compression
-        # Backtrader's resampled feeds (symbol_day, symbol_hour) will automatically
-        # consume from the base feed - they don't have extend_warmup() method
-        feed_name = symbol
-        feed = self._data_feeds.get(symbol)
+        # Determine target feed based on compression
+        # We need to queue directly to resampled feeds, but they don't have extend_warmup()
+        # So we'll add it dynamically if needed
+        if compression == "1d":
+            feed_name = f"{symbol}_day"
+            feed = self._get_resampled_feed(symbol, "_day")
+        elif compression == "1h":
+            feed_name = f"{symbol}_hour"
+            feed = self._get_resampled_feed(symbol, "_hour")
+        else:
+            # Minute data goes to base feed
+            feed_name = symbol
+            feed = self._data_feeds.get(symbol)
+
         if feed is None:
             logger.warning(
-                "Skipping warmup for %s: no matching data feed initialised", symbol
+                "Skipping %s warmup for %s: no matching feed found", compression, symbol
             )
             return
+
+        # Add extend_warmup() method to resampled feeds if missing
+        if not hasattr(feed, "extend_warmup"):
+            self._add_warmup_support_to_feed(feed, feed_name)
 
         try:
             bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
@@ -1141,16 +1154,12 @@ class LiveWorker:
             return
 
         logger.info(
-            "Converted %s historical data to %d %s bars (queuing to base feed: %s)",
+            "Converted %s historical data to %d %s bars (queuing to feed: %s)",
             symbol,
             len(bars),
             compression,
             feed_name,
         )
-
-        if not hasattr(feed, "extend_warmup"):
-            logger.debug("Data feed %s does not support warmup extension", feed_name)
-            return
 
         batch_size = max(int(self.config.historical_warmup_batch_size), 1)
         queue_limit = max(
@@ -1261,7 +1270,10 @@ class LiveWorker:
         if not symbols:
             return True
 
+        # Track all feeds that have warmup bars (base feeds AND resampled feeds)
         tracked: dict[str, Any] = {}
+
+        # Add base feeds
         for raw_symbol in symbols:
             if raw_symbol is None:
                 continue
@@ -1269,9 +1281,19 @@ class LiveWorker:
             if not symbol:
                 continue
             feed = self._data_feeds.get(symbol)
-            if feed is None:
-                continue
-            tracked[symbol] = feed
+            if feed is not None and hasattr(feed, 'warmup_backlog_size'):
+                tracked[symbol] = feed
+
+        # Add resampled feeds that have warmup support
+        try:
+            for data in self.cerebro.datas:
+                if not hasattr(data, 'warmup_backlog_size'):
+                    continue
+                feed_name = getattr(data, '_name', None)
+                if feed_name and feed_name not in tracked:
+                    tracked[feed_name] = data
+        except Exception as exc:
+            logger.debug("Error checking resampled feeds for warmup: %s", exc)
 
         if not tracked:
             return True
@@ -1609,6 +1631,56 @@ class LiveWorker:
         except Exception as exc:
             logger.debug("Error accessing resampled feed %s: %s", feed_name, exc)
         return None
+
+    def _add_warmup_support_to_feed(self, feed: Any, feed_name: str) -> None:
+        """Add extend_warmup() and warmup_backlog_size() to a resampled feed."""
+        import collections
+
+        # Create warmup queue if it doesn't exist
+        if not hasattr(feed, '_warmup_queue'):
+            feed._warmup_queue = collections.deque()
+
+        # Add extend_warmup method
+        def extend_warmup(bars: list) -> int:
+            """Queue bars for warmup processing."""
+            count = 0
+            for bar in bars:
+                feed._warmup_queue.append(bar)
+                count += 1
+            return count
+
+        # Add backlog size method
+        def warmup_backlog_size() -> int:
+            """Return number of queued warmup bars."""
+            return len(getattr(feed, '_warmup_queue', []))
+
+        # Save original _load method
+        if not hasattr(feed, '_original_load'):
+            feed._original_load = feed._load
+
+        # Wrap _load to consume warmup queue first
+        def _load_with_warmup():
+            """Load from warmup queue first, then fall back to original _load."""
+            warmup_queue = getattr(feed, '_warmup_queue', None)
+            if warmup_queue and len(warmup_queue) > 0:
+                bar = warmup_queue.popleft()
+                # Populate feed lines with bar data
+                feed.lines.datetime[0] = bt.date2num(bar.timestamp)
+                feed.lines.open[0] = bar.open
+                feed.lines.high[0] = bar.high
+                feed.lines.low[0] = bar.low
+                feed.lines.close[0] = bar.close
+                feed.lines.volume[0] = bar.volume
+                return True
+            # No warmup bars, use original load
+            return feed._original_load()
+
+        # Attach methods to feed
+        feed.extend_warmup = extend_warmup
+        feed.warmup_backlog_size = warmup_backlog_size
+        feed._load = _load_with_warmup
+
+        logger.info("Added warmup support to resampled feed: %s", feed_name)
 
     def _finalize_indicator_warmup(self) -> None:
         if not self._historical_warmup_counts:
