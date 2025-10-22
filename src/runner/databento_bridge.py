@@ -737,3 +737,229 @@ class DatabentoLiveData(bt.feeds.DataBase):
         """Return the number of buffered warmup bars awaiting consumption."""
 
         return len(self._warmup_bars)
+
+
+class ResampledLiveData(bt.feeds.DataBase):
+    """Hybrid feed that aggregates minute bars into daily/hourly with warmup support.
+
+    This feed operates in two modes:
+    1. Warmup mode: Consumes pre-aggregated daily/hourly bars from warmup queue
+    2. Live mode: Aggregates minute bars from source feed into daily/hourly bars
+
+    This design allows us to:
+    - Load 253 pre-aggregated daily bars during warmup (fast)
+    - Seamlessly switch to aggregating live minute bars (correct)
+    - Preserve full OHLC data for indicators
+    """
+
+    params = (
+        ("symbol", None),
+        ("source_feed", None),  # The minute-resolution feed to resample from
+        ("session_end_hour", 23),  # Hour when day closes (UTC)
+        ("session_end_minute", 0),
+        ("bar_interval_minutes", 1440),  # 1440=daily, 60=hourly
+        ("qcheck", 0.5),
+    )
+
+    def __init__(self, **kwargs) -> None:
+        # Set timeframe based on interval
+        interval = kwargs.get("bar_interval_minutes", 1440)
+        if interval >= 1440:
+            kwargs.setdefault("timeframe", bt.TimeFrame.Days)
+            kwargs.setdefault("compression", 1)
+        else:
+            kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
+            kwargs.setdefault("compression", interval)
+
+        super().__init__(**kwargs)
+
+        self._warmup_bars: "collections.deque[Bar]" = collections.deque()
+        self._current_bar: Optional[dict[str, Any]] = None
+        self._last_bar_timestamp: Optional[dt.datetime] = None
+        self._stopped = False
+
+    def start(self) -> None:
+        super().start()
+        logger.info("Starting ResampledLiveData for %s (%d-min bars)",
+                    self.p.symbol, self.p.bar_interval_minutes)
+
+    def stop(self) -> None:
+        logger.info("Stopping ResampledLiveData for %s", self.p.symbol)
+        super().stop()
+        self._stopped = True
+
+    def _load(self) -> Optional[bool]:
+        """Load next bar (from warmup queue or by aggregating from source)."""
+        if self._stopped:
+            return False
+
+        # Mode 1: Warmup - drain pre-aggregated bars from queue
+        if self._warmup_bars:
+            self._qcheck = 0.0  # Fast warmup
+            bar = self._warmup_bars.popleft()
+            return self._populate_lines_from_bar(bar)
+
+        # Mode 2: Live - aggregate minute bars from source feed
+        if not self._qcheck:
+            self._qcheck = self.p.qcheck or 0.5  # Restore normal qcheck
+
+        if not self.p.source_feed:
+            return None  # No source feed configured
+
+        # Try to aggregate minute bars into our timeframe
+        return self._aggregate_from_source()
+
+    def _aggregate_from_source(self) -> Optional[bool]:
+        """Aggregate minute bars from source feed into daily/hourly bars."""
+        source = self.p.source_feed
+
+        # Check if source has data available
+        if len(source) == 0:
+            return None
+
+        # Get current minute bar from source
+        minute_timestamp = bt.num2date(source.datetime[0])
+
+        # Determine if this minute bar belongs to a new aggregation period
+        if self._should_start_new_bar(minute_timestamp):
+            # Close and emit the previous bar if it exists
+            if self._current_bar is not None:
+                result = self._populate_lines_from_dict(self._current_bar)
+                self._current_bar = None
+                self._last_bar_timestamp = minute_timestamp
+                return result
+            self._last_bar_timestamp = minute_timestamp
+
+        # Aggregate this minute bar into current bar
+        self._aggregate_minute_bar(
+            timestamp=minute_timestamp,
+            open_price=source.open[0],
+            high_price=source.high[0],
+            low_price=source.low[0],
+            close_price=source.close[0],
+            volume=source.volume[0]
+        )
+
+        # Check if we should close this bar (end of period)
+        if self._is_bar_complete(minute_timestamp):
+            result = self._populate_lines_from_dict(self._current_bar)
+            self._current_bar = None
+            return result
+
+        return None  # Bar still building, not ready to emit
+
+    def _should_start_new_bar(self, timestamp: dt.datetime) -> bool:
+        """Check if this timestamp starts a new aggregation period."""
+        if self._current_bar is None:
+            return True  # No current bar, start fresh
+
+        current_start = self._current_bar['timestamp']
+
+        if self.p.bar_interval_minutes >= 1440:
+            # Daily bars: new bar if different day
+            return timestamp.date() != current_start.date()
+        else:
+            # Hourly bars: new bar if crossed hour boundary
+            hours_diff = (timestamp - current_start).total_seconds() / 3600
+            return hours_diff >= (self.p.bar_interval_minutes / 60)
+
+    def _is_bar_complete(self, timestamp: dt.datetime) -> bool:
+        """Check if current bar is complete and should be emitted."""
+        if self.p.bar_interval_minutes >= 1440:
+            # Daily bar: complete at session end
+            return (timestamp.hour == self.p.session_end_hour and
+                    timestamp.minute == self.p.session_end_minute)
+        else:
+            # Hourly bar: complete at top of next hour
+            return timestamp.minute == 0
+
+    def _aggregate_minute_bar(
+        self,
+        timestamp: dt.datetime,
+        open_price: float,
+        high_price: float,
+        low_price: float,
+        close_price: float,
+        volume: float
+    ) -> None:
+        """Add minute bar data to current aggregated bar."""
+        if self._current_bar is None:
+            # Start new bar
+            self._current_bar = {
+                'timestamp': timestamp,
+                'open': open_price,
+                'high': high_price,
+                'low': low_price,
+                'close': close_price,
+                'volume': volume
+            }
+        else:
+            # Update existing bar
+            self._current_bar['high'] = max(self._current_bar['high'], high_price)
+            self._current_bar['low'] = min(self._current_bar['low'], low_price)
+            self._current_bar['close'] = close_price
+            self._current_bar['volume'] += volume
+            self._current_bar['timestamp'] = timestamp  # Use latest timestamp
+
+    def _populate_lines_from_bar(self, bar: Bar) -> bool:
+        """Populate feed lines from a Bar object."""
+        self.lines.datetime[0] = bt.date2num(bar.timestamp)
+        self.lines.open[0] = bar.open
+        self.lines.high[0] = bar.high
+        self.lines.low[0] = bar.low
+        self.lines.close[0] = bar.close
+        self.lines.volume[0] = bar.volume
+        return True
+
+    def _populate_lines_from_dict(self, bar_dict: dict) -> bool:
+        """Populate feed lines from a dictionary."""
+        self.lines.datetime[0] = bt.date2num(bar_dict['timestamp'])
+        self.lines.open[0] = bar_dict['open']
+        self.lines.high[0] = bar_dict['high']
+        self.lines.low[0] = bar_dict['low']
+        self.lines.close[0] = bar_dict['close']
+        self.lines.volume[0] = bar_dict['volume']
+        return True
+
+    def extend_warmup(self, bars: Iterable[Bar]) -> int:
+        """Add pre-aggregated bars for warmup (called before live trading)."""
+        appended = 0
+        for bar in bars:
+            if not isinstance(bar, Bar):
+                logger.debug("Ignoring warmup payload of type %s", type(bar))
+                continue
+            self._warmup_bars.append(bar)
+            appended += 1
+        if appended:
+            logger.debug("Buffered %d warmup bars for %s", appended, self.p.symbol)
+        return appended
+
+    def warmup_backlog_size(self) -> int:
+        """Return number of buffered warmup bars awaiting consumption."""
+        return len(self._warmup_bars)
+
+
+class DailyResampledLiveData(ResampledLiveData):
+    """Daily resolution feed with warmup support and minute bar aggregation."""
+
+    params = (
+        ("symbol", None),
+        ("source_feed", None),
+        ("session_end_hour", 23),
+        ("session_end_minute", 0),
+        ("bar_interval_minutes", 1440),  # 1 day = 1440 minutes
+        ("qcheck", 0.5),
+    )
+
+
+class HourlyResampledLiveData(ResampledLiveData):
+    """Hourly resolution feed with warmup support and minute bar aggregation."""
+
+    params = (
+        ("symbol", None),
+        ("source_feed", None),
+        ("session_end_hour", 23),
+        ("session_end_minute", 0),
+        ("bar_interval_minutes", 60),  # 1 hour = 60 minutes
+        ("qcheck", 0.5),
+    )
