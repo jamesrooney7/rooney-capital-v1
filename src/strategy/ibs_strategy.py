@@ -4274,6 +4274,24 @@ class IbsStrategy(bt.Strategy):
             if pipeline_key:
                 record_value(pipeline_key, pipeline_val)
 
+            # Diagnostic: Log ALL daily return calculations to debug inconsistency
+            symbol = meta.get("symbol", "?")
+            tf = meta.get("timeframe", "?")
+            if tf == "Day" and symbol in ["CL", "6B", "6A", "GC", "SI"]:
+                data_feed = meta.get("data")
+                line = meta.get("line")
+                logging.info(
+                    "Daily return calc: %s=%s %s=%s | symbol=%s data_len=%d line_len=%d line_exists=%s",
+                    feature_key or "?",
+                    numeric,
+                    pipeline_key or "?",
+                    pipeline_val,
+                    symbol,
+                    len(data_feed) if data_feed is not None else 0,
+                    len(line) if line is not None else 0,
+                    line is not None,
+                )
+
         derived_pairs: dict[str, tuple[str, str]] = {
             "ibsxatrz": ("ibs", "atrz"),
             "ibsxvolz": ("ibs", "volz"),
