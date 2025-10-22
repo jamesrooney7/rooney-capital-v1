@@ -1085,6 +1085,23 @@ class IbsStrategy(bt.Strategy):
             meta["lookback"] = lookback
             meta["indicator"] = pipeline.get("indicator")
             meta["line"] = pipeline.get("line")
+
+            # Log initial cache attempt for daily returns
+            symbol = meta.get("symbol", "?")
+            tf = meta.get("timeframe", "?")
+            feature_key = meta.get("feature_key")
+            if tf == "Day" and symbol in ["CL", "6B", "6A", "GC", "SI", "NQ", "HG", "YM"]:
+                data_len = len(data_feed) if data_feed is not None else 0
+                line = pipeline.get("line") if pipeline else None
+                line_len = len(line) if line is not None else 0
+                logging.info(
+                    "Init cache: %s (symbol=%s) | data_len=%d line_len=%d",
+                    feature_key,
+                    symbol,
+                    data_len,
+                    line_len,
+                )
+
             self._record_cross_return_snapshot(meta)
 
         # Data series used for pivot calculations
@@ -2336,6 +2353,17 @@ class IbsStrategy(bt.Strategy):
         pct = change * 100.0
         meta["last_dt"] = dt_num
         meta["last_value"] = pct
+
+        # Log successful cache set for daily returns
+        symbol = meta.get("symbol", "?")
+        tf = meta.get("timeframe", "?")
+        if tf == "Day" and feature_key and "daily_return" in str(feature_key):
+            if not hasattr(self, "_init_cache_logged"):
+                self._init_cache_logged = set()
+            if feature_key not in self._init_cache_logged:
+                self._init_cache_logged.add(feature_key)
+                logging.info("Cached daily return: %s=%s (symbol=%s)", feature_key, pct, symbol)
+
         if feature_key:
             self._publish_ml_feature(feature_key, pct)
         if pipeline_key and pipeline_key != feature_key:
@@ -4273,6 +4301,24 @@ class IbsStrategy(bt.Strategy):
             pipeline_key = meta.get("pipeline_feature_key")
             if pipeline_key:
                 record_value(pipeline_key, pipeline_val)
+
+            # Diagnostic: Log ALL daily return calculations to debug inconsistency
+            symbol = meta.get("symbol", "?")
+            tf = meta.get("timeframe", "?")
+            if tf == "Day" and symbol in ["CL", "6B", "6A", "GC", "SI"]:
+                data_feed = meta.get("data")
+                line = meta.get("line")
+                logging.info(
+                    "Daily return calc: %s=%s %s=%s | symbol=%s data_len=%d line_len=%d line_exists=%s",
+                    feature_key or "?",
+                    numeric,
+                    pipeline_key or "?",
+                    pipeline_val,
+                    symbol,
+                    len(data_feed) if data_feed is not None else 0,
+                    len(line) if line is not None else 0,
+                    line is not None,
+                )
 
         derived_pairs: dict[str, tuple[str, str]] = {
             "ibsxatrz": ("ibs", "atrz"),
