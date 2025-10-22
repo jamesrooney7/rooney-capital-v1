@@ -2258,6 +2258,21 @@ class IbsStrategy(bt.Strategy):
                     intraday_ago=0,
                 )
             if val is None or math.isnan(val):
+                # Debug: Why did indicator line read fail?
+                if feature_key and "daily_return" in str(feature_key):
+                    symbol = meta.get("symbol", "?")
+                    tf = meta.get("timeframe", "?")
+                    line_len = len(line) if line is not None else 0
+                    data_len = len(data) if data is not None else 0
+                    logging.debug(
+                        "Return calc failed for %s: val=%s | symbol=%s tf=%s line_len=%d data_len=%d",
+                        feature_key,
+                        val,
+                        symbol,
+                        tf,
+                        line_len,
+                        data_len,
+                    )
                 if feature_key:
                     self._publish_ml_feature(feature_key, None)
                 if pipeline_key and pipeline_key != feature_key:
@@ -2662,13 +2677,40 @@ class IbsStrategy(bt.Strategy):
                     timeframe=meta.get("timeframe"),
                     intraday_ago=intraday_ago,
                 )
-            except Exception:
+            except Exception as e:
+                feature_key = meta.get("feature_key", "unknown")
+                logging.debug(
+                    "Exception reading pipeline line for %s: %s",
+                    feature_key,
+                    e,
+                )
                 raw_pipeline = None
             pipeline_val = self._coerce_numeric(raw_pipeline)
         else:
             pipeline_val = numeric
 
+        # Debug logging for mismatched values
+        feature_key = meta.get("feature_key")
         pipeline_key = meta.get("pipeline_feature_key")
+        if feature_key and pipeline_key and feature_key != pipeline_key:
+            if (numeric is None) != (pipeline_val is None):
+                symbol = meta.get("symbol", "?")
+                tf = meta.get("timeframe", "?")
+                data_feed = meta.get("data")
+                line_len = len(pipeline_line) if pipeline_line is not None else 0
+                data_len = len(data_feed) if data_feed is not None else 0
+                logging.warning(
+                    "Return value mismatch for %s: regular=%s pipeline=%s | "
+                    "symbol=%s tf=%s line_len=%d data_len=%d",
+                    feature_key,
+                    numeric,
+                    pipeline_val,
+                    symbol,
+                    tf,
+                    line_len,
+                    data_len,
+                )
+
         if pipeline_key:
             self._publish_ml_feature(pipeline_key, pipeline_val)
 
