@@ -2017,9 +2017,13 @@ class LiveWorker:
         for subscriber in self.subscribers:
             subscriber.start()
         self._stop_event.clear()
+
+        # Run historical warmup BEFORE starting Cerebro to ensure bars are loaded and drained
+        # Otherwise Cerebro starts consuming bars before drain completes
+        self._run_historical_warmup()
+
         self._cerebro_thread = threading.Thread(target=self._run_cerebro, name="cerebro-runner", daemon=True)
         self._cerebro_thread.start()
-        self._run_historical_warmup()
         self._update_heartbeat(status="running", force=True)
 
     def stop(self) -> None:
