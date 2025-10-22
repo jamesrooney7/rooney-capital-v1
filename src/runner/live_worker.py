@@ -220,10 +220,11 @@ class RuntimeConfig:
     backfill_days: Optional[int] = None
     backfill_lookback: int = 0
     load_historical_warmup: bool = False
-    historical_lookback_days: int = 252
+    historical_lookback_days: int = 252  # Daily bars lookback
+    historical_hourly_lookback_days: int = 15  # Hourly bars lookback (enough for 252 hourly bars)
     historical_warmup_batch_size: int = 5000
     historical_warmup_queue_soft_limit: int = 20000
-    historical_warmup_compression: str = "1min"
+    historical_warmup_compression: str = "1min"  # Deprecated: use separate daily/hourly loading
     queue_maxsize: int = 2048
     heartbeat_interval: Optional[int] = None
     heartbeat_file: Optional[Path] = None
@@ -477,6 +478,17 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
                 historical_lookback_days_raw,
             )
 
+    historical_hourly_lookback_days_raw = payload.get("historical_hourly_lookback_days")
+    historical_hourly_lookback_days = 15
+    if historical_hourly_lookback_days_raw is not None:
+        try:
+            historical_hourly_lookback_days = max(1, int(float(historical_hourly_lookback_days_raw)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid historical hourly lookback days value %r; defaulting to 15",
+                historical_hourly_lookback_days_raw,
+            )
+
     historical_warmup_batch_size_raw = payload.get("historical_warmup_batch_size")
     if historical_warmup_batch_size_raw is None:
         historical_warmup_batch_size = 5000
@@ -563,6 +575,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         backfill_lookback=backfill_lookback_minutes,
         load_historical_warmup=load_historical_warmup,
         historical_lookback_days=historical_lookback_days,
+        historical_hourly_lookback_days=historical_hourly_lookback_days,
         historical_warmup_batch_size=historical_warmup_batch_size,
         historical_warmup_queue_soft_limit=historical_warmup_queue_soft_limit,
         historical_warmup_compression=historical_warmup_compression,
@@ -996,23 +1009,49 @@ class LiveWorker:
                 return
             self._historical_warmup_started = True
 
-        lookback_days = self.config.historical_lookback_days or 1
+        daily_lookback_days = self.config.historical_lookback_days or 252
+        hourly_lookback_days = self.config.historical_hourly_lookback_days or 15
+
         logger.info(
-            "Loading %d days of historical data for indicator warmup...",
-            lookback_days,
+            "Loading dual-timeframe historical data: %d days daily + %d days hourly for indicator warmup...",
+            daily_lookback_days,
+            hourly_lookback_days,
         )
 
         self._historical_warmup_counts.clear()
         try:
+            # Load daily bars first (252 days for daily z-scores and returns)
+            logger.info("Loading daily historical data (%d days)...", daily_lookback_days)
             for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+                # Use closure factory to avoid lambda capture bug
+                def daily_warmup_callback(sym: str, data: Any) -> None:
+                    self._warmup_symbol_indicators(sym, data, compression="1D")
+
                 load_historical_data(
                     api_key=self.config.databento_api_key,
                     dataset=dataset,
                     symbols=symbols,
                     stype_in=stype_in,
-                    days=lookback_days,
+                    days=daily_lookback_days,
                     contract_map=self.contract_map,
-                    on_symbol_loaded=self._warmup_symbol_indicators,
+                    on_symbol_loaded=daily_warmup_callback,
+                )
+
+            # Load hourly bars second (15 days for hourly indicators)
+            logger.info("Loading hourly historical data (%d days)...", hourly_lookback_days)
+            for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+                # Use closure factory to avoid lambda capture bug
+                def hourly_warmup_callback(sym: str, data: Any) -> None:
+                    self._warmup_symbol_indicators(sym, data, compression="1h")
+
+                load_historical_data(
+                    api_key=self.config.databento_api_key,
+                    dataset=dataset,
+                    symbols=symbols,
+                    stype_in=stype_in,
+                    days=hourly_lookback_days,
+                    contract_map=self.contract_map,
+                    on_symbol_loaded=hourly_warmup_callback,
                 )
         except Exception:
             logger.exception("Failed to load historical data for warmup")
@@ -1054,7 +1093,7 @@ class LiveWorker:
 
         self._finalize_indicator_warmup()
 
-    def _warmup_symbol_indicators(self, symbol: str, data: Any) -> None:
+    def _warmup_symbol_indicators(self, symbol: str, data: Any, compression: str = None) -> None:
         feed = self._data_feeds.get(symbol)
         if feed is None:
             logger.warning(
@@ -1062,24 +1101,30 @@ class LiveWorker:
             )
             return
 
-        configured_compression = _normalise_warmup_compression(
-            getattr(self.config, "historical_warmup_compression", "1min")
-        )
-        if self._symbol_requires_minute_warmup(symbol):
-            compression = "1min"
-            if configured_compression != "1min":
-                logger.warning(
-                    "Minute warmup enforced for %s despite configured compression %s (reason: strategy or ML features require minute data)",
-                    symbol,
-                    configured_compression,
-                )
-        else:
-            compression = configured_compression
-            logger.info(
-                "Using %s compression for %s historical warmup",
-                compression,
-                symbol,
+        # If compression not specified, use configured compression (for backward compatibility)
+        if compression is None:
+            configured_compression = _normalise_warmup_compression(
+                getattr(self.config, "historical_warmup_compression", "1min")
             )
+            if self._symbol_requires_minute_warmup(symbol):
+                compression = "1min"
+                if configured_compression != "1min":
+                    logger.warning(
+                        "Minute warmup enforced for %s despite configured compression %s (reason: strategy or ML features require minute data)",
+                        symbol,
+                        configured_compression,
+                    )
+            else:
+                compression = configured_compression
+        else:
+            # Compression explicitly specified (dual-timeframe warmup)
+            compression = _normalise_warmup_compression(compression)
+
+        logger.info(
+            "Using %s compression for %s historical warmup",
+            compression,
+            symbol,
+        )
 
         try:
             bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
