@@ -1119,34 +1119,16 @@ class LiveWorker:
             symbol,
         )
 
-        # Determine which feed to queue bars to based on compression
-        # Daily bars must go to the daily resampled feed, hourly to hourly resampled feed,
-        # and minute/raw data goes to the base feed for Backtrader to resample
-        if compression == "1d":
-            feed_name = f"{symbol}_day"
-            feed = self._get_resampled_feed(symbol, "_day")
-            if feed is None:
-                logger.warning(
-                    "Skipping daily warmup for %s: no daily resampled feed found", symbol
-                )
-                return
-        elif compression == "1h":
-            feed_name = f"{symbol}_hour"
-            feed = self._get_resampled_feed(symbol, "_hour")
-            if feed is None:
-                logger.warning(
-                    "Skipping hourly warmup for %s: no hourly resampled feed found", symbol
-                )
-                return
-        else:
-            # Minute or raw data goes to base feed for resampling
-            feed_name = symbol
-            feed = self._data_feeds.get(symbol)
-            if feed is None:
-                logger.warning(
-                    "Skipping warmup for %s: no matching data feed initialised", symbol
-                )
-                return
+        # Queue all bars to the base feed regardless of compression
+        # Backtrader's resampled feeds (symbol_day, symbol_hour) will automatically
+        # consume from the base feed - they don't have extend_warmup() method
+        feed_name = symbol
+        feed = self._data_feeds.get(symbol)
+        if feed is None:
+            logger.warning(
+                "Skipping warmup for %s: no matching data feed initialised", symbol
+            )
+            return
 
         try:
             bars = self._convert_databento_to_bt_bars(symbol, data, compression=compression)
@@ -1159,7 +1141,7 @@ class LiveWorker:
             return
 
         logger.info(
-            "Converted %s historical data to %d bars using %s compression (targeting feed: %s)",
+            "Converted %s historical data to %d %s bars (queuing to base feed: %s)",
             symbol,
             len(bars),
             compression,
