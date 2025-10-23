@@ -920,6 +920,8 @@ class LiveWorker:
             hourly_feed = HourlyResampledLiveData(
                 symbol=symbol,
                 source_feed=data,  # Aggregate from minute feed
+                session_end_hour=session_start.hour if session_start else 23,
+                session_end_minute=session_start.minute if session_start else 0,
             )
             self.cerebro.adddata(hourly_feed, name=f"{symbol}_hour")
 
@@ -929,6 +931,8 @@ class LiveWorker:
             daily_feed = DailyResampledLiveData(
                 symbol=symbol,
                 source_feed=data,  # Aggregate from minute feed
+                session_end_hour=session_start.hour if session_start else 23,
+                session_end_minute=session_start.minute if session_start else 0,
             )
             self.cerebro.adddata(daily_feed, name=f"{symbol}_day")
 
