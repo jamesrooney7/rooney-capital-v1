@@ -803,7 +803,7 @@ class ResampledLiveData(bt.feeds.DataBase):
         if not self._qcheck:
             self._qcheck = self.p.qcheck or 0.5  # Restore normal qcheck
 
-        if not self.p.source_feed:
+        if self.p.source_feed is None:
             return None  # No source feed configured
 
         # Try to aggregate minute bars into our timeframe
