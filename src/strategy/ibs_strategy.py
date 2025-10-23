@@ -4638,6 +4638,16 @@ class IbsStrategy(bt.Strategy):
     def _with_ml_score(self, snapshot: dict | None) -> dict:
         result = dict(snapshot) if snapshot else {}
         result["ml_score"] = self._ml_last_score
+
+        # Calculate ml_passed: True if score >= threshold
+        ml_score = self._ml_last_score
+        ml_threshold = self.p.ml_threshold if hasattr(self.p, 'ml_threshold') else 0.5
+
+        if ml_score is not None and isinstance(ml_score, (int, float)) and not math.isnan(ml_score):
+            result["ml_passed"] = ml_score >= ml_threshold
+        else:
+            result["ml_passed"] = False
+
         return result
 
     def in_session(self, dt: datetime) -> bool:
@@ -5824,19 +5834,27 @@ class IbsStrategy(bt.Strategy):
                             f"🤖 {self.p.symbol} ML FILTER | Score: {ml_score_val:.3f} | "
                             f"Passed: {ml_passed} | Threshold: {self.p.ml_threshold}"
                         )
-                        order = self.buy(
-                            data=self.hourly,
-                            size=self.p.size,
-                            exectype=bt.Order.Limit,
-                            price=price0,
-                        )
-                        order.addinfo(
-                            ibs=ibs_val,
-                            created=dt,
-                            created_dt=dt,
-                            filter_snapshot=filter_snapshot,
-                        )
-                        self.order = order
+
+                        # Only place order if ML filter passes
+                        if ml_passed:
+                            order = self.buy(
+                                data=self.hourly,
+                                size=self.p.size,
+                                exectype=bt.Order.Limit,
+                                price=price0,
+                            )
+                            order.addinfo(
+                                ibs=ibs_val,
+                                created=dt,
+                                created_dt=dt,
+                                filter_snapshot=filter_snapshot,
+                            )
+                            self.order = order
+                        else:
+                            logger.info(
+                                f"⛔ {self.p.symbol} ML FILTER BLOCKED ENTRY | "
+                                f"Score {ml_score_val:.3f} < Threshold {self.p.ml_threshold}"
+                            )
             else:
                 price = line_val(self.hourly.close)
                 if price is None:
