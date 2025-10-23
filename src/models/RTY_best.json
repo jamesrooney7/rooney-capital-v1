@@ -22,7 +22,6 @@
     "random_state": 42
   },
   "Features": [
-    "vix_daily_return",
     "volz_pct",
     "volume_z_percentile",
     "6j_daily_return",
@@ -32,7 +31,6 @@
     "6c_daily_return",
     "6a_hourly_return",
     "parabolic_sar_distance_daily",
-    "vix_hourly_return",
     "pl_daily_return_pipeline",
     "tlt_daily_z_score",
     "daily_ibs_percentile",

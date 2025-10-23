@@ -45,7 +45,6 @@
     "daily_directional_drift",
     "hourly_atr_percentile",
     "prev_day_pctxvalue",
-    "vix_hourly_z_score",
     "cl_hourly_z_score",
     "tlt_hourly_z_score",
     "adx_value",

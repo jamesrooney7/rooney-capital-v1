@@ -1336,8 +1336,22 @@ class IbsStrategy(bt.Strategy):
                 )
                 if not need_indicator:
                     continue
+
+                # Debug logging for cross-symbol feed availability
+                feed_name = f"{symbol}_{feed_suffix}"
+                logging.debug(
+                    "Requesting cross-symbol feed %s (enable_param=%s, matches_ml=%s)",
+                    feed_name, enable_param, matches_ml_feature
+                )
+
                 data_feed = self._get_cross_feed(symbol, feed_suffix, enable_param)
                 if data_feed is None:
+                    if matches_ml_feature:
+                        logging.warning(
+                            "ML model requires feature %s but feed %s is unavailable - "
+                            "z-score pipeline will NOT be created",
+                            meta.get("feature_key"), feed_name
+                        )
                     continue
                 default_len = getattr(self.p, meta["len_param"], 20)
                 default_window = getattr(self.p, meta["window_param"], 252)

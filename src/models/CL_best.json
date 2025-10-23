@@ -37,7 +37,6 @@
     "rty_hourly_z_score",
     "es_hourly_z_score",
     "6n_hourly_return",
-    "vix_hourly_return",
     "6m_hourly_z_score",
     "donchian_proximity_to_nearest_band",
     "6s_hourly_return",
