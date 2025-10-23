@@ -264,7 +264,12 @@ CROSS_Z_TIMEFRAMES: list[tuple[str, str, str]] = [
     ("Day", "day", "Daily"),
 ]
 
-METAL_ENERGY_SYMBOLS: set[str] = {"SI", "PL", "HG", "CL", "NG"}
+METAL_ENERGY_SYMBOLS: set[str] = {
+    "SI", "PL", "HG", "CL", "NG",  # Original metals/energy
+    "ES", "NQ", "RTY", "YM",        # Equity indexes (for z-scores)
+    "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S",  # Currencies (for z-scores)
+    "GC", "TLT",                    # Gold and bonds (for z-scores)
+}
 
 SYMBOL_PARAM_ALIASES: dict[str, tuple[str, ...]] = {
     "6A": ("sixA", "6a"),
