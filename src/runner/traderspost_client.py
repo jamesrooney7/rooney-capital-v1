@@ -3,8 +3,9 @@
 This module centralises the formatting and delivery of execution events so
 `IbsStrategy` notifications can be pushed to TradersPost without replicating
 payload shaping logic throughout the runner.  Payloads contain the strategy
-root symbol, side, size, executed price, and a ``thresholds`` section which is
-populated with the ML score and filter snapshot that triggered the order.
+root ticker symbol, action (buy/sell/exit), quantity, executed price, and a
+``thresholds`` section which is populated with the ML score and filter snapshot
+that triggered the order.
 
 HTTP requests are retried with an exponential backoff when recoverable errors
 occur (connection errors or ``5xx`` responses).  ``4xx`` responses are treated
@@ -247,9 +248,9 @@ def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[st
     )
 
     payload = {
-        "symbol": _extract_symbol(strategy, getattr(order, "data", None)),
-        "side": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
-        "size": size,
+        "ticker": _extract_symbol(strategy, getattr(order, "data", None)),
+        "action": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
+        "quantity": size,
         "price": price,
         "thresholds": thresholds,
         "metadata": metadata,
@@ -306,9 +307,9 @@ def trade_notification_to_message(
     )
 
     payload = {
-        "symbol": _extract_symbol(strategy, getattr(trade, "data", None)),
-        "side": "sell" if (size_hint or 0) < 0 else "buy",
-        "size": size_hint,
+        "ticker": _extract_symbol(strategy, getattr(trade, "data", None)),
+        "action": "exit",  # Trade close uses "exit" action per TradersPost API
+        "quantity": abs(size_hint) if size_hint else None,
         "price": snapshot.get("price", getattr(trade, "price", None)),
         "thresholds": thresholds_payload,
         "metadata": metadata,
