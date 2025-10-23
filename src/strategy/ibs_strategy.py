@@ -2864,7 +2864,12 @@ class IbsStrategy(bt.Strategy):
                     feed_len = len(data_feed)
                 except Exception:
                     feed_len = None
-            if feed_len is not None and feed_len < max_period:
+
+            # Skip warmup check for METAL_ENERGY_SYMBOLS - let Backtrader handle empty feeds
+            # These are auto-created for ML features and should initialize even with 0 bars
+            skip_warmup_check = symbol in METAL_ENERGY_SYMBOLS
+
+            if feed_len is not None and feed_len < max_period and not skip_warmup_check:
                 logger.info(
                     "Cross Z-score feed %s/%s not warm (%s < %s); deferring pipeline",
                     symbol,
@@ -2873,6 +2878,16 @@ class IbsStrategy(bt.Strategy):
                     max_period,
                 )
                 return None
+
+            if skip_warmup_check and (feed_len is None or feed_len < max_period):
+                logger.debug(
+                    "Cross Z-score feed %s/%s not warm (%s < %s) but creating pipeline anyway "
+                    "(symbol in METAL_ENERGY_SYMBOLS)",
+                    symbol,
+                    timeframe,
+                    feed_len if feed_len is not None else 0,
+                    max_period,
+                )
 
         try:
             mean = bt.indicators.SimpleMovingAverage(data_feed.close, period=length)
