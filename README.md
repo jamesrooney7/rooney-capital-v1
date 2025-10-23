@@ -63,6 +63,150 @@ The default deployment tracks the following roots: `ES`, `NQ`, `RTY`, `YM`,
 `GC`, `SI`, `HG`, `CL`, `NG`, `6A`, `6B`, and `6E`. Extend the universe by
 updating the contract map and provisioning ML bundles for the new symbols.
 
+### Historical Warmup and Live Data Transition
+
+The system implements a sophisticated warmup mechanism that seamlessly transitions
+from historical data to live market data without gaps or interruptions. This
+ensures ML features and technical indicators are fully calculated before live
+trading begins.
+
+#### Startup Sequence
+
+**Phase 1: Pre-Cerebro Warmup (Historical Data Loading)**
+
+1. **Service starts** → Pre-flight validation checks ML models, connectivity, and configuration
+2. **Databento subscribers START** → Live data immediately begins flowing into per-symbol queues
+3. **Historical warmup loads in parallel**:
+   - **253 days** of DAILY bars → queued to `{symbol}_day` resampled feeds
+   - **15 days** of HOURLY bars → queued to `{symbol}_hour` resampled feeds
+   - Bars stored in `feed._warmup_bars` deque (in-memory buffer)
+4. **Strategies initialized** with `_in_historical_warmup = True` (fast mode)
+   - ML feature calculation and trade logic are **skipped** during warmup
+   - Indicators still update automatically via Backtrader
+
+**Phase 2: Cerebro Runtime (Warmup Drain)**
+
+5. **`cerebro.run()`** starts in dedicated thread
+6. **Warmup monitor thread** tracks backlog drain across all feeds
+7. **Feeds begin consuming bars**:
+   - **Warmup mode**: `_qcheck = 0.0` (no delay) → drains historical bars at maximum speed
+   - Historical bars processed from `_warmup_bars` deque
+   - Live bars continue queuing in parallel via `QueueFanout`
+
+**Phase 3: Transition to Live Trading**
+
+8. **Warmup monitor detects** all feeds report `warmup_backlog_size() == 0`
+9. **Mode transition**:
+   - `_set_strategies_warmup_mode(enabled=False)` → enables full ML processing
+   - Feeds switch from `_warmup_bars` → `_queue` (live data)
+   - `_qcheck` restored to `0.5s` (normal polling interval)
+10. **Seamless data continuity**: No gap between last historical bar and first live bar
+    - While historical bars drained, live bars were queuing
+    - When warmup exhausts, feed immediately reads from live queue
+
+#### Feed Architecture
+
+The system uses hybrid feeds that handle both warmup and live data:
+
+**`DatabentoLiveData`** (Minute-resolution base feed):
+```python
+def _load(self):
+    if self._warmup_bars:
+        # Warmup mode: Fast drain
+        self._qcheck = 0.0
+        bar = self._warmup_bars.popleft()
+    else:
+        # Live mode: Read from queue
+        self._qcheck = 0.5
+        bar = self._queue.get(timeout=0.5)
+```
+
+**`ResampledLiveData`** (Daily/Hourly aggregated feeds):
+```python
+def _load(self):
+    if self._warmup_bars:
+        # Warmup: Use pre-aggregated bars
+        return self._populate_lines_from_bar(self._warmup_bars.popleft())
+    else:
+        # Live: Aggregate from minute feed
+        return self._aggregate_from_source()
+```
+
+#### ML Feature Pipeline Creation
+
+**Challenge**: Cross-symbol z-score features require feeds from other instruments
+(e.g., CL model needs `6A_hourly_z_score`). During `__init__`, those feeds have
+0 bars even though warmup data is queued.
+
+**Solution** (implemented in `src/strategy/ibs_strategy.py:2868-2890`):
+```python
+# Skip warmup check for METAL_ENERGY_SYMBOLS
+skip_warmup_check = symbol in METAL_ENERGY_SYMBOLS
+
+if feed_len < max_period and not skip_warmup_check:
+    # Defer pipeline creation for normal feeds
+    return None
+
+# For METAL_ENERGY_SYMBOLS: Create pipeline even with 0 bars
+# Backtrader indicators handle empty feeds - they produce values once data arrives
+```
+
+This ensures:
+- **18 cross-symbol z-score features** created during `__init__`
+- Indicators (SMA, StdDev) initialize on empty feeds → produce values during warmup drain
+- **100% ML feature coverage** achieved by the time live trading begins
+
+#### Data Flow Monitoring
+
+**Key Log Messages**:
+
+```bash
+# Warmup progress
+"Buffered X historical bars for SYMBOL (feed: SYMBOL_hour)"
+"Waiting for warmup backlog to drain (queued=X, limit=Y)"
+
+# Transition point
+"Warmup backlog drained - disabling warmup mode for full processing"
+"Historical warmup mode DISABLED on all strategies (full processing)"
+
+# Feature readiness
+"🤖 SYMBOL ML HOURLY | Score: X.XXX | Features: 28/30"  # Initial warmup
+"✅ SYMBOL ML HOURLY | Score: X.XXX | Features: 30/30"  # Full coverage
+
+# Pipeline creation (cross-symbol features)
+"Cross Z-score feed 6A/Hour not warm (0 < 252) but creating pipeline anyway (symbol in METAL_ENERGY_SYMBOLS)"
+```
+
+#### Timing Expectations
+
+- **Historical warmup load**: ~30-60 seconds (depends on Databento API)
+- **Warmup drain**: ~10-30 seconds (Cerebro processes historical bars)
+- **Full ML feature coverage**: Within first hour of live trading
+- **Total startup to live**: ~2-5 minutes
+
+#### Safeguards
+
+1. **No trade execution during warmup**: `_in_historical_warmup` flag prevents strategy logic
+2. **Graceful degradation**: Missing features log warnings but don't crash
+3. **Connection resilience**: Databento auto-reconnects on network issues
+4. **Queue overflow protection**: `_wait_for_warmup_capacity()` throttles historical loading
+5. **Timeout handling**: Warmup monitor force-disables after 200 iterations (20 seconds)
+
+#### Verifying System Health
+
+After startup, confirm proper operation:
+
+```bash
+# Check feature coverage
+./verify_features.py
+
+# Monitor real-time logs
+sudo journalctl -u pine-runner.service -f | grep -E "🤖|⚠️|Warmup"
+```
+
+Expected: 90-100% feature coverage within first hour. VIX features may remain at
+NaN if data unavailable (handled gracefully by models).
+
 ## Repository Layout
 
 ```
