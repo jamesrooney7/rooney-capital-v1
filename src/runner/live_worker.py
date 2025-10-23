@@ -1060,36 +1060,14 @@ class LiveWorker:
                 self._historical_warmup_started = False
             return
 
-        logger.info("Historical data loaded, warming up indicators...")
+        logger.info("Historical data loaded - warmup bars queued to feeds")
 
-        drained_symbols = [
-            symbol
-            for symbol, count in self._historical_warmup_counts.items()
-            if int(count or 0) > 0
-        ]
-        if drained_symbols:
-            total_backlog = sum(
-                int(self._historical_warmup_counts.get(symbol, 0))
-                for symbol in drained_symbols
-            )
-            timeout = max(60.0, min(total_backlog * 0.001, 600.0))
+        # Enable fast warmup mode - Cerebro will drain bars quickly when it starts
+        self._set_strategies_warmup_mode(enabled=True)
 
-            # Enable fast warmup mode - skip expensive strategy processing
-            self._set_strategies_warmup_mode(enabled=True)
-
-            drained = self._drain_warmup_backlog(
-                drained_symbols,
-                poll_interval=0.05,
-                timeout=timeout,
-            )
-
-            # Disable warmup mode - resume full strategy processing
-            self._set_strategies_warmup_mode(enabled=False)
-
-            if not drained:
-                logger.info(
-                    "Warmup backlog drain aborted before completion; proceeding with available data"
-                )
+        # Note: We don't drain here because Cerebro isn't running yet.
+        # The warmup bars will be consumed automatically when cerebro.run() starts
+        # thanks to the _qcheck=0.0 optimization in the custom feeds.
 
         self._finalize_indicator_warmup()
 
@@ -1706,6 +1684,70 @@ class LiveWorker:
         if tracker is not None:
             tracker.refresh_all(self.symbols)
 
+    def _monitor_warmup_drain(self) -> None:
+        """Background thread that monitors warmup backlog and disables warmup mode when drained.
+
+        This runs after Cerebro starts and checks all feeds for warmup bars.
+        Once all warmup bars are consumed, it disables strategy warmup mode.
+        """
+        # Give Cerebro a moment to start processing
+        time.sleep(0.5)
+
+        # Track all feeds that might have warmup bars
+        tracked_feeds: list[Any] = []
+
+        # Add base feeds
+        for symbol in self.data_symbols:
+            feed = self._data_feeds.get(symbol)
+            if feed is not None and hasattr(feed, 'warmup_backlog_size'):
+                tracked_feeds.append(feed)
+
+        # Add resampled feeds
+        try:
+            for data in self.cerebro.datas:
+                if hasattr(data, 'warmup_backlog_size'):
+                    feed_name = getattr(data, '_name', None)
+                    if feed_name and (feed_name.endswith('_day') or feed_name.endswith('_hour')):
+                        tracked_feeds.append(data)
+        except Exception as exc:
+            logger.debug("Error checking resampled feeds for warmup monitoring: %s", exc)
+
+        if not tracked_feeds:
+            logger.debug("No feeds with warmup backlog found - skipping warmup monitoring")
+            return
+
+        logger.info("Monitoring %d feeds for warmup drain...", len(tracked_feeds))
+
+        # Poll until all warmup bars are drained
+        max_iterations = 200  # Safety limit
+        iteration = 0
+
+        while iteration < max_iterations and not self._stop_event.is_set():
+            total_backlog = 0
+            for feed in tracked_feeds:
+                try:
+                    backlog = feed.warmup_backlog_size()
+                    total_backlog += backlog
+                except Exception:
+                    pass  # Ignore errors
+
+            if total_backlog == 0:
+                # All warmup bars have been consumed!
+                logger.info("Warmup backlog drained - disabling warmup mode for full processing")
+                self._set_strategies_warmup_mode(enabled=False)
+                return
+
+            iteration += 1
+            time.sleep(0.1)  # Check every 100ms
+
+        # Timeout or stop requested
+        if not self._stop_event.is_set():
+            logger.warning(
+                "Warmup drain monitoring timed out after %d iterations - disabling warmup mode anyway",
+                max_iterations
+            )
+            self._set_strategies_warmup_mode(enabled=False)
+
     def _on_strategy_feature_snapshot(self, strategy: NotifyingIbsStrategy) -> None:
         tracker = getattr(self, "ml_feature_tracker", None)
         if tracker is None:
@@ -1930,6 +1972,15 @@ class LiveWorker:
             self._stop_event.set()
             logger.info("Cerebro runtime aborted: initial data unavailable")
             return
+
+        # Start background thread to monitor warmup drain and disable warmup mode
+        # once all warmup bars have been consumed by Cerebro
+        warmup_monitor = threading.Thread(
+            target=self._monitor_warmup_drain,
+            name="warmup-monitor",
+            daemon=True
+        )
+        warmup_monitor.start()
 
         try:
             self.cerebro.run(runonce=False, stdstats=False, maxcpus=1)
