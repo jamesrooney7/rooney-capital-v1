@@ -29,12 +29,16 @@ from utils import (
 
 # Import database and metrics
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent))  # For metrics.py in dashboard/
 try:
     from utils.trades_db import TradesDB
     from metrics import calculate_portfolio_metrics, calculate_instrument_metrics
     DB_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     DB_AVAILABLE = False
+    import traceback
+    st.error(f"Failed to load database modules: {e}")
+    st.error(traceback.format_exc())
 
 
 # Page configuration
@@ -87,6 +91,10 @@ if DB_AVAILABLE:
         db_trades = db.get_all_trades()
         daily_pnl = db.get_daily_pnl()
 
+        # Debug info (will remove later)
+        st.sidebar.write(f"**Debug:** Loaded {len(db_trades)} trades from DB")
+        st.sidebar.write(f"**Debug:** Daily P&L entries: {len(daily_pnl)}")
+
         # Calculate portfolio metrics
         portfolio_metrics = calculate_portfolio_metrics(
             trades=db_trades,
@@ -97,9 +105,16 @@ if DB_AVAILABLE:
 
         # Calculate per-instrument metrics
         instrument_metrics = calculate_instrument_metrics(db_trades)
+
+        st.sidebar.write(f"**Debug:** Portfolio metrics calculated: {bool(portfolio_metrics)}")
+        st.sidebar.write(f"**Debug:** Instrument metrics: {list(instrument_metrics.keys())}")
     except Exception as e:
+        import traceback
         st.error(f"Failed to load database metrics: {e}")
+        st.error(traceback.format_exc())
         DB_AVAILABLE = False
+else:
+    st.sidebar.warning("Database not available")
 
 
 # ============================================================================
