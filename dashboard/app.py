@@ -14,7 +14,9 @@ Run with: streamlit run app.py
 from __future__ import annotations
 
 import streamlit as st
-from datetime import datetime
+import sys
+from datetime import datetime, timedelta
+from pathlib import Path
 
 from utils import (
     read_heartbeat,
@@ -24,6 +26,15 @@ from utils import (
     get_recent_trades,
     get_open_positions,
 )
+
+# Import database and metrics
+sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+try:
+    from utils.trades_db import TradesDB
+    from metrics import calculate_portfolio_metrics, calculate_instrument_metrics
+    DB_AVAILABLE = True
+except ImportError:
+    DB_AVAILABLE = False
 
 
 # Page configuration
@@ -65,6 +76,30 @@ log_data = parse_recent_logs(lines=log_lines, since_minutes=log_window)
 ml_stats = calculate_ml_stats(log_data)
 recent_trades = get_recent_trades(log_data, limit=10)
 open_positions = get_open_positions(log_data)
+
+# Fetch database metrics if available
+db_trades = []
+portfolio_metrics = {}
+instrument_metrics = {}
+if DB_AVAILABLE:
+    try:
+        db = TradesDB()
+        db_trades = db.get_all_trades()
+        daily_pnl = db.get_daily_pnl()
+
+        # Calculate portfolio metrics
+        portfolio_metrics = calculate_portfolio_metrics(
+            trades=db_trades,
+            daily_pnl=daily_pnl,
+            starting_capital=100000.0,  # Adjust based on your account size
+            risk_free_rate=0.04,  # 4% annual risk-free rate
+        )
+
+        # Calculate per-instrument metrics
+        instrument_metrics = calculate_instrument_metrics(db_trades)
+    except Exception as e:
+        st.error(f"Failed to load database metrics: {e}")
+        DB_AVAILABLE = False
 
 
 # ============================================================================
@@ -335,6 +370,185 @@ if log_data["errors"]:
         for error in log_data["errors"][:10]:  # Show last 10 errors
             timestamp_str = error["timestamp"].strftime("%Y-%m-%d %H:%M:%S") if error["timestamp"] else "Unknown"
             st.error(f"[{timestamp_str}] {error['raw']}")
+
+
+# ============================================================================
+# Portfolio Performance
+# ============================================================================
+
+if DB_AVAILABLE and portfolio_metrics:
+    st.header("📈 Portfolio Performance")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Total P&L",
+            f"${portfolio_metrics.get('total_pnl', 0):.2f}",
+            help="Cumulative realized profit/loss"
+        )
+
+    with col2:
+        sharpe = portfolio_metrics.get('sharpe_ratio', 0)
+        sharpe_color = "🟢" if sharpe > 1.0 else "🟡" if sharpe > 0.5 else "🔴"
+        st.metric(
+            "Sharpe Ratio",
+            f"{sharpe_color} {sharpe:.2f}",
+            help="Risk-adjusted returns (>1.0 is good)"
+        )
+
+    with col3:
+        sortino = portfolio_metrics.get('sortino_ratio', 0)
+        sortino_color = "🟢" if sortino > 1.5 else "🟡" if sortino > 0.75 else "🔴"
+        st.metric(
+            "Sortino Ratio",
+            f"{sortino_color} {sortino:.2f}",
+            help="Downside risk-adjusted returns (>1.5 is good)"
+        )
+
+    with col4:
+        pf = portfolio_metrics.get('profit_factor', 0)
+        pf_color = "🟢" if pf > 1.5 else "🟡" if pf > 1.0 else "🔴"
+        pf_display = f"{pf:.2f}" if pf != float('inf') else "∞"
+        st.metric(
+            "Profit Factor",
+            f"{pf_color} {pf_display}",
+            help="Gross profit / Gross loss (>1.5 is good)"
+        )
+
+    # Second row of metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric(
+            "Win Rate",
+            f"{portfolio_metrics.get('win_rate', 0):.1f}%",
+            help="Percentage of profitable trades"
+        )
+
+    with col2:
+        st.metric(
+            "Total Trades",
+            f"{portfolio_metrics.get('total_trades', 0)}",
+            help="Number of completed round-trip trades"
+        )
+
+    with col3:
+        max_dd = portfolio_metrics.get('max_drawdown', 0)
+        max_dd_pct = portfolio_metrics.get('max_drawdown_pct', 0)
+        st.metric(
+            "Max Drawdown",
+            f"${max_dd:.2f}",
+            delta=f"-{max_dd_pct:.1f}%",
+            delta_color="inverse",
+            help="Maximum peak-to-trough decline"
+        )
+
+    with col4:
+        avg_duration = portfolio_metrics.get('avg_trade_duration_hours', 0)
+        st.metric(
+            "Avg Duration",
+            f"{avg_duration:.1f}h",
+            help="Average time in trade (hours)"
+        )
+
+    # Best/Worst trades
+    with st.expander("📊 Additional Stats"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Best Trade:** ${portfolio_metrics.get('best_trade', 0):.2f}")
+        with col2:
+            st.write(f"**Worst Trade:** ${portfolio_metrics.get('worst_trade', 0):.2f}")
+
+
+# ============================================================================
+# Per-Instrument Performance
+# ============================================================================
+
+if DB_AVAILABLE and instrument_metrics:
+    st.header("🎯 Per-Instrument Performance")
+
+    # Sort instruments by total P&L
+    sorted_instruments = sorted(
+        instrument_metrics.items(),
+        key=lambda x: x[1]['total_pnl'],
+        reverse=True
+    )
+
+    for symbol, metrics in sorted_instruments:
+        # Color code by P&L
+        pnl = metrics['total_pnl']
+        pnl_color = "🟢" if pnl > 0 else "🔴" if pnl < 0 else "⚪"
+
+        with st.expander(f"{pnl_color} {symbol} | P&L: ${pnl:.2f} | Trades: {metrics['total_trades']}"):
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.write(f"**Total P&L:** ${metrics['total_pnl']:.2f}")
+                st.write(f"**Win Rate:** {metrics['win_rate']:.1f}%")
+
+            with col2:
+                pf = metrics['profit_factor']
+                pf_display = f"{pf:.2f}" if pf != float('inf') else "∞"
+                st.write(f"**Profit Factor:** {pf_display}")
+                st.write(f"**Trades:** {metrics['total_trades']}")
+
+            with col3:
+                st.write(f"**Best Trade:** ${metrics['best_trade']:.2f}")
+                st.write(f"**Worst Trade:** ${metrics['worst_trade']:.2f}")
+
+            with col4:
+                avg_duration = metrics['avg_trade_duration_hours']
+                st.write(f"**Avg Duration:** {avg_duration:.1f}h")
+
+
+# ============================================================================
+# System Health
+# ============================================================================
+
+st.header("🏥 System Health")
+
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    # Trades today
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    if DB_AVAILABLE:
+        try:
+            db = TradesDB()
+            today_trades = db.get_trades_since(today_start)
+            st.metric("Trades Today", len(today_trades))
+        except:
+            st.metric("Trades Today", "N/A")
+    else:
+        st.metric("Trades Today", "N/A")
+
+with col2:
+    # Error count from logs
+    error_count = len(log_data.get("errors", []))
+    error_color = "🟢" if error_count == 0 else "🟡" if error_count < 5 else "🔴"
+    st.metric("Recent Errors", f"{error_color} {error_count}")
+
+with col3:
+    # Time since last trade
+    if db_trades:
+        last_trade = db_trades[0]  # Already sorted by exit_time descending
+        last_exit = datetime.fromisoformat(last_trade['exit_time'])
+        time_since = datetime.now() - last_exit.replace(tzinfo=None)
+        hours = int(time_since.total_seconds() / 3600)
+        minutes = int((time_since.total_seconds() % 3600) / 60)
+        st.metric("Last Trade", f"{hours}h {minutes}m ago")
+    else:
+        st.metric("Last Trade", "No trades yet")
+
+with col4:
+    # ML filter effectiveness
+    if ml_stats['total_signals'] > 0:
+        pass_rate = ml_stats['pass_rate']
+        filter_health = "🟢" if 20 <= pass_rate <= 40 else "🟡" if 10 <= pass_rate <= 50 else "🔴"
+        st.metric("ML Filter Health", f"{filter_health} {pass_rate:.0f}% pass")
+    else:
+        st.metric("ML Filter Health", "No signals")
 
 
 # ============================================================================
