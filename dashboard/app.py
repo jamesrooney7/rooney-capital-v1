@@ -116,12 +116,13 @@ with col4:
 # ============================================================================
 
 with st.expander("📡 Service Details"):
-    # TradersPost and Databento are at root level, not under "details"
+    # Both TradersPost and Databento are under "details" key
+    details = heartbeat.get("details", {})
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("TradersPost Webhook")
-        tp_status = heartbeat.get("traderspost", {})
+        tp_status = details.get("traderspost", {})
         if isinstance(tp_status, dict):
             last_success = tp_status.get("last_success", {})
             last_error = tp_status.get("last_error")
@@ -146,18 +147,35 @@ with st.expander("📡 Service Details"):
 
     with col2:
         st.subheader("Databento Feed")
-        db_status = heartbeat.get("databento", {})
+        db_status = details.get("databento", {})
         if isinstance(db_status, dict):
+            # Get subscriber info (more detailed than queue_fanout)
+            subscribers = db_status.get("subscribers", [])
             queue_fanout = db_status.get("queue_fanout", {})
             known_symbols = queue_fanout.get("known_symbols", [])
 
-            # Connected if we have known symbols
-            connected = len(known_symbols) > 0
-            st.write(f"**Connected:** {'✅ Yes' if connected else '❌ No'}")
-            st.write(f"**Symbols:** {len(known_symbols)} tracked")
+            # Check connection from subscribers
+            client_connected = False
+            last_trade_time = None
+            if subscribers and len(subscribers) > 0:
+                subscriber = subscribers[0]
+                client_connected = subscriber.get("client_connected", False)
+                last_trade = subscriber.get("last_trade", {})
+                if last_trade:
+                    # Get most recent trade time across all symbols
+                    times = [t for t in last_trade.values() if t]
+                    if times:
+                        last_trade_time = max(times)
 
-            if known_symbols:
-                st.write(f"**List:** {', '.join(known_symbols[:8])}{', ...' if len(known_symbols) > 8 else ''}")
+            st.write(f"**Connected:** {'✅ Yes' if client_connected else '❌ No'}")
+            st.write(f"**Symbols:** {len(known_symbols)} tracked")
+            if last_trade_time:
+                st.write(f"**Last Trade:** {last_trade_time}")
+
+            if known_symbols and len(known_symbols) <= 12:
+                st.write(f"**List:** {', '.join(known_symbols)}")
+            elif known_symbols:
+                st.write(f"**List:** {', '.join(known_symbols[:12])}, ...")
         else:
             st.write("No data feed info available")
 
