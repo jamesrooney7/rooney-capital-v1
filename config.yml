@@ -26,6 +26,7 @@ symbols:
 
 databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
+discord_webhook_url: ${DISCORD_WEBHOOK_URL}
 
 killswitch: ${POLICY_KILLSWITCH}
 
