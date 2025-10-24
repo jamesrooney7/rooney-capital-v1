@@ -37,6 +37,7 @@
     "6c_hourly_z_score",
     "6n_hourly_z_score",
     "rsixvolz",
+    "vix_hourly_return",
     "6e_hourly_z_score",
     "rty_hourly_z_score",
     "tr_atr_percentile",
