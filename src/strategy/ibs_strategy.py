@@ -5926,7 +5926,7 @@ class IbsStrategy(bt.Strategy):
                 if exit_signal:
                     logger.info(
                         f"🚪 {self.p.symbol} EXIT SIGNAL | Bar: {len(self.hourly)} | "
-                        f"Reason: {exit_signal} | IBS: {ibs_val:.3f} | Price: {price:.2f}"
+                        f"Reason: {exit_signal} | IBS: {ibs_val:.3f} | Price: {price:.2f} | Time: {dt}"
                     )
                     filter_snapshot = self._with_ml_score(
                         self.collect_filter_values(intraday_ago=0)
