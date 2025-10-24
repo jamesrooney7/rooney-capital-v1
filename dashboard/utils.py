@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -158,8 +158,8 @@ def parse_recent_logs(
     ml_blocked = []
     errors = []
 
-    # Cutoff time
-    cutoff = datetime.now() - timedelta(minutes=since_minutes)
+    # Cutoff time (timezone-aware to match log timestamps)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=since_minutes)
 
     for line in logs.splitlines():
         # Extract timestamp
