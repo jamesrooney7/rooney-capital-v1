@@ -52,6 +52,7 @@ from runner.traderspost_client import (
 )
 from strategy.contract_specs import CONTRACT_SPECS
 from strategy.ibs_strategy import IbsStrategy
+from utils.discord_notifier import DiscordNotifier
 
 logger = logging.getLogger(__name__)
 
@@ -238,6 +239,7 @@ class RuntimeConfig:
     heartbeat_write_interval: float = 30.0
     poll_interval: float = 1.0
     traderspost_webhook: Optional[str] = None
+    discord_webhook_url: Optional[str] = None
     resample_session_start: Optional[dt.time] = dt.time(23, 0)
     instruments: Mapping[str, InstrumentRuntimeConfig] = field(default_factory=dict)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
@@ -539,6 +541,14 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         or traderspost_payload.get("webhook")
         or os.environ.get("TRADERSPOST_WEBHOOK_URL")
     )
+
+    # Discord webhook configuration
+    discord_webhook = (
+        payload.get("discord_webhook_url")
+        or payload.get("discord_webhook")
+        or os.environ.get("DISCORD_WEBHOOK_URL")
+    )
+
     session_start_raw = (
         payload.get("resample_session_start")
         or payload.get("session_start")
@@ -592,6 +602,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         heartbeat_write_interval=heartbeat_write_interval,
         poll_interval=poll_interval,
         traderspost_webhook=webhook_url,
+        discord_webhook_url=discord_webhook,
         resample_session_start=session_start,
         instruments=instruments,
         preflight=preflight_config,
@@ -734,6 +745,25 @@ class LiveWorker:
                 "TradersPost client disabled: no webhook URL configured"
             )
             self.traderspost_client = None
+
+        # Initialize Discord notifier for alerts and notifications
+        self.discord_notifier: Optional[DiscordNotifier]
+        if config.discord_webhook_url:
+            try:
+                self.discord_notifier = DiscordNotifier(config.discord_webhook_url)
+                logger.info("Discord notifier initialized")
+                # Send startup notification
+                self.discord_notifier.send_system_alert(
+                    title="System Started",
+                    message=f"Rooney Capital trading system started\nSymbols: {', '.join(config.symbols)}",
+                    alert_type="info",
+                )
+            except Exception:
+                logger.exception("Failed to initialize Discord notifier")
+                self.discord_notifier = None
+        else:
+            logger.info("Discord notifier disabled: no webhook URL configured")
+            self.discord_notifier = None
 
         self._setup_data_and_strategies()
 
@@ -983,6 +1013,9 @@ class LiveWorker:
             if self.traderspost_client:
                 order_callbacks.append(self._traderspost_order_callback)
                 trade_callbacks.append(self._traderspost_trade_callback)
+
+            if self.discord_notifier:
+                trade_callbacks.append(self._discord_trade_callback)
 
             self.cerebro.addstrategy(
                 NotifyingIbsStrategy,
@@ -1912,6 +1945,151 @@ class LiveWorker:
                 payload.get("side"),
                 payload.get("size"),
             )
+
+    def _discord_trade_callback(
+        self,
+        strategy: NotifyingIbsStrategy,
+        trade: Any,
+        exit_snapshot: Optional[Mapping[str, Any]],
+    ) -> None:
+        """Send Discord notification for trade events."""
+        if not self.discord_notifier:
+            return
+
+        if not getattr(trade, "isclosed", False):
+            # Trade opened - send entry notification
+            symbol = getattr(strategy, "p", None) and strategy.p.symbol
+            if not symbol:
+                return
+
+            try:
+                from datetime import datetime
+                from strategy.contract_specs import point_value
+
+                # Get entry details
+                entry_price = float(trade.price) if hasattr(trade, "price") else 0.0
+                size = abs(float(strategy.p.size)) if hasattr(strategy.p, "size") else 1.0
+                side = "long"  # IBS strategy is long-only
+
+                # Get IBS and ML score from strategy state
+                ibs_val = None
+                ml_score = None
+                if hasattr(strategy, "_latest_ibs_value"):
+                    ibs_val = strategy._latest_ibs_value
+                if hasattr(strategy, "_latest_ml_score"):
+                    ml_score = strategy._latest_ml_score
+
+                self.discord_notifier.send_trade_entry(
+                    symbol=symbol,
+                    side=side,
+                    price=entry_price,
+                    size=size,
+                    ibs=ibs_val,
+                    ml_score=ml_score,
+                )
+            except Exception:
+                logger.exception("Failed to send Discord entry notification")
+
+        else:
+            # Trade closed - send exit notification
+            symbol = getattr(strategy, "p", None) and strategy.p.symbol
+            if not symbol:
+                return
+
+            try:
+                from datetime import datetime
+                from strategy.contract_specs import point_value, CONTRACT_SPECS
+                from config import COMMISSION_PER_SIDE
+
+                # Get trade details
+                entry_price = float(trade.price) if hasattr(trade, "price") else 0.0
+                exit_price = float(trade.price + trade.pnl) if hasattr(trade, "pnl") else entry_price
+                size = abs(float(strategy.p.size)) if hasattr(strategy.p, "size") else 1.0
+                side = "long"
+
+                # Calculate P&L
+                pv = point_value(symbol)
+                commission_usd = 2 * COMMISSION_PER_SIDE * size
+                pnl_usd = trade.pnl * pv - commission_usd if hasattr(trade, "pnl") else 0.0
+                pnl_percent = (trade.pnl / entry_price * 100) if entry_price > 0 and hasattr(trade, "pnl") else 0.0
+
+                # Get exit reason and IBS from exit snapshot
+                exit_reason = "Unknown"
+                ibs_val = None
+                if exit_snapshot:
+                    exit_reason = exit_snapshot.get("exit_reason", "Unknown")
+                    ibs_val = exit_snapshot.get("ibs_value")
+
+                # Calculate duration
+                duration_hours = None
+                if hasattr(trade, "dtopen") and hasattr(trade, "dtclose"):
+                    import backtrader as bt
+                    entry_time = bt.num2date(trade.dtopen)
+                    exit_time = bt.num2date(trade.dtclose)
+                    duration_hours = (exit_time - entry_time).total_seconds() / 3600
+
+                self.discord_notifier.send_trade_exit(
+                    symbol=symbol,
+                    side=side,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    size=size,
+                    pnl=pnl_usd,
+                    pnl_percent=pnl_percent,
+                    exit_reason=exit_reason,
+                    ibs=ibs_val,
+                    duration_hours=duration_hours,
+                )
+            except Exception:
+                logger.exception("Failed to send Discord exit notification")
+
+    def send_daily_summary(self) -> bool:
+        """Send a daily performance summary to Discord.
+
+        Returns:
+            True if summary was sent successfully
+        """
+        if not self.discord_notifier:
+            logger.debug("Discord notifier not available for daily summary")
+            return False
+
+        try:
+            from datetime import datetime, timedelta
+            from utils.trades_db import TradesDB
+
+            db = TradesDB()
+
+            # Get today's trades
+            today = datetime.now().date()
+            start_of_day = datetime.combine(today, datetime.min.time())
+            end_of_day = datetime.combine(today, datetime.max.time())
+
+            trades = db.get_trades_between(start_of_day, end_of_day)
+
+            if not trades:
+                logger.info("No trades today, skipping daily summary")
+                return False
+
+            # Calculate summary stats
+            total_pnl = sum(t["pnl"] for t in trades)
+            winning_trades = [t for t in trades if t["pnl"] > 0]
+            win_rate = (len(winning_trades) / len(trades)) * 100 if trades else 0.0
+            best_trade = max((t["pnl"] for t in trades), default=0.0)
+            worst_trade = min((t["pnl"] for t in trades), default=0.0)
+            symbols = list(set(t["symbol"] for t in trades))
+
+            return self.discord_notifier.send_daily_summary(
+                total_pnl=total_pnl,
+                num_trades=len(trades),
+                win_rate=win_rate,
+                best_trade=best_trade,
+                worst_trade=worst_trade,
+                symbols_traded=symbols,
+                date=datetime.now(),
+            )
+        except Exception:
+            logger.exception("Failed to send daily summary")
+            return False
 
     def _required_reference_feed_names(self) -> set[str]:
         feeds: set[str] = set()
