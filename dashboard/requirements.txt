@@ -1,0 +1,10 @@
+# Pine Trading Dashboard Dependencies
+
+# Core dashboard framework
+streamlit>=1.28.0
+
+# Data handling (if needed for future enhancements)
+pandas>=2.0.0
+
+# Date/time utilities (already in stdlib but listed for reference)
+# python-dateutil>=2.8.0  # Not needed - using stdlib datetime
