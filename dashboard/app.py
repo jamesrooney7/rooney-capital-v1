@@ -427,13 +427,179 @@ if DB_AVAILABLE and portfolio_metrics:
             help="Average time in trade (hours)"
         )
 
-    # Best/Worst trades
-    with st.expander("📊 Additional Stats"):
-        col1, col2 = st.columns(2)
+    # Additional comprehensive stats in expandable sections
+    with st.expander("📊 Risk & Return Metrics"):
+        col1, col2, col3, col4 = st.columns(4)
+
         with col1:
-            st.write(f"**Best Trade:** ${portfolio_metrics.get('best_trade', 0):.2f}")
+            expectancy = portfolio_metrics.get('expectancy', 0)
+            exp_color = "🟢" if expectancy > 0 else "🔴"
+            st.write(f"**Expectancy:** {exp_color} ${expectancy:.2f}")
+
         with col2:
-            st.write(f"**Worst Trade:** ${portfolio_metrics.get('worst_trade', 0):.2f}")
+            calmar = portfolio_metrics.get('calmar_ratio', 0)
+            st.write(f"**Calmar Ratio:** {calmar:.2f}")
+
+        with col3:
+            recovery = portfolio_metrics.get('recovery_factor', 0)
+            rec_display = f"{recovery:.2f}" if recovery != float('inf') else "∞"
+            st.write(f"**Recovery Factor:** {rec_display}")
+
+        with col4:
+            st.write(f"**Trades/Day:** {portfolio_metrics.get('trades_per_day', 0):.2f}")
+
+    with st.expander("💰 Win/Loss Analysis"):
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.write(f"**Avg Win:** ${portfolio_metrics.get('avg_win', 0):.2f}")
+        with col2:
+            st.write(f"**Avg Loss:** ${portfolio_metrics.get('avg_loss', 0):.2f}")
+        with col3:
+            wl_ratio = portfolio_metrics.get('win_loss_ratio', 0)
+            st.write(f"**Win/Loss Ratio:** {wl_ratio:.2f}x")
+        with col4:
+            best_trade = portfolio_metrics.get('best_trade', 0)
+            st.write(f"**Best Trade:** ${best_trade:.2f}")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            worst_trade = portfolio_metrics.get('worst_trade', 0)
+            st.write(f"**Worst Trade:** ${worst_trade:.2f}")
+        with col2:
+            best_day = portfolio_metrics.get('best_day', 0)
+            st.write(f"**Best Day:** ${best_day:.2f}")
+        with col3:
+            worst_day = portfolio_metrics.get('worst_day', 0)
+            st.write(f"**Worst Day:** ${worst_day:.2f}")
+        with col4:
+            profitable_days_pct = portfolio_metrics.get('profitable_days_pct', 0)
+            st.write(f"**Profitable Days:** {profitable_days_pct:.1f}%")
+
+    with st.expander("🔥 Streaks"):
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            current_streak = portfolio_metrics.get('current_streak', 0)
+            if current_streak > 0:
+                st.write(f"**Current Streak:** 🟢 {current_streak} wins")
+            elif current_streak < 0:
+                st.write(f"**Current Streak:** 🔴 {abs(current_streak)} losses")
+            else:
+                st.write(f"**Current Streak:** ⚪ 0")
+
+        with col2:
+            max_win = portfolio_metrics.get('max_win_streak', 0)
+            st.write(f"**Max Win Streak:** {max_win}")
+
+        with col3:
+            max_loss = portfolio_metrics.get('max_loss_streak', 0)
+            st.write(f"**Max Loss Streak:** {max_loss}")
+
+
+# ============================================================================
+# P&L Calendar
+# ============================================================================
+
+if DB_AVAILABLE and db_trades:
+    st.header("📅 P&L Calendar")
+
+    # Get all dates with trades
+    db = TradesDB()
+    all_daily_pnl = db.get_daily_pnl()
+
+    if all_daily_pnl:
+        # Month selector
+        from datetime import datetime as dt_class
+        dates = [dt_class.fromisoformat(d) for d in all_daily_pnl.keys()]
+        min_date = min(dates)
+        max_date = max(dates)
+
+        # Create month options
+        months = []
+        current = min_date.replace(day=1)
+        while current <= max_date:
+            months.append(current)
+            # Move to next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+
+        # Month selector
+        selected_month = st.selectbox(
+            "Select Month",
+            months,
+            index=len(months) - 1,  # Default to most recent month
+            format_func=lambda x: x.strftime("%B %Y")
+        )
+
+        # Filter P&L for selected month
+        month_start = selected_month.replace(day=1)
+        if selected_month.month == 12:
+            month_end = selected_month.replace(year=selected_month.year + 1, month=1, day=1)
+        else:
+            month_end = selected_month.replace(month=selected_month.month + 1, day=1)
+
+        # Create calendar grid
+        import calendar
+        cal = calendar.monthcalendar(selected_month.year, selected_month.month)
+
+        # Build calendar
+        st.write(f"### {selected_month.strftime('%B %Y')}")
+
+        # Days of week header
+        col_headers = st.columns(7)
+        for i, day in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']):
+            col_headers[i].write(f"**{day}**")
+
+        # Calendar rows
+        for week in cal:
+            cols = st.columns(7)
+            for i, day in enumerate(week):
+                if day == 0:
+                    cols[i].write("")
+                else:
+                    date_str = f"{selected_month.year}-{selected_month.month:02d}-{day:02d}"
+                    pnl = all_daily_pnl.get(date_str, 0.0)
+
+                    if pnl > 0:
+                        cols[i].markdown(
+                            f"<div style='background-color: #d4edda; padding: 5px; border-radius: 3px; text-align: center;'>"
+                            f"<small>{day}</small><br><b>${pnl:.0f}</b></div>",
+                            unsafe_allow_html=True
+                        )
+                    elif pnl < 0:
+                        cols[i].markdown(
+                            f"<div style='background-color: #f8d7da; padding: 5px; border-radius: 3px; text-align: center;'>"
+                            f"<small>{day}</small><br><b>${pnl:.0f}</b></div>",
+                            unsafe_allow_html=True
+                        )
+                    else:
+                        cols[i].markdown(
+                            f"<div style='padding: 5px; text-align: center;'>"
+                            f"<small style='color: #999;'>{day}</small></div>",
+                            unsafe_allow_html=True
+                        )
+
+        # Month summary
+        month_pnl = sum(
+            pnl for date_str, pnl in all_daily_pnl.items()
+            if month_start <= dt_class.fromisoformat(date_str) < month_end
+        )
+        month_days = sum(
+            1 for date_str in all_daily_pnl.keys()
+            if month_start <= dt_class.fromisoformat(date_str) < month_end
+        )
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Month P&L", f"${month_pnl:.2f}")
+        with col2:
+            st.metric("Trading Days", month_days)
+        with col3:
+            avg_day = month_pnl / month_days if month_days > 0 else 0
+            st.metric("Avg Day", f"${avg_day:.2f}")
 
 
 # ============================================================================
