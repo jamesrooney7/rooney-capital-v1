@@ -5816,8 +5816,8 @@ class IbsStrategy(bt.Strategy):
                     price0 = line_val(self.hourly.close)
                     price0_val = price0 if price0 is not None else float("nan")
                     logger.info(
-                        f"📊 {self.p.symbol} ENTRY SIGNAL | IBS: {ibs_val:.3f} | "
-                        f"Price: {price0_val:.2f} | Time: {dt}"
+                        f"📊 {self.p.symbol} ENTRY SIGNAL | Bar: {len(self.hourly)} | "
+                        f"IBS: {ibs_val:.3f} | Price: {price0_val:.2f} | Time: {dt}"
                     )
                     if price0 is not None:
                         filter_snapshot = self._with_ml_score(
@@ -5865,8 +5865,9 @@ class IbsStrategy(bt.Strategy):
 
                 # Prevent exit on the same bar as entry
                 if self.bar_executed is not None and len(self.hourly) == self.bar_executed:
-                    logger.debug(
-                        f"{self.p.symbol} skipping exit check on entry bar (bar {len(self.hourly)})"
+                    logger.info(
+                        f"⏸️  {self.p.symbol} SKIPPING EXIT CHECK | Bar: {len(self.hourly)} | "
+                        f"Reason: Same bar as entry (bar_executed: {self.bar_executed})"
                     )
                     return
 
@@ -5924,8 +5925,8 @@ class IbsStrategy(bt.Strategy):
 
                 if exit_signal:
                     logger.info(
-                        f"🚪 {self.p.symbol} EXIT SIGNAL | Reason: {exit_signal} | "
-                        f"IBS: {ibs_val:.3f} | Price: {price:.2f}"
+                        f"🚪 {self.p.symbol} EXIT SIGNAL | Bar: {len(self.hourly)} | "
+                        f"Reason: {exit_signal} | IBS: {ibs_val:.3f} | Price: {price:.2f}"
                     )
                     filter_snapshot = self._with_ml_score(
                         self.collect_filter_values(intraday_ago=0)
@@ -5951,7 +5952,7 @@ class IbsStrategy(bt.Strategy):
             if order.status == bt.Order.Completed:
                 action = "BUY" if order.isbuy() else "SELL"
                 logger.info(
-                    f"✅ {self.p.symbol} {action} FILLED | "
+                    f"✅ {self.p.symbol} {action} FILLED | Bar: {len(self.hourly)} | "
                     f"Size: {order.executed.size} | Price: {order.executed.price:.2f}"
                 )
                 sma200_ready = self.sma200 is not None and len(self.sma200) > 0
@@ -6015,6 +6016,10 @@ class IbsStrategy(bt.Strategy):
                     entry.update(self._with_ml_score(snapshot))
                     self.trades_log.append(entry)
                     self.bar_executed = len(self.hourly)
+                    logger.info(
+                        f"🔒 {self.p.symbol} SET BAR_EXECUTED | Bar: {self.bar_executed} | "
+                        f"Exit checks will be skipped on this bar"
+                    )
                     self.current_signal = None
                 else:
                     self.pending_exit = {
@@ -6126,6 +6131,10 @@ class IbsStrategy(bt.Strategy):
             exit_entry.update(filter_snapshot)
             self.pending_exit = None
             self.bar_executed = None
+            logger.info(
+                f"🔓 {self.p.symbol} CLEARED BAR_EXECUTED | Bar: {len(self.hourly)} | "
+                f"Exit checks now allowed on all bars"
+            )
             self.trades_log.append(exit_entry)
 
     def trade_report(self):
