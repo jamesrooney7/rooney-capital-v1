@@ -116,26 +116,48 @@ with col4:
 # ============================================================================
 
 with st.expander("📡 Service Details"):
-    details = heartbeat.get("details", {})
-
+    # TradersPost and Databento are at root level, not under "details"
     col1, col2 = st.columns(2)
 
     with col1:
         st.subheader("TradersPost Webhook")
-        tp_status = details.get("traderspost", {})
+        tp_status = heartbeat.get("traderspost", {})
         if isinstance(tp_status, dict):
-            st.write(f"**Configured:** {'✅ Yes' if tp_status.get('configured') else '❌ No'}")
-            st.write(f"**Last Post:** {tp_status.get('last_post_at', 'Never')}")
-            st.write(f"**Total Posts:** {tp_status.get('total_posts', 0)}")
+            last_success = tp_status.get("last_success", {})
+            last_error = tp_status.get("last_error")
+
+            # Configured if last_success exists
+            configured = last_success is not None and isinstance(last_success, dict)
+            st.write(f"**Configured:** {'✅ Yes' if configured else '❌ No'}")
+
+            # Last post timestamp
+            if configured and last_success.get("at"):
+                st.write(f"**Last Post:** {last_success.get('at', 'Never')}")
+            else:
+                st.write(f"**Last Post:** Never")
+
+            # Show last error if exists
+            if last_error:
+                st.write(f"**Last Error:** {last_error}")
+            else:
+                st.write(f"**Status:** ✅ No errors")
         else:
             st.write("No webhook data available")
 
     with col2:
         st.subheader("Databento Feed")
-        db_status = details.get("databento", {})
+        db_status = heartbeat.get("databento", {})
         if isinstance(db_status, dict):
-            st.write(f"**Connected:** {'✅ Yes' if db_status.get('connected') else '❌ No'}")
-            st.write(f"**Last Update:** {db_status.get('last_update', 'Unknown')}")
+            queue_fanout = db_status.get("queue_fanout", {})
+            known_symbols = queue_fanout.get("known_symbols", [])
+
+            # Connected if we have known symbols
+            connected = len(known_symbols) > 0
+            st.write(f"**Connected:** {'✅ Yes' if connected else '❌ No'}")
+            st.write(f"**Symbols:** {len(known_symbols)} tracked")
+
+            if known_symbols:
+                st.write(f"**List:** {', '.join(known_symbols[:8])}{', ...' if len(known_symbols) > 8 else ''}")
         else:
             st.write("No data feed info available")
 
