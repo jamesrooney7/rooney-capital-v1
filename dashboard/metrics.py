@@ -223,6 +223,155 @@ def get_daily_returns_from_pnl(
     return returns
 
 
+def calculate_expectancy(trades: list[dict[str, Any]]) -> float:
+    """Calculate expectancy (average profit per trade).
+
+    Args:
+        trades: List of trade dictionaries with 'pnl' field
+
+    Returns:
+        Average profit/loss per trade in dollars
+    """
+    if not trades:
+        return 0.0
+    return sum(t["pnl"] for t in trades) / len(trades)
+
+
+def calculate_calmar_ratio(
+    total_pnl: float, max_drawdown: float, trading_days: int
+) -> float:
+    """Calculate Calmar Ratio (annualized return / max drawdown).
+
+    Args:
+        total_pnl: Total profit/loss
+        max_drawdown: Maximum drawdown in dollars
+        trading_days: Number of days with trades
+
+    Returns:
+        Calmar ratio
+    """
+    if max_drawdown == 0 or trading_days == 0:
+        return 0.0
+
+    # Annualize the return (assume 252 trading days per year)
+    annualized_return = (total_pnl / trading_days) * 252 if trading_days > 0 else 0
+    return annualized_return / max_drawdown if max_drawdown > 0 else 0.0
+
+
+def calculate_recovery_factor(total_pnl: float, max_drawdown: float) -> float:
+    """Calculate Recovery Factor (net profit / max drawdown).
+
+    Args:
+        total_pnl: Total profit/loss
+        max_drawdown: Maximum drawdown in dollars
+
+    Returns:
+        Recovery factor
+    """
+    if max_drawdown == 0:
+        return float('inf') if total_pnl > 0 else 0.0
+    return total_pnl / max_drawdown
+
+
+def calculate_consecutive_stats(trades: list[dict[str, Any]]) -> dict[str, int]:
+    """Calculate consecutive win/loss streaks.
+
+    Args:
+        trades: List of trades sorted by exit time
+
+    Returns:
+        Dictionary with current_streak, max_win_streak, max_loss_streak
+    """
+    if not trades:
+        return {"current_streak": 0, "max_win_streak": 0, "max_loss_streak": 0}
+
+    current_streak = 0
+    max_win_streak = 0
+    max_loss_streak = 0
+    current_win_streak = 0
+    current_loss_streak = 0
+
+    for trade in trades:
+        if trade["pnl"] > 0:
+            current_win_streak += 1
+            current_loss_streak = 0
+            current_streak = current_win_streak
+            max_win_streak = max(max_win_streak, current_win_streak)
+        elif trade["pnl"] < 0:
+            current_loss_streak += 1
+            current_win_streak = 0
+            current_streak = -current_loss_streak
+            max_loss_streak = max(max_loss_streak, current_loss_streak)
+        else:
+            # Break even trade
+            current_win_streak = 0
+            current_loss_streak = 0
+
+    return {
+        "current_streak": current_streak,
+        "max_win_streak": max_win_streak,
+        "max_loss_streak": max_loss_streak,
+    }
+
+
+def calculate_daily_stats(daily_pnl: dict[str, float]) -> dict[str, Any]:
+    """Calculate daily-level statistics.
+
+    Args:
+        daily_pnl: Dictionary mapping date strings to daily P&L
+
+    Returns:
+        Dictionary with daily statistics
+    """
+    if not daily_pnl:
+        return {
+            "total_trading_days": 0,
+            "profitable_days": 0,
+            "profitable_days_pct": 0.0,
+            "best_day": 0.0,
+            "worst_day": 0.0,
+            "avg_day": 0.0,
+        }
+
+    pnls = list(daily_pnl.values())
+    profitable_days = sum(1 for p in pnls if p > 0)
+
+    return {
+        "total_trading_days": len(pnls),
+        "profitable_days": profitable_days,
+        "profitable_days_pct": (profitable_days / len(pnls) * 100) if pnls else 0.0,
+        "best_day": max(pnls) if pnls else 0.0,
+        "worst_day": min(pnls) if pnls else 0.0,
+        "avg_day": sum(pnls) / len(pnls) if pnls else 0.0,
+    }
+
+
+def calculate_win_loss_stats(trades: list[dict[str, Any]]) -> dict[str, Any]:
+    """Calculate win/loss analysis.
+
+    Args:
+        trades: List of trades
+
+    Returns:
+        Dictionary with avg_win, avg_loss, win_loss_ratio
+    """
+    if not trades:
+        return {"avg_win": 0.0, "avg_loss": 0.0, "win_loss_ratio": 0.0}
+
+    wins = [t["pnl"] for t in trades if t["pnl"] > 0]
+    losses = [abs(t["pnl"]) for t in trades if t["pnl"] < 0]
+
+    avg_win = sum(wins) / len(wins) if wins else 0.0
+    avg_loss = sum(losses) / len(losses) if losses else 0.0
+    win_loss_ratio = avg_win / avg_loss if avg_loss > 0 else 0.0
+
+    return {
+        "avg_win": avg_win,
+        "avg_loss": avg_loss,
+        "win_loss_ratio": win_loss_ratio,
+    }
+
+
 def calculate_portfolio_metrics(
     trades: list[dict[str, Any]],
     daily_pnl: dict[str, float],
@@ -253,6 +402,20 @@ def calculate_portfolio_metrics(
             "avg_trade_duration_hours": 0.0,
             "best_trade": 0.0,
             "worst_trade": 0.0,
+            "expectancy": 0.0,
+            "calmar_ratio": 0.0,
+            "recovery_factor": 0.0,
+            "current_streak": 0,
+            "max_win_streak": 0,
+            "max_loss_streak": 0,
+            "avg_win": 0.0,
+            "avg_loss": 0.0,
+            "win_loss_ratio": 0.0,
+            "total_trading_days": 0,
+            "profitable_days_pct": 0.0,
+            "best_day": 0.0,
+            "worst_day": 0.0,
+            "trades_per_day": 0.0,
         }
 
     # Calculate daily returns
@@ -261,18 +424,56 @@ def calculate_portfolio_metrics(
     # Calculate max drawdown
     max_dd, max_dd_pct = calculate_max_drawdown(daily_pnl)
 
+    # Calculate total P&L
+    total_pnl = sum(t["pnl"] for t in trades)
+
+    # Get additional stats
+    win_loss = calculate_win_loss_stats(trades)
+    consecutive = calculate_consecutive_stats(trades)
+    daily_stats = calculate_daily_stats(daily_pnl)
+
+    # Trades per day
+    trades_per_day = len(trades) / daily_stats["total_trading_days"] if daily_stats["total_trading_days"] > 0 else 0.0
+
     return {
+        # Basic metrics
         "total_trades": len(trades),
-        "total_pnl": sum(t["pnl"] for t in trades),
+        "total_pnl": total_pnl,
         "win_rate": calculate_win_rate(trades),
         "profit_factor": calculate_profit_factor(trades),
+
+        # Risk-adjusted metrics
         "sharpe_ratio": calculate_sharpe_ratio(daily_returns, risk_free_rate),
         "sortino_ratio": calculate_sortino_ratio(daily_returns, risk_free_rate),
+        "calmar_ratio": calculate_calmar_ratio(total_pnl, max_dd, daily_stats["total_trading_days"]),
+        "recovery_factor": calculate_recovery_factor(total_pnl, max_dd),
+
+        # Drawdown
         "max_drawdown": max_dd,
         "max_drawdown_pct": max_dd_pct,
+
+        # Per-trade metrics
         "avg_trade_duration_hours": calculate_average_trade_duration(trades),
         "best_trade": max((t["pnl"] for t in trades), default=0.0),
         "worst_trade": min((t["pnl"] for t in trades), default=0.0),
+        "expectancy": calculate_expectancy(trades),
+
+        # Win/Loss analysis
+        "avg_win": win_loss["avg_win"],
+        "avg_loss": win_loss["avg_loss"],
+        "win_loss_ratio": win_loss["win_loss_ratio"],
+
+        # Streaks
+        "current_streak": consecutive["current_streak"],
+        "max_win_streak": consecutive["max_win_streak"],
+        "max_loss_streak": consecutive["max_loss_streak"],
+
+        # Daily stats
+        "total_trading_days": daily_stats["total_trading_days"],
+        "profitable_days_pct": daily_stats["profitable_days_pct"],
+        "best_day": daily_stats["best_day"],
+        "worst_day": daily_stats["worst_day"],
+        "trades_per_day": trades_per_day,
     }
 
 
