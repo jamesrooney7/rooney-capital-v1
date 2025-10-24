@@ -64,7 +64,10 @@ class DiscordNotifier:
             req = request.Request(
                 self.webhook_url,
                 data=data,
-                headers={"Content-Type": "application/json"},
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "RooneyCapitalBot/1.0",
+                },
             )
             with request.urlopen(req, timeout=10) as response:
                 if response.status == 204:
