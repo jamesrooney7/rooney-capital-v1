@@ -6056,14 +6056,12 @@ class IbsStrategy(bt.Strategy):
         if trade.isclosed:
             pv = point_value(self.p.symbol)
             spec = CONTRACT_SPECS[self.p.symbol]
-            slippage_usd = spec["tick_value"] * abs(trade.size)
-            commission_usd = 2 * COMMISSION_PER_SIDE * abs(trade.size)
+            slippage_usd = spec["tick_value"] * abs(self.p.size)  # Use self.p.size instead of trade.size
+            commission_usd = 2 * COMMISSION_PER_SIDE * abs(self.p.size)
 
-            broker_pnl = getattr(trade, "pnlcomm", None)
-            if broker_pnl is None:
-                pnl_usd = trade.pnl * pv - commission_usd
-            else:
-                pnl_usd = broker_pnl
+            # Always calculate P&L with point_value multiplier
+            # trade.pnl is the price difference in points
+            pnl_usd = trade.pnl * pv - commission_usd
             sma200_ready = self.sma200 is not None and len(self.sma200) > 0
             if sma200_ready:
                 dclose = timeframed_line_val(
@@ -6177,10 +6175,10 @@ class IbsStrategy(bt.Strategy):
                         side="long",  # IBS strategy is long-only
                         entry_time=bt.num2date(trade.dtopen),
                         entry_price=entry_price,
-                        entry_size=abs(trade.size),
+                        entry_size=abs(self.p.size),  # Use self.p.size instead of trade.size
                         exit_time=bt.num2date(trade.dtclose),
                         exit_price=exit_price_val,
-                        exit_size=abs(size if size else trade.size),
+                        exit_size=abs(self.p.size),  # Use self.p.size for consistency
                         pnl=pnl_usd,
                         pnl_percent=pnl_percent,
                         exit_reason=exit_reason,

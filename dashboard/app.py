@@ -31,10 +31,6 @@ from utils import (
 dashboard_path = Path(__file__).resolve().parent
 src_path = dashboard_path.parent / "src"
 
-# Debug paths
-st.sidebar.write(f"**Debug:** Dashboard path: {dashboard_path}")
-st.sidebar.write(f"**Debug:** Src path: {src_path}")
-
 sys.path.insert(0, str(src_path))
 sys.path.insert(0, str(dashboard_path))
 
@@ -44,9 +40,6 @@ try:
 
     # Load trades_db module
     trades_db_path = src_path / "utils" / "trades_db.py"
-    st.sidebar.write(f"**Debug:** Looking for trades_db at: {trades_db_path}")
-    st.sidebar.write(f"**Debug:** File exists: {trades_db_path.exists()}")
-
     spec = importlib.util.spec_from_file_location("trades_db", trades_db_path)
     trades_db_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(trades_db_module)
@@ -54,9 +47,6 @@ try:
 
     # Load metrics module
     metrics_path = dashboard_path / "metrics.py"
-    st.sidebar.write(f"**Debug:** Looking for metrics at: {metrics_path}")
-    st.sidebar.write(f"**Debug:** File exists: {metrics_path.exists()}")
-
     spec = importlib.util.spec_from_file_location("dashboard_metrics", metrics_path)
     metrics_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(metrics_module)
@@ -64,25 +54,23 @@ try:
     calculate_instrument_metrics = metrics_module.calculate_instrument_metrics
 
     DB_AVAILABLE = True
-    st.sidebar.success("✅ Database modules loaded successfully")
 except Exception as e:
     DB_AVAILABLE = False
-    import traceback
-    st.error(f"Failed to load database modules: {e}")
-    st.error(traceback.format_exc())
+    # Only show error in sidebar, not main page
+    st.sidebar.error(f"Database unavailable: {e}")
 
 
 # Page configuration
 st.set_page_config(
-    page_title="Pine Trading Dashboard",
+    page_title="Rooney Exploration Dashboard",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
 # Title
-st.title("📊 Pine Trading System Dashboard")
-st.caption("Real-time monitoring for algorithmic trading")
+st.title("📊 Rooney Exploration Dashboard")
+st.caption("Real-time portfolio monitoring and performance analytics")
 
 # Auto-refresh every 10 seconds
 st.markdown(
@@ -122,10 +110,6 @@ if DB_AVAILABLE:
         db_trades = db.get_all_trades()
         daily_pnl = db.get_daily_pnl()
 
-        # Debug info (will remove later)
-        st.sidebar.write(f"**Debug:** Loaded {len(db_trades)} trades from DB")
-        st.sidebar.write(f"**Debug:** Daily P&L entries: {len(daily_pnl)}")
-
         # Calculate portfolio metrics
         portfolio_metrics = calculate_portfolio_metrics(
             trades=db_trades,
@@ -136,16 +120,9 @@ if DB_AVAILABLE:
 
         # Calculate per-instrument metrics
         instrument_metrics = calculate_instrument_metrics(db_trades)
-
-        st.sidebar.write(f"**Debug:** Portfolio metrics calculated: {bool(portfolio_metrics)}")
-        st.sidebar.write(f"**Debug:** Instrument metrics: {list(instrument_metrics.keys())}")
     except Exception as e:
-        import traceback
-        st.error(f"Failed to load database metrics: {e}")
-        st.error(traceback.format_exc())
+        st.sidebar.error(f"Failed to load metrics: {e}")
         DB_AVAILABLE = False
-else:
-    st.sidebar.warning("Database not available")
 
 
 # ============================================================================
@@ -259,54 +236,6 @@ with st.expander("📡 Service Details"):
                 st.write(f"**List:** {', '.join(known_symbols[:12])}, ...")
         else:
             st.write("No data feed info available")
-
-
-# ============================================================================
-# ML Filter Statistics
-# ============================================================================
-
-st.header("🤖 ML Filter Statistics")
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.metric(
-        "Total Signals",
-        ml_stats["total_signals"],
-        help="Total number of IBS signals in time window"
-    )
-
-with col2:
-    st.metric(
-        "Passed",
-        ml_stats["passed"],
-        delta=f"{ml_stats['pass_rate']:.1f}%",
-        delta_color="normal",
-        help="Signals that passed ML filter threshold"
-    )
-
-with col3:
-    st.metric(
-        "Blocked",
-        ml_stats["blocked"],
-        delta=f"-{100-ml_stats['pass_rate']:.1f}%" if ml_stats['total_signals'] > 0 else None,
-        delta_color="inverse",
-        help="Signals blocked by ML filter"
-    )
-
-with col4:
-    pass_rate = ml_stats["pass_rate"]
-    if pass_rate >= 70:
-        color = "🟢"
-    elif pass_rate >= 40:
-        color = "🟡"
-    else:
-        color = "🔴"
-    st.metric(
-        "Pass Rate",
-        f"{color} {pass_rate:.1f}%",
-        help="Percentage of signals passing ML filter"
-    )
 
 
 # ============================================================================
