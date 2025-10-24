@@ -27,14 +27,33 @@ from utils import (
     get_open_positions,
 )
 
-# Import database and metrics
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-sys.path.insert(0, str(Path(__file__).parent))  # For metrics.py in dashboard/
+# Import database and metrics - use absolute path to avoid conflict with local utils.py
+src_path = Path(__file__).parent.parent / "src"
+dashboard_path = Path(__file__).parent
+sys.path.insert(0, str(src_path))
+sys.path.insert(0, str(dashboard_path))
+
 try:
-    from utils.trades_db import TradesDB
-    from metrics import calculate_portfolio_metrics, calculate_instrument_metrics
+    # Import from src/utils/ package
+    import importlib.util
+
+    # Load trades_db module
+    trades_db_path = src_path / "utils" / "trades_db.py"
+    spec = importlib.util.spec_from_file_location("trades_db", trades_db_path)
+    trades_db_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(trades_db_module)
+    TradesDB = trades_db_module.TradesDB
+
+    # Load metrics module
+    metrics_path = dashboard_path / "metrics.py"
+    spec = importlib.util.spec_from_file_location("dashboard_metrics", metrics_path)
+    metrics_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(metrics_module)
+    calculate_portfolio_metrics = metrics_module.calculate_portfolio_metrics
+    calculate_instrument_metrics = metrics_module.calculate_instrument_metrics
+
     DB_AVAILABLE = True
-except ImportError as e:
+except Exception as e:
     DB_AVAILABLE = False
     import traceback
     st.error(f"Failed to load database modules: {e}")
