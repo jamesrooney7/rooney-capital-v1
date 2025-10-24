@@ -19,6 +19,12 @@ from .safe_div import monkey_patch_division, safe_div
 from .contract_specs import CONTRACT_SPECS, point_value
 from .feature_utils import normalize_column_name
 
+# Import trades database for persisting completed trades
+try:
+    from utils.trades_db import TradesDB
+except ImportError:
+    TradesDB = None  # Gracefully handle if module not available
+
 
 # Ensure Backtrader line division uses SafeDivision before any strategies are built.
 monkey_patch_division()
@@ -1136,6 +1142,15 @@ class IbsStrategy(bt.Strategy):
         self.current_signal = None
         self.trades_log: list[dict] = []
         self.pending_exit: dict | None = None
+
+        # Initialize trades database for persistence
+        self._trades_db = None
+        if TradesDB is not None:
+            try:
+                self._trades_db = TradesDB()
+                logger.info(f"{sym} initialized trades database")
+            except Exception as e:
+                logger.warning(f"{sym} failed to initialize trades database: {e}")
         self.filter_columns: list[FilterColumn] = list(self.p.filter_columns or [])
         self.filter_keys = {column.parameter for column in self.filter_columns}
         self.filter_column_keys = {column.column_key for column in self.filter_columns}
@@ -6136,6 +6151,46 @@ class IbsStrategy(bt.Strategy):
                 f"Exit checks now allowed on all bars"
             )
             self.trades_log.append(exit_entry)
+
+            # Write completed trade to database
+            if self._trades_db is not None:
+                try:
+                    # Find matching entry from trades_log (most recent entry before this exit)
+                    entry_ibs = None
+                    entry_ml_score = None
+                    for log_entry in reversed(self.trades_log[:-1]):  # Exclude the exit we just added
+                        if (log_entry.get("instrument") == self.p.symbol
+                            and log_entry.get("signal") in ["IBS entry", "entry"]):
+                            entry_ibs = log_entry.get("ibs_value")
+                            entry_ml_score = log_entry.get("ml_score")
+                            break
+
+                    # Calculate P&L percent
+                    entry_price = trade.price
+                    exit_price_val = price if price is not None else 0.0
+                    pnl_percent = None
+                    if entry_price and entry_price != 0:
+                        pnl_percent = ((exit_price_val - entry_price) / entry_price) * 100
+
+                    self._trades_db.insert_trade(
+                        symbol=self.p.symbol,
+                        side="long",  # IBS strategy is long-only
+                        entry_time=bt.num2date(trade.dtopen),
+                        entry_price=entry_price,
+                        entry_size=abs(trade.size),
+                        exit_time=bt.num2date(trade.dtclose),
+                        exit_price=exit_price_val,
+                        exit_size=abs(size if size else trade.size),
+                        pnl=pnl_usd,
+                        pnl_percent=pnl_percent,
+                        exit_reason=exit_reason,
+                        ml_score=entry_ml_score or filter_snapshot.get("ml_score"),
+                        ibs_entry=entry_ibs,
+                        ibs_exit=ibs_val if ibs_val is not None else filter_snapshot.get("ibs_value"),
+                    )
+                    logger.info(f"💾 {self.p.symbol} trade saved to database | P&L: ${pnl_usd:.2f}")
+                except Exception as e:
+                    logger.error(f"Failed to write trade to database for {self.p.symbol}: {e}")
 
     def trade_report(self):
         """Return recorded trades.
