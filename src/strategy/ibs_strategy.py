@@ -5837,17 +5837,18 @@ class IbsStrategy(bt.Strategy):
 
                         # Only place order if ML filter passes
                         if ml_passed:
+                            # Use Market order for immediate execution at bar close price
                             order = self.buy(
                                 data=self.hourly,
                                 size=self.p.size,
-                                exectype=bt.Order.Limit,
-                                price=price0,
+                                exectype=bt.Order.Market,
                             )
                             order.addinfo(
                                 ibs=ibs_val,
                                 created=dt,
                                 created_dt=dt,
                                 filter_snapshot=filter_snapshot,
+                                signal_price=price0,  # Record signal price for logging
                             )
                             self.order = order
                         else:
