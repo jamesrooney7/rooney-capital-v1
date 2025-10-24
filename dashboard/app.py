@@ -28,8 +28,13 @@ from utils import (
 )
 
 # Import database and metrics - use absolute path to avoid conflict with local utils.py
-src_path = Path(__file__).parent.parent / "src"
-dashboard_path = Path(__file__).parent
+dashboard_path = Path(__file__).resolve().parent
+src_path = dashboard_path.parent / "src"
+
+# Debug paths
+st.sidebar.write(f"**Debug:** Dashboard path: {dashboard_path}")
+st.sidebar.write(f"**Debug:** Src path: {src_path}")
+
 sys.path.insert(0, str(src_path))
 sys.path.insert(0, str(dashboard_path))
 
@@ -39,6 +44,9 @@ try:
 
     # Load trades_db module
     trades_db_path = src_path / "utils" / "trades_db.py"
+    st.sidebar.write(f"**Debug:** Looking for trades_db at: {trades_db_path}")
+    st.sidebar.write(f"**Debug:** File exists: {trades_db_path.exists()}")
+
     spec = importlib.util.spec_from_file_location("trades_db", trades_db_path)
     trades_db_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(trades_db_module)
@@ -46,6 +54,9 @@ try:
 
     # Load metrics module
     metrics_path = dashboard_path / "metrics.py"
+    st.sidebar.write(f"**Debug:** Looking for metrics at: {metrics_path}")
+    st.sidebar.write(f"**Debug:** File exists: {metrics_path.exists()}")
+
     spec = importlib.util.spec_from_file_location("dashboard_metrics", metrics_path)
     metrics_module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(metrics_module)
@@ -53,6 +64,7 @@ try:
     calculate_instrument_metrics = metrics_module.calculate_instrument_metrics
 
     DB_AVAILABLE = True
+    st.sidebar.success("✅ Database modules loaded successfully")
 except Exception as e:
     DB_AVAILABLE = False
     import traceback
