@@ -5862,6 +5862,13 @@ class IbsStrategy(bt.Strategy):
                 entry_price = self.getposition(self.hourly).price
                 size = self.getposition(self.hourly).size
 
+                # Prevent exit on the same bar as entry
+                if self.bar_executed is not None and len(self.hourly) == self.bar_executed:
+                    logger.debug(
+                        f"{self.p.symbol} skipping exit check on entry bar (bar {len(self.hourly)})"
+                    )
+                    return
+
                 if self.p.enable_stop:
                     if str(self.p.stop_type).lower().startswith("percent"):
                         stop_price = entry_price * (
