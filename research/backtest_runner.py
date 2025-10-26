@@ -29,9 +29,9 @@ import backtrader as bt
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from research.utils.data_loader import setup_cerebro_with_data
-from strategy.ibs_strategy import IbsStrategy
-from models.loader import load_model_bundle
-from config import COMMISSION_PER_SIDE
+from src.strategy.ibs_strategy import IbsStrategy
+from src.models.loader import load_model_bundle
+from src.config import COMMISSION_PER_SIDE
 
 logging.basicConfig(
     level=logging.INFO,
