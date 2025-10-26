@@ -339,12 +339,44 @@ def extract_training_data(
     cerebro.broker.set_coc(True)
 
     # Load data for symbol + reference symbols
-    # Note: All symbols must have data for the full period or the backtest will stop early!
-    # Only load the primary symbol - strategy will handle missing cross-asset data gracefully
-    symbols_to_load = [symbol]
+    # Try to load common reference symbols, but skip gracefully if data is missing/incomplete
+    # The strategy will return None for cross-asset features if feeds aren't available
+    primary_symbol = symbol
+    reference_symbols = ['TLT', 'VIX', 'ES', 'NQ', 'RTY', 'YM',
+                         'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
+                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S']
 
-    logger.info(f"Loading data for primary symbol: {symbol}")
-    logger.info(f"Note: Cross-asset features will be disabled if data not available")
+    # Remove primary symbol from reference list to avoid duplicates
+    reference_symbols = [s for s in reference_symbols if s != primary_symbol]
+
+    symbols_to_load = [primary_symbol]  # Always load primary
+
+    logger.info(f"Loading primary symbol: {primary_symbol}")
+
+    # Try loading reference symbols
+    from research.utils.data_loader import load_symbol_data
+    for ref_symbol in reference_symbols:
+        try:
+            hourly_df, daily_df = load_symbol_data(
+                ref_symbol,
+                data_dir=data_dir,
+                start_date=start_date,
+                end_date=end_date
+            )
+
+            # Check if we have sufficient data (at least 1 year)
+            if len(hourly_df) >= 252 * 6 and len(daily_df) >= 252:  # ~1 year of hourly/daily
+                symbols_to_load.append(ref_symbol)
+                logger.info(f"✓ Loaded reference symbol: {ref_symbol}")
+            else:
+                logger.warning(f"⚠️  Skipping {ref_symbol}: insufficient data ({len(hourly_df)} hourly, {len(daily_df)} daily)")
+
+        except FileNotFoundError:
+            logger.debug(f"⚠️  Skipping {ref_symbol}: data file not found")
+        except Exception as e:
+            logger.warning(f"⚠️  Skipping {ref_symbol}: {e}")
+
+    logger.info(f"Total symbols loaded: {len(symbols_to_load)} (1 primary + {len(symbols_to_load)-1} reference)")
 
     setup_cerebro_with_data(
         cerebro,
