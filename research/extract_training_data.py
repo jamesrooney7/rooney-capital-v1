@@ -172,6 +172,32 @@ class FeatureLoggingStrategy(IbsStrategy):
         result["ml_passed"] = True  # Always allow entries for training data
         return result
 
+    def entry_allowed(self, dt, ibs_val: float) -> bool:
+        """
+        Override to bypass ALL filters during training data extraction.
+
+        We only check:
+        1. Session time (trading hours)
+        2. IBS entry range (0.0-0.2 for the base signal)
+
+        All other filters (RSI, ATR, calendar, etc.) are DISABLED so they
+        don't block entries. We still CALCULATE those filter values via
+        collect_filter_values(), but we don't use them to filter trades.
+
+        This ensures we capture both winning and losing base IBS trades
+        so the ML model can learn which filter combinations predict success.
+        """
+        # Check session time only
+        if not self.in_session(dt):
+            return False
+
+        # Check base IBS entry range only
+        if not (self.p.ibs_entry_low <= ibs_val <= self.p.ibs_entry_high):
+            return False
+
+        # All other filters bypassed!
+        return True
+
     def notify_order(self, order):
         """Capture features when orders are placed."""
 
