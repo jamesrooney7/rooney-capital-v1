@@ -14,10 +14,11 @@ SYMBOLS=(
 
 DATA_DIR="data/training"
 OUTPUT_DIR="src/models"
-N_TRIALS=30          # Hyperparameter optimization trials
-N_FOLDS=5            # CPCV folds
-SCORE_METRIC="sharpe"  # Optimization metric
-MIN_TRADES=100       # Minimum trades for threshold
+N_TRIALS=30              # Hyperparameter optimization trials
+N_FOLDS=5                # CPCV folds
+SCORE_METRIC="sharpe"    # Optimization metric (sharpe, profit_factor, auc)
+MIN_TRADES=100           # Minimum trades for threshold optimization
+MIN_TOTAL_TRADES=1000    # Minimum total trades for robust training
 
 # Colors for output
 GREEN='\033[0;32m'
@@ -34,9 +35,11 @@ echo "Output Directory: $OUTPUT_DIR"
 echo "Optimization Trials: $N_TRIALS"
 echo "CPCV Folds: $N_FOLDS"
 echo "Score Metric: $SCORE_METRIC"
+echo "Min Total Trades: $MIN_TOTAL_TRADES (robustness requirement)"
 echo "Total Symbols: ${#SYMBOLS[@]}"
 echo ""
 echo -e "${YELLOW}⚠️  This will take several hours to complete!${NC}"
+echo -e "${YELLOW}⚠️  Symbols with <$MIN_TOTAL_TRADES trades will be skipped.${NC}"
 echo ""
 
 # Track results
@@ -59,7 +62,8 @@ for symbol in "${SYMBOLS[@]}"; do
         --n-trials "$N_TRIALS" \
         --n-folds "$N_FOLDS" \
         --score-metric "$SCORE_METRIC" \
-        --min-trades "$MIN_TRADES"
+        --min-trades "$MIN_TRADES" \
+        --min-total-trades "$MIN_TOTAL_TRADES"
 
     if [ $? -eq 0 ]; then
         SYMBOL_END=$(date +%s)

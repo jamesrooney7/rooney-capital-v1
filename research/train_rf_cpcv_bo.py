@@ -478,6 +478,7 @@ def train_model(
     n_folds: int = 5,
     score_metric: str = "sharpe",
     min_trades_threshold: int = 100,
+    min_total_trades: int = 1000,
 ) -> None:
     """Train Random Forest model with CPCV and Bayesian Optimization.
 
@@ -489,6 +490,7 @@ def train_model(
         n_folds: Number of CPCV folds
         score_metric: Metric to optimize ("sharpe", "profit_factor", "auc")
         min_trades_threshold: Minimum trades for threshold optimization
+        min_total_trades: Minimum total trades required for training (default: 1000)
     """
     logger.info(f"\n{'='*60}")
     logger.info(f"Training model for {symbol}")
@@ -497,11 +499,26 @@ def train_model(
     # Load data
     df = load_training_data(symbol, data_dir)
 
+    # Validate minimum trades
+    if len(df) < min_total_trades:
+        logger.error(
+            f"❌ Insufficient training data for {symbol}: "
+            f"{len(df)} trades (minimum: {min_total_trades})"
+        )
+        logger.error(
+            f"   This symbol does not have enough historical trades for robust training."
+        )
+        raise ValueError(
+            f"Symbol {symbol} has only {len(df)} trades, "
+            f"need at least {min_total_trades} for training"
+        )
+
     # Prepare features
     X, y, returns, feature_names = prepare_features(df)
 
     logger.info(f"Training set: {len(X)} samples, {len(feature_names)} features")
     logger.info(f"Class balance: {(y==1).sum()} wins / {(y==0).sum()} losses")
+    logger.info(f"✅ Passed minimum trades requirement ({len(X)} >= {min_total_trades})")
 
     # Generate CPCV splits
     splits = get_cpcv_splits(len(X), n_splits=n_folds, purge_pct=0.02)
@@ -546,7 +563,8 @@ def train_model(
         "Trades": int(len(X)),
         "Prod_Threshold": threshold,
         "Guardrails": {
-            "Trades": min_trades_threshold,
+            "Min_Total_Trades": min_total_trades,
+            "Min_Threshold_Trades": min_trades_threshold,
             "Era_Positive_Count": 4,  # TODO: Implement era analysis
             "Era_Count": 5,
         },
@@ -629,6 +647,12 @@ def main():
         default=100,
         help="Minimum trades for threshold optimization (default: 100)",
     )
+    parser.add_argument(
+        "--min-total-trades",
+        type=int,
+        default=1000,
+        help="Minimum total trades required for training (default: 1000)",
+    )
 
     args = parser.parse_args()
 
@@ -640,6 +664,7 @@ def main():
         n_folds=args.n_folds,
         score_metric=args.score_metric,
         min_trades_threshold=args.min_trades,
+        min_total_trades=args.min_total_trades,
     )
 
 
