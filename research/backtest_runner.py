@@ -66,6 +66,40 @@ class PercentageSizer(bt.Sizer):
         return max(size, 0)
 
 
+def extract_reference_symbols(features: tuple[str, ...]) -> set[str]:
+    """
+    Extract reference symbol names from ML feature names.
+
+    Features like 'tlt_daily_z_score', 'nq_daily_return', '6a_hourly_return'
+    indicate the strategy needs data for TLT, NQ, 6A, etc.
+
+    Args:
+        features: Tuple of feature names
+
+    Returns:
+        Set of uppercase symbol names
+    """
+    reference_symbols = set()
+
+    # Common reference symbols to look for in feature names
+    known_symbols = {
+        'TLT', 'VIX', 'NQ', 'ES', 'YM', 'RTY',  # Indices
+        '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S',  # Currencies
+        'CL', 'NG', 'GC', 'SI', 'HG', 'PL',  # Commodities
+        'DXY', 'MBT'  # Other
+    }
+
+    for feature in features:
+        feature_lower = feature.lower()
+        for sym in known_symbols:
+            sym_lower = sym.lower()
+            # Check if symbol appears in feature name
+            if sym_lower in feature_lower:
+                reference_symbols.add(sym)
+
+    return reference_symbols
+
+
 def run_backtest(
     symbol: str,
     start_date: str,
@@ -109,29 +143,24 @@ def run_backtest(
     # Set commission
     cerebro.broker.setcommission(commission=commission)
 
-    # Load data for primary symbol and reference symbols
-    # IbsStrategy needs TLT_day for regime filters
-    symbols_to_load = [symbol, 'TLT']
+    # Load ML model bundle first to detect required reference symbols
+    symbols_to_load = {symbol}  # Start with primary symbol
+    strat_params = {}
 
-    # Also load pair symbols if needed (e.g., NQ for ES)
-    # For now, just load the main symbol + TLT
-    # TODO: Add pair symbol logic based on PAIR_MAP
-
-    logger.info(f"Loading data for symbols: {symbols_to_load}")
-    setup_cerebro_with_data(
-        cerebro,
-        symbols=symbols_to_load,
-        data_dir=data_dir,
-        start_date=start_date,
-        end_date=end_date
-    )
-
-    # Load ML model bundle for this symbol
     if use_ml:
         try:
             logger.info(f"Loading ML model bundle for {symbol}...")
             bundle = load_model_bundle(symbol)
             logger.info(f"✅ Loaded model with {len(bundle.features)} features, threshold={bundle.threshold}")
+
+            # Extract reference symbols from features
+            reference_symbols = extract_reference_symbols(bundle.features)
+            symbols_to_load.update(reference_symbols)
+
+            # Always add TLT (used by IbsStrategy for regime filters)
+            symbols_to_load.add('TLT')
+
+            logger.info(f"   Detected reference symbols: {', '.join(sorted(reference_symbols))}")
             logger.info(f"   Features: {', '.join(bundle.features[:5])}... ({len(bundle.features)} total)")
 
             # Get strategy parameters from bundle
@@ -142,9 +171,21 @@ def run_backtest(
             logger.warning(f"⚠️  No ML model found for {symbol}: {e}")
             logger.warning(f"   Running with default parameters (no ML filter)")
             strat_params = {'symbol': symbol}
+            symbols_to_load.add('TLT')  # Still need TLT for basic strategy
     else:
         logger.info(f"ML disabled - running with default parameters")
         strat_params = {'symbol': symbol}
+        symbols_to_load.add('TLT')
+
+    # Load data for all required symbols
+    logger.info(f"Loading data for symbols: {', '.join(sorted(symbols_to_load))}")
+    setup_cerebro_with_data(
+        cerebro,
+        symbols=list(symbols_to_load),
+        data_dir=data_dir,
+        start_date=start_date,
+        end_date=end_date
+    )
 
     # Merge any custom parameters
     if strategy_params:
