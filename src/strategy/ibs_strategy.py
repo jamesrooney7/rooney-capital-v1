@@ -34,29 +34,36 @@ logger = logging.getLogger(__name__)
 
 
 EXECUTION_SYMBOLS: set[str] = {
+    # Equity indices
     "ES",
     "NQ",
     "RTY",
     "YM",
+    # Commodities
     "GC",
     "SI",
     "HG",
     "CL",
     "NG",
+    "PL",  # Now tradable
+    # Currencies
     "6A",
     "6B",
+    "6C",  # Now tradable
     "6E",
+    "6J",  # Now tradable
+    "6M",  # Now tradable
+    "6N",  # Now tradable
+    "6S",  # Now tradable
+    # Grains
+    "ZC",  # Now tradable
+    "ZS",  # Now tradable
+    "ZW",  # Now tradable
 }
 
 REFERENCE_SYMBOLS: set[str] = {
-    "PL",
-    "6C",
-    "6J",
-    "6M",
-    "6N",
-    "6S",
-    "TLT",
-    "VIX",
+    "TLT",  # Reference only (not traded)
+    "VIX",  # Reference only (not traded)
 }
 
 
