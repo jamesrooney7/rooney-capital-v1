@@ -248,9 +248,17 @@ class FeatureLoggingStrategy(IbsStrategy):
                         # Get contract specs for PnL calculation
                         from strategy.contract_specs import point_value
                         pv = point_value(self.p.symbol)
-                        pnl_usd = (exit_price - entry_price) * pv
 
-                        # Binary outcome
+                        # Gross PnL (price movement only)
+                        gross_pnl = (exit_price - entry_price) * pv
+
+                        # Net PnL (after commissions and slippage)
+                        # Commission: $1.00 per side = $2.00 total
+                        # Slippage: Already included in executed prices from Backtrader
+                        commission_total = 2.00  # $1.00 entry + $1.00 exit
+                        pnl_usd = gross_pnl - commission_total
+
+                        # Binary outcome (based on NET PnL after all costs)
                         binary = 1 if pnl_usd > 0 else 0
 
                         # Create training record
@@ -261,7 +269,8 @@ class FeatureLoggingStrategy(IbsStrategy):
                             'Exit_Price': exit_price,
                             'y_return': price_return,
                             'y_binary': binary,
-                            'y_pnl_usd': pnl_usd,
+                            'y_pnl_usd': pnl_usd,  # Net PnL after commissions
+                            'y_pnl_gross': gross_pnl,  # Gross PnL before commissions
                         }
 
                         # Add all features
@@ -308,14 +317,20 @@ def extract_training_data(
     logger.info(f"Period: {start_date} to {end_date}")
 
     # Create Cerebro instance
-    cerebro = bt.Cerebro(runonce=False)
+    # Enable cheat-on-close to execute at bar close price (not next bar open)
+    cerebro = bt.Cerebro(runonce=False, cheat_on_close=True)
 
     # Set initial cash
     cerebro.broker.setcash(100000.0)
 
-    # Set commission
-    from config import COMMISSION_PER_SIDE
-    cerebro.broker.setcommission(commission=COMMISSION_PER_SIDE)
+    # Set commission: $1.00 per side (user requirement)
+    cerebro.broker.setcommission(commission=1.00)
+
+    # Set slippage: 1 tick per side (user requirement)
+    from strategy.contract_specs import CONTRACT_SPECS
+    spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
+    tick_size = spec["tick_size"]
+    cerebro.broker.set_slippage_fixed(tick_size, slip_open=True, slip_limit=True, slip_match=True, slip_out=False)
 
     # Load data for symbol + reference symbols
     # For now, load common reference symbols
