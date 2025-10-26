@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from research.utils.data_loader import setup_cerebro_with_data
 from strategy.ibs_strategy import IbsStrategy
+from models.loader import load_model_bundle
 from config import COMMISSION_PER_SIDE
 
 logging.basicConfig(
@@ -70,11 +71,14 @@ def run_backtest(
     data_dir: str = 'data/resampled',
     initial_cash: float = 100000.0,
     commission: float = COMMISSION_PER_SIDE,
-    model_path: str = None,
     strategy_params: dict = None,
+    use_ml: bool = True,
 ):
     """
     Run backtest for a single symbol using production IbsStrategy.
+
+    Automatically loads the trained ML model and filter configuration for the symbol
+    from src/models/{SYMBOL}_rf_model.pkl and {SYMBOL}_best.json.
 
     Args:
         symbol: Symbol to backtest (e.g., 'ES', 'NQ')
@@ -83,8 +87,8 @@ def run_backtest(
         data_dir: Directory containing resampled data
         initial_cash: Starting capital
         commission: Commission per trade side
-        model_path: Optional path to ML model file
         strategy_params: Optional strategy parameters to override
+        use_ml: Whether to load ML model (default: True)
 
     Returns:
         Backtest results
@@ -120,22 +124,29 @@ def run_backtest(
         end_date=end_date
     )
 
-    # Prepare strategy parameters
-    strat_params = {
-        'symbol': symbol,
-    }
+    # Load ML model bundle for this symbol
+    if use_ml:
+        try:
+            logger.info(f"Loading ML model bundle for {symbol}...")
+            bundle = load_model_bundle(symbol)
+            logger.info(f"✅ Loaded model with {len(bundle.features)} features, threshold={bundle.threshold}")
+            logger.info(f"   Features: {', '.join(bundle.features[:5])}... ({len(bundle.features)} total)")
+
+            # Get strategy parameters from bundle
+            strat_params = bundle.strategy_kwargs()
+            strat_params['symbol'] = symbol
+
+        except FileNotFoundError as e:
+            logger.warning(f"⚠️  No ML model found for {symbol}: {e}")
+            logger.warning(f"   Running with default parameters (no ML filter)")
+            strat_params = {'symbol': symbol}
+    else:
+        logger.info(f"ML disabled - running with default parameters")
+        strat_params = {'symbol': symbol}
 
     # Merge any custom parameters
     if strategy_params:
         strat_params.update(strategy_params)
-
-    # Load ML model if provided
-    if model_path:
-        logger.info(f"Loading ML model from {model_path}")
-        # TODO: Load model bundle and add to strategy params
-        # from models import load_model_bundle
-        # bundle = load_model_bundle(model_path)
-        # strat_params.update(bundle)
 
     # Add strategy (production IbsStrategy class!)
     logger.info(f"Adding IbsStrategy with params: {strat_params}")
@@ -223,7 +234,7 @@ def main():
     parser.add_argument('--data-dir', type=str, default='data/resampled', help='Data directory')
     parser.add_argument('--cash', type=float, default=100000.0, help='Initial capital')
     parser.add_argument('--commission', type=float, default=COMMISSION_PER_SIDE, help='Commission per side')
-    parser.add_argument('--model', type=str, help='Path to ML model file')
+    parser.add_argument('--no-ml', action='store_true', help='Disable ML model loading (use default params)')
 
     args = parser.parse_args()
 
@@ -253,7 +264,7 @@ def main():
                 data_dir=args.data_dir,
                 initial_cash=args.cash,
                 commission=args.commission,
-                model_path=args.model,
+                use_ml=not args.no_ml,
             )
             results[symbol] = result
         except Exception as e:
