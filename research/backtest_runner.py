@@ -25,13 +25,15 @@ from datetime import datetime
 import logging
 import backtrader as bt
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Add project root and src/ to path
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / 'src'))
 
 from research.utils.data_loader import setup_cerebro_with_data
-from src.strategy.ibs_strategy import IbsStrategy
-from src.models.loader import load_model_bundle
-from src.config import COMMISSION_PER_SIDE
+from strategy.ibs_strategy import IbsStrategy
+from models.loader import load_model_bundle
+from config import COMMISSION_PER_SIDE
 
 logging.basicConfig(
     level=logging.INFO,
