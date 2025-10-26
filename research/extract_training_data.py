@@ -322,10 +322,6 @@ def extract_training_data(
     # Set initial cash
     cerebro.broker.setcash(100000.0)
 
-    # Enable cheat-on-close to execute at bar close price (not next bar open)
-    # This matches live trading: signal at bar close → execute at bar close
-    cerebro.broker.set_coc(True)
-
     # Set commission: $1.00 per side (user requirement)
     cerebro.broker.setcommission(commission=1.00)
 
@@ -333,7 +329,14 @@ def extract_training_data(
     from strategy.contract_specs import CONTRACT_SPECS
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]
-    cerebro.broker.set_slippage_fixed(tick_size, slip_open=True, slip_limit=True, slip_match=True, slip_out=False)
+
+    # Use FixedSlippage slicer
+    cerebro.broker.set_slippage_fixed(tick_size)
+
+    # Enable cheat-on-close to execute at bar close price (not next bar open)
+    # This matches live trading: signal at bar close → execute at bar close
+    # NOTE: This must be set AFTER slippage for Backtrader compatibility
+    cerebro.broker.set_coc(True)
 
     # Load data for symbol + reference symbols
     # For now, load common reference symbols
