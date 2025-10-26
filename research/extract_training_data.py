@@ -317,11 +317,14 @@ def extract_training_data(
     logger.info(f"Period: {start_date} to {end_date}")
 
     # Create Cerebro instance
-    # Enable cheat-on-close to execute at bar close price (not next bar open)
-    cerebro = bt.Cerebro(runonce=False, cheat_on_close=True)
+    cerebro = bt.Cerebro(runonce=False)
 
     # Set initial cash
     cerebro.broker.setcash(100000.0)
+
+    # Enable cheat-on-close to execute at bar close price (not next bar open)
+    # This matches live trading: signal at bar close → execute at bar close
+    cerebro.broker.set_coc(True)
 
     # Set commission: $1.00 per side (user requirement)
     cerebro.broker.setcommission(commission=1.00)
