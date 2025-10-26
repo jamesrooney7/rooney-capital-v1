@@ -37,15 +37,24 @@ This creates:
 Run the production IbsStrategy on your resampled data:
 
 ```bash
-# Backtest ES from 2023-2024
+# Backtest ES from 2023-2024 (auto-loads ES_rf_model.pkl + ES_best.json)
 python research/backtest_runner.py --symbol ES --start 2023-01-01 --end 2024-12-31
 
-# Backtest multiple symbols
+# Backtest multiple symbols (each loads its own ML model)
 python research/backtest_runner.py --symbols ES NQ YM RTY --start 2023-01-01
 
 # Backtest with custom initial capital
 python research/backtest_runner.py --symbol ES --start 2023-01-01 --cash 250000
+
+# Backtest without ML model (use default params)
+python research/backtest_runner.py --symbol ES --start 2023-01-01 --no-ml
 ```
+
+**Important:** The backtest runner **automatically loads your trained ML models** from `src/models/`:
+- `ES_rf_model.pkl` - Your trained Random Forest classifier
+- `ES_best.json` - 30 features + 0.55 probability threshold
+
+This ensures the backtest uses the **exact same filters and ML model as production**!
 
 ### Step 3: Compare to Notebook Results
 
@@ -134,9 +143,14 @@ python research/backtest_runner.py --symbol ES --start 2023-01-01
 python research/backtest_runner.py --symbol ES --start 2010-01-01
 ```
 
-### Backtest with ML model (Phase 3+)
+### Backtest with ML models (automatic!)
 ```bash
-python research/backtest_runner.py --symbol ES --start 2023-01-01 --model src/models/ES_v2.joblib
+# ML models are loaded automatically - no need to specify!
+python research/backtest_runner.py --symbol ES --start 2023-01-01
+
+# This automatically loads:
+# - src/models/ES_rf_model.pkl (your trained model)
+# - src/models/ES_best.json (features + threshold)
 ```
 
 ## Troubleshooting
