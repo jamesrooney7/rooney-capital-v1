@@ -66,7 +66,7 @@ class PercentageSizer(bt.Sizer):
         return max(size, 0)
 
 
-def extract_reference_symbols(features: tuple[str, ...]) -> set[str]:
+def extract_reference_symbols(features: tuple[str, ...], exclude: set[str] = None) -> set[str]:
     """
     Extract reference symbol names from ML feature names.
 
@@ -75,10 +75,14 @@ def extract_reference_symbols(features: tuple[str, ...]) -> set[str]:
 
     Args:
         features: Tuple of feature names
+        exclude: Set of symbols to exclude (e.g., {'VIX'} if no live data available)
 
     Returns:
         Set of uppercase symbol names
     """
+    if exclude is None:
+        exclude = set()
+
     reference_symbols = set()
 
     # Common reference symbols to look for in feature names
@@ -94,7 +98,7 @@ def extract_reference_symbols(features: tuple[str, ...]) -> set[str]:
         for sym in known_symbols:
             sym_lower = sym.lower()
             # Check if symbol appears in feature name
-            if sym_lower in feature_lower:
+            if sym_lower in feature_lower and sym not in exclude:
                 reference_symbols.add(sym)
 
     return reference_symbols
@@ -147,19 +151,25 @@ def run_backtest(
     symbols_to_load = {symbol}  # Start with primary symbol
     strat_params = {}
 
+    # Symbols to exclude (no live data available)
+    # VIX is excluded because it's not available via Databento for live trading
+    excluded_symbols = {'VIX'}
+
     if use_ml:
         try:
             logger.info(f"Loading ML model bundle for {symbol}...")
             bundle = load_model_bundle(symbol)
             logger.info(f"✅ Loaded model with {len(bundle.features)} features, threshold={bundle.threshold}")
 
-            # Extract reference symbols from features
-            reference_symbols = extract_reference_symbols(bundle.features)
+            # Extract reference symbols from features (excluding VIX and others we can't get live)
+            reference_symbols = extract_reference_symbols(bundle.features, exclude=excluded_symbols)
             symbols_to_load.update(reference_symbols)
 
             # Always add TLT (used by IbsStrategy for regime filters)
             symbols_to_load.add('TLT')
 
+            if excluded_symbols:
+                logger.info(f"   ⚠️  Excluded symbols (no live data): {', '.join(sorted(excluded_symbols))}")
             logger.info(f"   Detected reference symbols: {', '.join(sorted(reference_symbols))}")
             logger.info(f"   Features: {', '.join(bundle.features[:5])}... ({len(bundle.features)} total)")
 
