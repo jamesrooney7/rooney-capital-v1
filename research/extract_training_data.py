@@ -41,6 +41,9 @@ logger = logging.getLogger(__name__)
 class FeatureLoggingStrategy(IbsStrategy):
     """
     Wrapper around IbsStrategy that logs features and trade outcomes.
+
+    IMPORTANT: This strategy disables ML filtering to capture ALL base IBS signals.
+    We need both winning and losing trades to train the ML model!
     """
 
     def __init__(self, *args, **kwargs):
@@ -49,6 +52,20 @@ class FeatureLoggingStrategy(IbsStrategy):
         self.trade_entry_features = {}  # {order_id: features_dict}
 
         super().__init__(*args, **kwargs)
+
+    def _with_ml_score(self, snapshot: dict | None) -> dict:
+        """
+        Override to bypass ML filtering during training data extraction.
+
+        We want to capture ALL base IBS trades (both winners and losers)
+        so the ML model can learn which filter combinations predict success.
+
+        Sets ml_passed = True regardless of ml_score.
+        """
+        result = dict(snapshot) if snapshot else {}
+        result["ml_score"] = None  # No ML scoring during extraction
+        result["ml_passed"] = True  # Always allow entries for training data
+        return result
 
     def notify_order(self, order):
         """Capture features when orders are placed."""
