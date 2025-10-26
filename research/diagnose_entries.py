@@ -11,8 +11,9 @@ from pathlib import Path
 import backtrader as bt
 import pandas as pd
 
-# Add src to path
+# Add src and research to path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from research.utils.data_loader import setup_cerebro_with_data
 from strategy.ibs_strategy import IbsStrategy

@@ -339,14 +339,16 @@ def extract_training_data(
     cerebro.broker.set_coc(True)
 
     # Load data for symbol + reference symbols
-    # For now, load common reference symbols
-    # TODO: Auto-detect based on strategy requirements
-    symbols_to_load = {symbol, 'TLT', 'NQ', '6A', '6B', '6C', '6S', 'CL', 'SI'}
+    # Note: All symbols must have data for the full period or the backtest will stop early!
+    # Only load the primary symbol - strategy will handle missing cross-asset data gracefully
+    symbols_to_load = [symbol]
 
-    logger.info(f"Loading data for symbols: {', '.join(sorted(symbols_to_load))}")
+    logger.info(f"Loading data for primary symbol: {symbol}")
+    logger.info(f"Note: Cross-asset features will be disabled if data not available")
+
     setup_cerebro_with_data(
         cerebro,
-        symbols=list(symbols_to_load),
+        symbols=symbols_to_load,
         data_dir=data_dir,
         start_date=start_date,
         end_date=end_date
