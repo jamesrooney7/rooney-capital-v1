@@ -139,7 +139,9 @@ def run_backtest(
     logger.info(f"Commission: ${commission} per side")
 
     # Create Cerebro instance
-    cerebro = bt.Cerebro()
+    # Disable runonce mode to handle data feeds with different lengths
+    # (e.g., TLT has 502 bars, ES has 623 bars - they don't align perfectly)
+    cerebro = bt.Cerebro(runonce=False)
 
     # Set initial cash
     cerebro.broker.setcash(initial_cash)
