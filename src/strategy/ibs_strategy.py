@@ -5852,21 +5852,21 @@ class IbsStrategy(bt.Strategy):
                             else float("nan")
                         )
                         ml_passed = filter_snapshot.get("ml_passed", False)
-                        logger.info(
+                        logger.debug(
                             f"🤖 {self.p.symbol} ML FILTER | Score: {ml_score_val:.3f} | "
                             f"Passed: {ml_passed} | Threshold: {self.p.ml_threshold}"
                         )
 
                         # Only place order if ML filter passes
                         if ml_passed:
-                            logger.info(f"🔵 {self.p.symbol} PLACING BUY ORDER | Size: {self.p.size} | Bar: {len(self.hourly)}")
+                            logger.debug(f"🔵 {self.p.symbol} PLACING BUY ORDER | Size: {self.p.size} | Bar: {len(self.hourly)}")
                             # Use Market order for immediate execution at bar close price
                             order = self.buy(
                                 data=self.hourly,
                                 size=self.p.size,
                                 exectype=bt.Order.Market,
                             )
-                            logger.info(f"🔵 {self.p.symbol} BUY ORDER CREATED | Order: {order} | Bar: {len(self.hourly)}")
+                            logger.debug(f"🔵 {self.p.symbol} BUY ORDER CREATED | Order: {order} | Bar: {len(self.hourly)}")
                             order.addinfo(
                                 ibs=ibs_val,
                                 created=dt,
@@ -5889,7 +5889,7 @@ class IbsStrategy(bt.Strategy):
 
                 # Prevent exit on the same bar as entry
                 if self.bar_executed is not None and len(self.hourly) == self.bar_executed:
-                    logger.info(
+                    logger.debug(
                         f"⏸️  {self.p.symbol} SKIPPING EXIT CHECK | Bar: {len(self.hourly)} | "
                         f"Reason: Same bar as entry (bar_executed: {self.bar_executed})"
                     )
@@ -5972,8 +5972,8 @@ class IbsStrategy(bt.Strategy):
         self.prev_ibs_val = ibs_val
 
     def notify_order(self, order):
-        # Log ALL order status changes for debugging
-        logger.info(
+        # Log ALL order status changes for debugging (DEBUG level only)
+        logger.debug(
             f"🔔 {self.p.symbol} ORDER NOTIFICATION | "
             f"Status: {order.getstatusname()} | "
             f"Ref: {order.ref} | "
@@ -6048,7 +6048,7 @@ class IbsStrategy(bt.Strategy):
                     entry.update(self._with_ml_score(snapshot))
                     self.trades_log.append(entry)
                     self.bar_executed = len(self.hourly)
-                    logger.info(
+                    logger.debug(
                         f"🔒 {self.p.symbol} SET BAR_EXECUTED | Bar: {self.bar_executed} | "
                         f"Exit checks will be skipped on this bar"
                     )
@@ -6161,7 +6161,7 @@ class IbsStrategy(bt.Strategy):
             exit_entry.update(filter_snapshot)
             self.pending_exit = None
             self.bar_executed = None
-            logger.info(
+            logger.debug(
                 f"🔓 {self.p.symbol} CLEARED BAR_EXECUTED | Bar: {len(self.hourly)} | "
                 f"Exit checks now allowed on all bars"
             )
