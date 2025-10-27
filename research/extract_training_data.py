@@ -32,10 +32,13 @@ from strategy.ibs_strategy import IbsStrategy
 from models.loader import load_model_bundle
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,  # Suppress verbose INFO logs during extraction for performance
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Log key extraction milestones at WARNING level for visibility
+logger.setLevel(logging.INFO)  # Keep extraction script's own logs
 
 
 class FeatureLoggingStrategy(IbsStrategy):
