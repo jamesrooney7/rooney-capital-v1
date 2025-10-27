@@ -5696,7 +5696,7 @@ class IbsStrategy(bt.Strategy):
 
         price = line_val(self.hourly.close)
         price_val = price if price is not None else float("nan")
-        logger.info(
+        logger.debug(
             f"{self.p.symbol} | Bar {len(self.hourly)} | IBS: {ibs_val:.3f} | "
             f"Price: {price_val:.2f} | Time: {dt}"
         )
@@ -5729,7 +5729,7 @@ class IbsStrategy(bt.Strategy):
             else:
                 threshold_display = "nan"
 
-            logger.info(
+            logger.debug(
                 f"🤖 {self.p.symbol} ML HOURLY | Score: {score_display} | "
                 f"Passed: {ml_passed} | Threshold: {threshold_display} | "
                 f"Features: {calculated_features}/{total_features}"
