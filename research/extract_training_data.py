@@ -31,14 +31,20 @@ from research.utils.data_loader import setup_cerebro_with_data
 from strategy.ibs_strategy import IbsStrategy
 from models.loader import load_model_bundle
 
+# Configure logging BEFORE any strategy logs
 logging.basicConfig(
     level=logging.WARNING,  # Suppress verbose INFO logs during extraction for performance
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
 
-# Log key extraction milestones at WARNING level for visibility
-logger.setLevel(logging.INFO)  # Keep extraction script's own logs
+# Explicitly silence verbose loggers
+logging.getLogger('strategy.ibs_strategy').setLevel(logging.WARNING)
+logging.getLogger('root').setLevel(logging.WARNING)
+logging.getLogger('').setLevel(logging.WARNING)  # Root logger
+
+# Keep extraction script's own logs at INFO
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class FeatureLoggingStrategy(IbsStrategy):
