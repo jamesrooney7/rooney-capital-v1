@@ -37,6 +37,21 @@ class DiagnosticStrategy(IbsStrategy):
         self.ml_passed_count = 0
         self.actual_entries = 0
 
+    def _with_ml_score(self, snapshot: dict | None) -> dict:
+        """Override to bypass ML filter like FeatureLoggingStrategy does."""
+        result = dict(snapshot) if snapshot else {}
+        result["ml_score"] = None
+        result["ml_passed"] = True  # Always allow entries for diagnostic
+        return result
+
+    def entry_allowed(self, dt, ibs_val: float) -> bool:
+        """Override to bypass ALL filters like FeatureLoggingStrategy does."""
+        if not self.in_session(dt):
+            return False
+        if not (self.p.ibs_entry_low <= ibs_val <= self.p.ibs_entry_high):
+            return False
+        return True
+
     def next(self):
         self.total_bars += 1
 
