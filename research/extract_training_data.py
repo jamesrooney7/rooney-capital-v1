@@ -320,8 +320,10 @@ def extract_training_data(
     # Create Cerebro instance
     cerebro = bt.Cerebro(runonce=False)
 
-    # Set initial cash
-    cerebro.broker.setcash(100000.0)
+    # Set initial cash - use very high amount for data extraction
+    # During feature extraction, we don't care about realistic capital constraints
+    # We want to capture ALL base IBS trades regardless of account balance
+    cerebro.broker.setcash(10_000_000.0)
 
     # Set commission: $1.00 per side (user requirement)
     cerebro.broker.setcommission(commission=1.00)
