@@ -2669,7 +2669,7 @@ class IbsStrategy(bt.Strategy):
                     feed_len = None
             if feed_len is not None and feed_len < max_period:
                 if not meta.get("warmup_pending"):
-                    logger.info(
+                    logger.debug(
                         "Cross Z-score feed %s/%s still warming (%s < %s)",
                         meta.get("symbol"),
                         meta.get("timeframe"),
@@ -2892,7 +2892,7 @@ class IbsStrategy(bt.Strategy):
             skip_warmup_check = symbol in METAL_ENERGY_SYMBOLS
 
             if feed_len is not None and feed_len < max_period and not skip_warmup_check:
-                logger.info(
+                logger.debug(
                     "Cross Z-score feed %s/%s not warm (%s < %s); deferring pipeline",
                     symbol,
                     timeframe,
@@ -2917,7 +2917,7 @@ class IbsStrategy(bt.Strategy):
             denom = bt.Max(std, 1e-12)
             line = safe_div(data_feed.close - mean, denom, orig_den=std)
         except (IndexError, ValueError) as exc:
-            logger.info(
+            logger.debug(
                 "Cross Z-score feed %s/%s not ready (%s); deferring pipeline",
                 symbol,
                 timeframe,
@@ -4364,7 +4364,7 @@ class IbsStrategy(bt.Strategy):
             if tf == "Day" and symbol in ["CL", "6B", "6A", "GC", "SI"]:
                 data_feed = meta.get("data")
                 line = meta.get("line")
-                logging.info(
+                logging.debug(
                     "Daily return calc: %s=%s %s=%s | symbol=%s data_len=%d line_len=%d line_exists=%s",
                     feature_key or "?",
                     numeric,
