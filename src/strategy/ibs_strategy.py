@@ -5972,6 +5972,14 @@ class IbsStrategy(bt.Strategy):
         self.prev_ibs_val = ibs_val
 
     def notify_order(self, order):
+        # Log ALL order status changes for debugging
+        logger.info(
+            f"🔔 {self.p.symbol} ORDER NOTIFICATION | "
+            f"Status: {order.getstatusname()} | "
+            f"Ref: {order.ref} | "
+            f"Bar: {len(self.hourly)}"
+        )
+
         if order.status in [bt.Order.Completed, bt.Order.Canceled, bt.Order.Rejected]:
             if order.status == bt.Order.Completed:
                 action = "BUY" if order.isbuy() else "SELL"
