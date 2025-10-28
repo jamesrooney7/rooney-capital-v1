@@ -457,6 +457,9 @@ def extract_training_data(
         output_dir = Path('data/training')
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{symbol}_transformed_features.csv"
+    else:
+        # Convert string path to Path object
+        output_path = Path(output_path)
 
     # Add feature-logging strategy with incremental CSV writing
     strat_params = {'symbol': symbol, 'output_csv_path': str(output_path)}
