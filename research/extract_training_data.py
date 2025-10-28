@@ -48,9 +48,15 @@ class FeatureLoggingStrategy(IbsStrategy):
     """
 
     def __init__(self, *args, **kwargs):
-        # Initialize feature log storage
-        self.feature_log = []
+        # Get output path before calling super().__init__
+        self.output_csv_path = kwargs.pop('output_csv_path', None)
+
+        # Initialize trade tracking
         self.trade_entry_features = {}  # {order_id: features_dict}
+        self.csv_file = None
+        self.csv_writer = None
+        self.csv_headers_written = False
+        self.trade_count = 0
 
         super().__init__(*args, **kwargs)
 
@@ -158,6 +164,42 @@ class FeatureLoggingStrategy(IbsStrategy):
                 keys.add(f'{symbol.lower()}_hourly_return')
 
         return keys
+
+    def _write_trade_to_csv(self, record: dict):
+        """Write a single trade record to CSV immediately."""
+        import csv
+        from pathlib import Path
+
+        if self.output_csv_path is None:
+            logger.warning("No output CSV path set, trade not written to disk")
+            return
+
+        try:
+            # Open file on first trade
+            if self.csv_file is None:
+                output_path = Path(self.output_csv_path)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                self.csv_file = open(output_path, 'w', newline='')
+                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=record.keys())
+                self.csv_writer.writeheader()
+                self.csv_headers_written = True
+                logger.info(f"Opened CSV file for incremental writing: {output_path}")
+
+            # Write the trade
+            self.csv_writer.writerow(record)
+            self.csv_file.flush()  # Ensure it's written to disk
+            self.trade_count += 1
+
+        except Exception as e:
+            logger.error(f"Error writing trade to CSV: {e}", exc_info=True)
+
+    def stop(self):
+        """Called by Backtrader when strategy finishes - close CSV file."""
+        if self.csv_file is not None:
+            self.csv_file.close()
+            logger.info(f"Closed CSV file after writing {self.trade_count} trades")
+        super().stop()
 
     def _with_ml_score(self, snapshot: dict | None) -> dict:
         """
@@ -277,7 +319,11 @@ class FeatureLoggingStrategy(IbsStrategy):
                         # Add all features
                         record.update(features)
 
-                        self.feature_log.append(record)
+                        # Add Date column for compatibility
+                        record['Date'] = entry_time.date()
+
+                        # Write immediately to CSV (incremental writing)
+                        self._write_trade_to_csv(record)
 
                         logger.info(
                             f"Logged trade: {entry_time} → {exit_time} | "
@@ -389,40 +435,35 @@ def extract_training_data(
         end_date=end_date
     )
 
-    # Add feature-logging strategy
-    strat_params = {'symbol': symbol}
-    logger.info(f"Adding FeatureLoggingStrategy with params: {strat_params}")
-    cerebro.addstrategy(FeatureLoggingStrategy, **strat_params)
-
-    # Run backtest
-    logger.info("Running backtest to extract features...")
-    results = cerebro.run()
-    strat = results[0]
-
-    # Get feature log
-    feature_log = strat.feature_log
-    logger.info(f"Extracted {len(feature_log)} trades with features")
-
-    if not feature_log:
-        logger.warning("No trades captured! Check strategy parameters.")
-        return pd.DataFrame()
-
-    # Convert to DataFrame
-    df = pd.DataFrame(feature_log)
-
-    # Ensure Date column (for compatibility with training script)
-    df['Date'] = pd.to_datetime(df['Date/Time']).dt.date
-
-    # Save to CSV
+    # Determine output path
     if output_path is None:
         output_dir = Path('data/training')
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{symbol}_transformed_features.csv"
 
-    df.to_csv(output_path, index=False)
-    logger.info(f"Saved training data to: {output_path}")
+    # Add feature-logging strategy with incremental CSV writing
+    strat_params = {'symbol': symbol, 'output_csv_path': str(output_path)}
+    logger.info(f"Adding FeatureLoggingStrategy with incremental CSV writing to: {output_path}")
+    cerebro.addstrategy(FeatureLoggingStrategy, **strat_params)
+
+    # Run backtest (trades written incrementally to CSV during execution)
+    logger.info("Running backtest to extract features (writing incrementally to CSV)...")
+    results = cerebro.run()
+    strat = results[0]
+
+    # Verify CSV was created and has content
+    if not output_path.exists():
+        logger.warning("No CSV file created! Check strategy parameters.")
+        return pd.DataFrame()
+
+    # Read the CSV to verify and return
+    df = pd.read_csv(output_path)
+    logger.info(f"Extraction complete! Saved training data to: {output_path}")
     logger.info(f"Shape: {df.shape} (rows={len(df)}, columns={len(df.columns)})")
-    logger.info(f"Features extracted: {[c for c in df.columns if c not in ['Date/Time', 'Exit Date/Time', 'Entry_Price', 'Exit_Price', 'y_return', 'y_binary', 'y_pnl_usd', 'Date']]}")
+
+    if len(df) == 0:
+        logger.warning("CSV has no trades! Check strategy parameters.")
+        return pd.DataFrame()
 
     return df
 
