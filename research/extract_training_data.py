@@ -50,6 +50,7 @@ class FeatureLoggingStrategy(IbsStrategy):
     def __init__(self, *args, **kwargs):
         # Get output path before calling super().__init__
         self.output_csv_path = kwargs.pop('output_csv_path', None)
+        self.filter_year = kwargs.pop('filter_year', None)  # Optional: only keep trades from this year
 
         # Initialize trade tracking
         self.trade_entry_features = {}  # {order_id: features_dict}
@@ -57,6 +58,7 @@ class FeatureLoggingStrategy(IbsStrategy):
         self.csv_writer = None
         self.csv_headers_written = False
         self.trade_count = 0
+        self.filtered_count = 0
 
         super().__init__(*args, **kwargs)
 
@@ -174,6 +176,15 @@ class FeatureLoggingStrategy(IbsStrategy):
             logger.warning("No output CSV path set, trade not written to disk")
             return
 
+        # Filter by year if specified (for 2-year chunk extraction with warmup)
+        if self.filter_year is not None:
+            entry_time = record.get('Date/Time')
+            if entry_time is not None:
+                trade_year = entry_time.year if hasattr(entry_time, 'year') else None
+                if trade_year != self.filter_year:
+                    self.filtered_count += 1
+                    return  # Skip trades not in the target year (warmup data)
+
         try:
             # Open file on first trade
             if self.csv_file is None:
@@ -185,6 +196,8 @@ class FeatureLoggingStrategy(IbsStrategy):
                 self.csv_writer.writeheader()
                 self.csv_headers_written = True
                 logger.info(f"Opened CSV file for incremental writing: {output_path}")
+                if self.filter_year:
+                    logger.info(f"Filtering trades to year {self.filter_year} only (warmup year discarded)")
 
             # Write the trade
             self.csv_writer.writerow(record)
@@ -199,6 +212,8 @@ class FeatureLoggingStrategy(IbsStrategy):
         if self.csv_file is not None:
             self.csv_file.close()
             logger.info(f"Closed CSV file after writing {self.trade_count} trades")
+            if self.filter_year and self.filtered_count > 0:
+                logger.info(f"Filtered out {self.filtered_count} warmup trades (not in year {self.filter_year})")
         super().stop()
 
     def _with_ml_score(self, snapshot: dict | None) -> dict:
@@ -345,6 +360,7 @@ def extract_training_data(
     data_dir: str = 'data/resampled',
     output_path: str = None,
     use_ml: bool = False,  # Don't load ML model during extraction
+    filter_year: int = None,  # Optional: only keep trades from this year (discard warmup)
 ):
     """
     Extract training data by running IbsStrategy backtest.
@@ -356,6 +372,7 @@ def extract_training_data(
         data_dir: Directory containing resampled data
         output_path: Output CSV path (default: data/training/{symbol}_transformed_features.csv)
         use_ml: Whether to load ML model (default: False for training data extraction)
+        filter_year: Optional year to filter trades (e.g., 2011). Only trades with entry in this year are kept.
 
     Returns:
         DataFrame with training data
@@ -443,6 +460,9 @@ def extract_training_data(
 
     # Add feature-logging strategy with incremental CSV writing
     strat_params = {'symbol': symbol, 'output_csv_path': str(output_path)}
+    if filter_year is not None:
+        strat_params['filter_year'] = filter_year
+        logger.info(f"Filtering output to trades from year {filter_year} only")
     logger.info(f"Adding FeatureLoggingStrategy with incremental CSV writing to: {output_path}")
     cerebro.addstrategy(FeatureLoggingStrategy, **strat_params)
 
@@ -475,6 +495,7 @@ def main():
     parser.add_argument('--end', type=str, required=True, help='End date (YYYY-MM-DD)')
     parser.add_argument('--data-dir', type=str, default='data/resampled', help='Data directory')
     parser.add_argument('--output', type=str, help='Output CSV path')
+    parser.add_argument('--filter-year', type=int, help='Only keep trades from this year (e.g., 2011)')
 
     args = parser.parse_args()
 
@@ -485,6 +506,7 @@ def main():
             end_date=args.end,
             data_dir=args.data_dir,
             output_path=args.output,
+            filter_year=args.filter_year,
         )
 
         if df.empty:
