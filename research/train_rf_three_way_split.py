@@ -544,8 +544,8 @@ def main():
                        help='End date for training period (hyperparameter tuning)')
     parser.add_argument('--threshold-end', type=str, default='2020-12-31',
                        help='End date for threshold period (threshold optimization)')
-    parser.add_argument('--rs-trials', type=int, default=120, help='Random search trials')
-    parser.add_argument('--bo-trials', type=int, default=300, help='Bayesian optimization trials')
+    parser.add_argument('--rs-trials', type=int, default=25, help='Random search trials (reduced from 120 for meta-labeling)')
+    parser.add_argument('--bo-trials', type=int, default=65, help='Bayesian optimization trials (reduced from 300 for meta-labeling)')
     parser.add_argument('--folds', type=int, default=5, help='Number of CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Number of test folds in CPCV')
     parser.add_argument('--embargo-days', type=int, default=5, help='Embargo days for CPCV (default: 5 for robust protection against label leakage)')

@@ -979,8 +979,8 @@ def main(
     outdir,
     symbol,
     seed=42,
-    rs_trials=120,
-    bo_trials=300,
+    rs_trials=25,
+    bo_trials=65,
     folds=5,
     k_test=2,
     embargo_days=5,
@@ -1444,8 +1444,8 @@ if __name__ == "__main__":
     ap.add_argument("--symbol", default="ES", help="Instrument symbol label")
     ap.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     ap.add_argument("--holdout_start", help="YYYY-MM-DD to reserve data for holdout scoring")
-    ap.add_argument("--rs_trials", type=int, default=120, help="Random search trial count")
-    ap.add_argument("--bo_trials", type=int, default=300, help="Bayesian optimisation trial count")
+    ap.add_argument("--rs_trials", type=int, default=25, help="Random search trial count (reduced from 120 for meta-labeling)")
+    ap.add_argument("--bo_trials", type=int, default=65, help="Bayesian optimisation trial count (reduced from 300 for meta-labeling)")
     ap.add_argument("--bo_batch", type=int, default=1, help="Parallel Optuna jobs during BO")
     ap.add_argument(
         "--bo_acq",

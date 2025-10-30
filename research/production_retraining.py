@@ -472,8 +472,8 @@ def main():
 
     # Annual mode args
     parser.add_argument('--anchor-end', type=str, help='End date for anchored optimization (YYYY-MM-DD)')
-    parser.add_argument('--rs-trials', type=int, default=120, help='Random search trials')
-    parser.add_argument('--bo-trials', type=int, default=300, help='Bayesian optimization trials')
+    parser.add_argument('--rs-trials', type=int, default=25, help='Random search trials (reduced from 120 for meta-labeling)')
+    parser.add_argument('--bo-trials', type=int, default=65, help='Bayesian optimization trials (reduced from 300 for meta-labeling)')
     parser.add_argument('--folds', type=int, default=5, help='CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Test folds per combination')
     parser.add_argument('--embargo-days', type=int, default=5, help='Embargo period')
