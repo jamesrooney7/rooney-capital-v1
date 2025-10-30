@@ -548,7 +548,7 @@ def main():
     parser.add_argument('--bo-trials', type=int, default=65, help='Bayesian optimization trials (reduced from 300 for meta-labeling)')
     parser.add_argument('--folds', type=int, default=5, help='Number of CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Number of test folds in CPCV')
-    parser.add_argument('--embargo-days', type=int, default=5, help='Embargo days for CPCV (default: 5 for robust protection against label leakage)')
+    parser.add_argument('--embargo-days', type=int, default=2, help='Embargo days for CPCV (reduced from 5 to 2 for meta-labeling, 1-day hold + 1-day buffer)')
     parser.add_argument('--k-features', type=int, default=30, help='Number of features to select')
     parser.add_argument('--screen-method', type=str, default='importance',
                        choices=['importance', 'permutation', 'l1', 'none'],

@@ -200,7 +200,7 @@ def annual_hyperparameter_reoptimization(
     bo_trials: int = 300,
     folds: int = 5,
     k_test: int = 2,
-    embargo_days: int = 5,
+    embargo_days: int = 2,
     k_features: int = 30,
     seed: int = 42,
 ) -> Dict[str, Any]:
@@ -222,7 +222,7 @@ def annual_hyperparameter_reoptimization(
         bo_trials: Bayesian optimization trials (default: 300)
         folds: CPCV folds (default: 5)
         k_test: Test folds per combination (default: 2)
-        embargo_days: Embargo period (default: 5)
+        embargo_days: Embargo period (default: 2, reduced from 5 for meta-labeling)
         k_features: Number of features to select (default: 30)
         seed: Random seed
 
@@ -476,7 +476,7 @@ def main():
     parser.add_argument('--bo-trials', type=int, default=65, help='Bayesian optimization trials (reduced from 300 for meta-labeling)')
     parser.add_argument('--folds', type=int, default=5, help='CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Test folds per combination')
-    parser.add_argument('--embargo-days', type=int, default=5, help='Embargo period')
+    parser.add_argument('--embargo-days', type=int, default=2, help='Embargo period (reduced from 5 to 2 for meta-labeling)')
     parser.add_argument('--k-features', type=int, default=30, help='Number of features to select')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
 

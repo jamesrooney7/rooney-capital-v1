@@ -45,16 +45,16 @@ logger = logging.getLogger(__name__)
 def get_cpcv_splits(
     dates: pd.Series,
     n_splits: int = 5,
-    embargo_days: int = 5,
+    embargo_days: int = 2,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
     """Generate CPCV splits with TIME-BASED purging between train/test sets.
 
     Args:
         dates: Series of trade entry dates
         n_splits: Number of folds (default: 5)
-        embargo_days: Number of days to purge between train/test (default: 5)
+        embargo_days: Number of days to purge between train/test (default: 2)
                      This should account for max holding period + buffer.
-                     For 1-2 day holds, 5 days provides robust protection.
+                     For 1-day max holds with EOD exits, 2 days provides adequate protection.
 
     Returns:
         List of (train_indices, test_indices) tuples
@@ -62,9 +62,9 @@ def get_cpcv_splits(
     Note:
         Uses time-based embargo instead of percentage-based purge to ensure
         the purge window matches actual label finalization time:
-        - Max hold period: ~1-2 days (8 bars or 3PM close)
-        - Buffer: +3 days for robust protection
-        - Total embargo: 5 days from entry to ensure no label leakage
+        - Max hold period: 1 day (EOD exit by 3PM close)
+        - Buffer: +1 day for conservative protection
+        - Total embargo: 2 days from entry to prevent label leakage
     """
     # Convert dates to datetime and extract unique dates
     dates_dt = pd.to_datetime(dates)
@@ -540,8 +540,8 @@ def train_model(
     logger.info(f"Class balance: {(y==1).sum()} wins / {(y==0).sum()} losses")
     logger.info(f"✅ Passed minimum trades requirement ({len(X)} >= {min_total_trades})")
 
-    # Generate CPCV splits with time-based embargo (5 days = max 2-day hold + 3-day buffer)
-    splits = get_cpcv_splits(dates, n_splits=n_folds, embargo_days=5)
+    # Generate CPCV splits with time-based embargo (2 days = max 1-day hold + 1-day buffer)
+    splits = get_cpcv_splits(dates, n_splits=n_folds, embargo_days=2)
 
     # Hyperparameter optimization
     best_params, best_model, trial_history = bayesian_optimization_search(

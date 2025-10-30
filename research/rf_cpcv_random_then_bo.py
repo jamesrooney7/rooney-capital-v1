@@ -254,7 +254,7 @@ def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     return Xn
 
 # ========== CPCV ==========
-def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=5):
+def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=2):
     d = pd.to_datetime(dates).dt.date
     unique_dates = np.array(sorted(pd.Series(d).unique()))
     split_points = np.linspace(0, len(unique_dates), n_folds + 1, dtype=int)
@@ -335,7 +335,7 @@ def screen_features(
     method="importance",
     folds=5,
     k_test=2,
-    embargo_days=5,
+    embargo_days=2,
     top_n=None,
 ):
     """Rank features via the requested screening method and keep the top set.
@@ -417,7 +417,7 @@ def _cpcv_evaluate(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=5,
+    embargo_days=2,
     min_train=200,
     min_test=50,
     thr_grid=None,
@@ -619,7 +619,7 @@ def evaluate_rf_cpcv(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=5,
+    embargo_days=2,
     min_train=200,
     min_test=50,
     thr_grid=None,
@@ -983,7 +983,7 @@ def main(
     bo_trials=65,
     folds=5,
     k_test=2,
-    embargo_days=5,
+    embargo_days=2,
     holdout_start=None,
     bo_batch=1,
     bo_acq="tpe",
@@ -1460,7 +1460,7 @@ if __name__ == "__main__":
         choices=["importance", "mdi", "permutation", "l1", "none"],
         help="Feature screening strategy",
     )
-    ap.add_argument("--embargo_days", type=int, default=5, help="Embargo window between train/test eras")
+    ap.add_argument("--embargo_days", type=int, default=2, help="Embargo window between train/test eras (reduced from 5 for meta-labeling)")
     ap.add_argument("--score_metric", default="Sharpe", help="Metric used to rank tuned candidates")
     ap.add_argument("--folds", type=int, default=5, help="Number of CPCV folds")
     ap.add_argument("--k_test", type=int, default=2, help="Test fold count per CPCV split")
