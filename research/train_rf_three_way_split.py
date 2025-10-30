@@ -329,16 +329,20 @@ def phase2_threshold_optimization(
     feature_list: list,
     min_trades: int = 100,
 ) -> Tuple[float, Dict[str, Any]]:
-    """Phase 2: Threshold optimization on separate threshold period (2019-2020).
+    """Phase 2: Fixed threshold validation on separate threshold period (2019-2020).
 
     Trains model on full training set with best hyperparameters,
-    then optimizes threshold on completely separate threshold period data.
+    then validates performance using FIXED threshold = 0.50 (no optimization).
+
+    NOTE: Threshold optimization removed to eliminate 5-15% optimistic bias from
+    testing 31 thresholds on validation data. Using natural decision boundary (0.50)
+    for calibrated Random Forest probabilities.
 
     Returns:
-        Tuple of (best_threshold, threshold_metrics)
+        Tuple of (fixed_threshold=0.50, threshold_metrics)
     """
     logger.info(f"\n{'='*60}")
-    logger.info("PHASE 2: THRESHOLD OPTIMIZATION (Threshold Period)")
+    logger.info("PHASE 2: FIXED THRESHOLD VALIDATION (Threshold Period)")
     logger.info(f"{'='*60}\n")
 
     # Train final model on full training set with best hyperparameters
@@ -360,49 +364,14 @@ def phase2_threshold_optimization(
 
     returns_threshold = Xy_threshold["y_return"].values
 
-    # Optimize threshold on threshold period
-    logger.info("Optimizing probability threshold (0.40-0.70)...")
+    # Use fixed threshold = 0.50 (no optimization to avoid bias)
+    logger.info("Using FIXED threshold = 0.50 (natural decision boundary for calibrated probabilities)")
+    logger.info("Threshold optimization removed to eliminate 5-15% optimistic bias from multiple testing\n")
 
-    thresholds = np.arange(0.40, 0.71, 0.01)
-    best_threshold = 0.5
-    best_sharpe = -np.inf
+    fixed_threshold = 0.50
 
-    threshold_results = []
-    for threshold in thresholds:
-        passed = y_threshold_proba >= threshold
-        if passed.sum() < min_trades:
-            continue
-
-        threshold_returns = returns_threshold[passed]
-
-        # Calculate daily returns for Sharpe
-        threshold_dates = Xy_threshold.loc[passed, "Date"]
-        daily = pd.DataFrame({
-            "d": threshold_dates,
-            "r": threshold_returns
-        }).groupby(pd.Grouper(key="d", freq="D"))["r"].sum()
-
-        daily = ensure_daily_index(daily, threshold_dates)
-        sharpe = sharpe_ratio_from_daily(daily)
-        pf = profit_factor(pd.Series(Xy_threshold.loc[passed, "y_pnl_usd"]))
-
-        threshold_results.append({
-            "threshold": threshold,
-            "trades": int(passed.sum()),
-            "sharpe": sharpe,
-            "pf": pf,
-        })
-
-        if sharpe > best_sharpe:
-            best_sharpe = sharpe
-            best_threshold = threshold
-            logger.debug(
-                f"  Threshold {threshold:.2f}: {passed.sum()} trades, "
-                f"Sharpe={sharpe:.3f}, PF={pf:.3f}"
-            )
-
-    # Final metrics at best threshold
-    passed = y_threshold_proba >= best_threshold
+    # Calculate metrics at fixed threshold
+    passed = y_threshold_proba >= fixed_threshold
     final_returns = returns_threshold[passed]
     final_dates = Xy_threshold.loc[passed, "Date"]
 
@@ -414,25 +383,25 @@ def phase2_threshold_optimization(
     daily = ensure_daily_index(daily, final_dates)
 
     threshold_metrics = {
-        "threshold": float(best_threshold),
+        "threshold": float(fixed_threshold),
         "trades": int(passed.sum()),
         "sharpe": sharpe_ratio_from_daily(daily),
         "profit_factor": profit_factor(pd.Series(Xy_threshold.loc[passed, "y_pnl_usd"])),
         "win_rate": float((Xy_threshold.loc[passed, "y_binary"] == 1).mean()) if passed.sum() > 0 else 0.0,
-        "all_thresholds": threshold_results,
+        "note": "Fixed threshold (0.50) used - no optimization to avoid bias",
     }
 
     logger.info(f"\n{'='*60}")
-    logger.info("Phase 2 Complete - Best Threshold:")
+    logger.info("Phase 2 Complete - Fixed Threshold Validation:")
     logger.info(f"{'='*60}")
-    logger.info(f"Threshold: {best_threshold:.2f}")
+    logger.info(f"Threshold: {fixed_threshold:.2f} (FIXED - not optimized)")
     logger.info(f"Trades: {threshold_metrics['trades']}")
     logger.info(f"Sharpe: {threshold_metrics['sharpe']:.3f}")
     logger.info(f"Profit Factor: {threshold_metrics['profit_factor']:.3f}")
     logger.info(f"Win Rate: {threshold_metrics['win_rate']*100:.1f}%")
     logger.info(f"{'='*60}\n")
 
-    return best_threshold, threshold_metrics
+    return fixed_threshold, threshold_metrics
 
 
 def phase3_final_evaluation(

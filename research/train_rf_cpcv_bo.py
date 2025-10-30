@@ -553,10 +553,47 @@ def train_model(
     final_model = RandomForestClassifier(**best_params)
     final_model.fit(X, y)
 
-    # Optimize threshold
-    threshold, threshold_metrics = optimize_threshold(
-        final_model, X, y, returns, splits, min_trades=min_trades_threshold
-    )
+    # Use fixed threshold = 0.50 (no optimization to avoid 5-15% optimistic bias)
+    logger.info("\nUsing FIXED threshold = 0.50 (natural decision boundary)")
+    logger.info("Threshold optimization removed to eliminate bias from testing 31 thresholds on validation data\n")
+
+    threshold = 0.50
+
+    # Calculate metrics at fixed threshold for reporting
+    all_predictions = []
+    all_actuals = []
+    all_returns = []
+
+    for train_idx, test_idx in splits:
+        X_train_fold, X_test_fold = X.iloc[train_idx], X.iloc[test_idx]
+        y_train_fold = y[train_idx]
+
+        final_model.fit(X_train_fold, y_train_fold)
+        y_pred_proba = final_model.predict_proba(X_test_fold)[:, 1]
+
+        all_predictions.extend(y_pred_proba)
+        all_actuals.extend(y[test_idx])
+        all_returns.extend(returns[test_idx])
+
+    all_predictions = np.array(all_predictions)
+    all_returns = np.array(all_returns)
+    all_actuals = np.array(all_actuals)
+
+    passed = all_predictions >= threshold
+    threshold_returns = all_returns[passed]
+
+    threshold_metrics = {
+        "threshold": float(threshold),
+        "trades": int(passed.sum()),
+        "sharpe": calculate_sharpe_ratio(threshold_returns),
+        "profit_factor": calculate_profit_factor(threshold_returns),
+        "win_rate": float((all_actuals[passed] == 1).mean()) if passed.sum() > 0 else 0.0,
+        "note": "Fixed threshold (0.50) used - no optimization to avoid bias",
+    }
+
+    logger.info(f"Fixed threshold: {threshold:.2f}")
+    logger.info(f"Expected trades: {threshold_metrics['trades']}")
+    logger.info(f"Expected Sharpe: {threshold_metrics['sharpe']:.3f}")
 
     # Evaluate final model
     final_metrics = evaluate_model_cpcv(final_model, X, y, returns, splits)

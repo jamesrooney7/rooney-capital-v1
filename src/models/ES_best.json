@@ -4,7 +4,7 @@
   "Deflated_Sharpe": null,
   "Profit_Factor": 1.6469007840978052,
   "Trades": 875,
-  "Prod_Threshold": 0.55,
+  "Prod_Threshold": 0.5,
   "Guardrails": {
     "Trades": 500,
     "Era_Positive_Count": 4,
