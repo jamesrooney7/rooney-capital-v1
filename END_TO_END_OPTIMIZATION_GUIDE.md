@@ -18,6 +18,32 @@
 
 ---
 
+## 🔄 Recent Updates (2025-10-30)
+
+**Three critical improvements based on expert review**:
+
+1. **Bayesian Optimization Now Uses Full Hyperparameter Space** 🔴 HIGH PRIORITY
+   - **Previous**: Constrained to top 10% of Random Search results (could miss global optimum)
+   - **Now**: Uses full hyperparameter space, same as Random Search
+   - **Impact**: Better chance of finding optimal hyperparameters
+
+2. **Embargo Period Increased to 5 Days** 🟡 MEDIUM PRIORITY
+   - **Previous**: 3-day embargo (marginally safe for 1-2 day holds)
+   - **Now**: 5-day embargo (robust protection against label leakage)
+   - **Rationale**: 2-day max hold + 3-day buffer = 5 days
+   - **Impact**: Slightly less training data, but more robust
+
+3. **Production Retraining Framework Added** 🟢 LOW PRIORITY
+   - **New**: `research/production_retraining.py` with three modes
+   - **Monthly**: Weight retraining only (fast, fixed hyperparameters)
+   - **Annual**: Full 420-trial re-optimization (anchored walk-forward)
+   - **Performance**: Triggered re-optimization if Sharpe degrades
+   - **Critical**: All use anchored windows to prevent forward-looking bias
+
+**See** `EXPERT_REVIEW_RESPONSES.md` and `EXPERT_ISSUES_FIXED.md` for detailed analysis.
+
+---
+
 ## Executive Summary
 
 This system implements a sophisticated machine learning pipeline for optimizing an **IBS (Internal Bar Strength) mean reversion trading strategy**. The optimization combines multiple advanced techniques to find robust trading parameters while avoiding overfitting.
@@ -269,6 +295,8 @@ X_train_selected = selector.transform(X_train)
 
 **Algorithm**: TPE (Tree-structured Parzen Estimator) via Optuna
 
+**IMPORTANT**: As of 2025-10-30, Bayesian optimization uses the **FULL hyperparameter space** (same as Random Search), not constrained to top Random Search results. This ensures the global optimum can be found even if Random Search missed it.
+
 **How TPE Works**:
 1. Build probabilistic model of `P(hyperparameters | Sharpe ratio)`
 2. Separate trials into "good" (high Sharpe) and "bad" (low Sharpe)
@@ -347,7 +375,7 @@ k=2 Combinations (10 total):
 **Embargo Calculation**:
 
 ```python
-def embargoed_cpcv_splits(dates, n_splits=5, k_test=2, embargo_days=3):
+def embargoed_cpcv_splits(dates, n_splits=5, k_test=2, embargo_days=5):
     """Generate CPCV splits with TIME-BASED embargo."""
 
     # For each combination of k=2 test folds:
@@ -364,10 +392,11 @@ def embargoed_cpcv_splits(dates, n_splits=5, k_test=2, embargo_days=3):
         yield train_indices, test_indices
 ```
 
-**Why 3 Days**:
+**Why 5 Days** (Updated 2025-10-30):
 - Max hold period: 2 days
-- Buffer: 1 day
-- Total: 3 days ensures no position overlap
+- Buffer: 3 days (robust protection against label leakage)
+- Total: 5 days ensures no label leakage even for trades that exit near test boundaries
+- **Previous**: Used 3 days (marginally safe but not robust)
 
 **Performance Aggregation**:
 ```python
@@ -512,7 +541,7 @@ python research/train_rf_three_way_split.py \
     --bo-trials 300 \
     --folds 5 \
     --k-test 2 \
-    --embargo-days 3
+    --embargo-days 5
 
 # Custom date splits
 python research/train_rf_three_way_split.py \
@@ -703,7 +732,7 @@ python research/rf_cpcv_random_then_bo.py \
     --bo-trials 300 \
     --folds 5 \
     --k-test 2 \
-    --embargo-days 3 \
+    --embargo-days 5 \
     --k-features 20 \
     --seed 42
 
@@ -719,7 +748,7 @@ python research/rf_cpcv_random_then_bo.py \
 - `--bo-trials`: Number of Bayesian Optimization trials (default: 300)
 - `--folds`: Number of CPCV folds (default: 5)
 - `--k-test`: Number of test folds per combination (default: 2)
-- `--embargo-days`: Embargo period in days (default: 3)
+- `--embargo-days`: Embargo period in days (default: 5)
 - `--k-features`: Number of features to select (default: 20)
 - `--screen-method`: Feature selection ('f_classif' or 'mutual_info', default: 'f_classif')
 - `--seed`: Random seed for reproducibility
@@ -736,7 +765,7 @@ python research/train_rf_three_way_split.py \
     --bo-trials 300 \
     --folds 5 \
     --k-test 2 \
-    --embargo-days 3 \
+    --embargo-days 5 \
     --k-features 20 \
     --seed 42
 
@@ -796,9 +825,9 @@ python your_production_script.py --model models/SPY_rf_model.pkl
 ### 3. Hyperparameter Optimization
 
 ✅ **Start with Random Search** (120 trials) to explore space
-✅ **Refine with Bayesian Optimization** (300 trials)
+✅ **Refine with Bayesian Optimization** (300 trials) using FULL hyperparameter space
 ✅ **Use CPCV** (5 folds, k=2) for all evaluations
-✅ **Set time-based embargo** (3 days for 1-2 day holds)
+✅ **Set time-based embargo** (5 days for 1-2 day holds, increased from 3 as of 2025-10-30)
 ❌ **Don't optimize exit parameters** (keeps IBS exit, trailing stop, max hold fixed)
 
 ### 4. Threshold Optimization
@@ -824,7 +853,61 @@ python your_production_script.py --model models/SPY_rf_model.pkl
 ✅ **Monitor live performance** vs backtested expectations
 ❌ **Don't deploy if DSR < 0.3** (not statistically significant)
 
-### 7. Common Pitfalls
+### 7. Production Retraining 🆕 (Added 2025-10-30)
+
+**Framework**: Use `research/production_retraining.py` for systematic model updates without forward-looking bias.
+
+#### Three Retraining Modes
+
+**Monthly Weight Retraining** (Fast ~10 min):
+```bash
+python research/production_retraining.py \
+    --symbol SPY \
+    --mode monthly \
+    --existing-model models/SPY_rf_model.pkl \
+    --window-type expanding
+```
+- Keeps hyperparameters FIXED from original optimization
+- Only retrains Random Forest weights on new data
+- No forward-looking bias (hyperparameters from past)
+- Supports expanding or rolling windows (default: expanding)
+
+**Annual Hyperparameter Re-Optimization** (Full ~8 hrs):
+```bash
+python research/production_retraining.py \
+    --symbol SPY \
+    --mode annual \
+    --anchor-end 2024-12-31  # CRITICAL: ends BEFORE deployment period
+    --rs-trials 120 \
+    --bo-trials 300
+```
+- Full 420-trial optimization (120 Random + 300 Bayesian)
+- **CRITICAL**: Uses anchored window ending BEFORE deployment
+- Example: Optimize on 2010-2024, deploy for 2025+
+- Ensures NO forward-looking bias
+
+**Performance-Triggered Re-Optimization** (Ad-hoc):
+```bash
+python research/production_retraining.py \
+    --symbol SPY \
+    --mode performance \
+    --current-sharpe 0.25 \
+    --expected-sharpe 0.45 \
+    --degradation-threshold 0.30  # Trigger if < 45% * 0.7 = 0.315
+```
+- Monitors live Sharpe vs expected
+- Triggers full re-optimization if performance degrades
+- Default: trigger if current < expected * 0.7
+
+#### Best Practices for Retraining
+
+✅ **Monthly**: Retrain weights with expanding window
+✅ **Annually**: Full hyperparameter re-optimization with anchored window
+✅ **Monitor**: Track live vs expected Sharpe, trigger if degraded > 30%
+✅ **Anchored**: Always optimize on data ending BEFORE deployment period
+❌ **Never optimize on deployment period data** (forward-looking bias)
+
+### 8. Common Pitfalls
 
 ❌ **Look-Ahead Bias**: Using future data in features (e.g., full-dataset percentiles)
 ❌ **Label Leakage**: Train/test overlap in positions (no embargo)
@@ -885,9 +968,10 @@ Phase 3 (Test): Sharpe=0.68, Win Rate=58%
    # Check feature calculation uses only historical data
    grep -n "percentile" src/strategy/ibs_strategy.py
    ```
-2. **Increase embargo period**:
+2. **Increase embargo period** (if using old default):
    ```python
-   embargo_days = 5  # Instead of 3
+   embargo_days = 7  # Consider increasing further if still suspicious
+   # Note: Default is now 5 days as of 2025-10-30
    ```
 3. **Use different test period** (multiple test periods if possible)
 4. **Never re-optimize** after viewing test results
@@ -1074,7 +1158,8 @@ rooney-capital-v1/
 │   ├── extract_training_data.py           # Step 1: Extract features and outcomes
 │   ├── rf_cpcv_random_then_bo.py          # Step 2A: Standard CPCV training
 │   ├── train_rf_three_way_split.py        # Step 2B: Three-way split training
-│   └── train_rf_cpcv_bo.py                # Alternative: Bayesian only (no random search)
+│   ├── train_rf_cpcv_bo.py                # Alternative: Bayesian only (no random search)
+│   └── production_retraining.py           # Production retraining framework (monthly/annual/performance modes)
 │
 ├── src/
 │   └── strategy/
@@ -1148,6 +1233,10 @@ For questions or issues, refer to the troubleshooting section or examine the sou
 
 ---
 
-**Document Version**: 1.0
+**Document Version**: 2.0 (Updated with expert review fixes)
 **Last Updated**: 2025-10-30
 **Maintained By**: Rooney Capital
+
+**Changelog**:
+- **v2.0 (2025-10-30)**: Added expert review fixes - Bayesian optimization uses full space, embargo increased to 5 days, production retraining framework added
+- **v1.0 (2025-10-30)**: Initial comprehensive guide
