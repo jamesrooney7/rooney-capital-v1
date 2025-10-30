@@ -990,6 +990,7 @@ def main(
     turbo=False,
     k_features=30,
     screen_method="importance",
+    feature_selection_end="2020-12-31",
     score_metric="Sharpe",
 ): 
     os.makedirs(outdir, exist_ok=True)
@@ -1016,6 +1017,18 @@ def main(
     if rest:
         X[rest] = X[rest].fillna(0.0)
 
+    # Parse feature selection end date (for time-based split to prevent data leakage)
+    feat_sel_end_ts = None
+    if feature_selection_end:
+        try:
+            feat_sel_end_ts = pd.to_datetime(feature_selection_end)
+        except Exception as exc:
+            raise ValueError(f"Invalid feature_selection_end '{feature_selection_end}': {exc}")
+        if isinstance(feat_sel_end_ts, pd.DatetimeIndex):
+            feat_sel_end_ts = feat_sel_end_ts[0]
+        feat_sel_end_ts = pd.Timestamp(feat_sel_end_ts).tz_localize(None)
+
+    # Parse holdout start date (for final holdout evaluation)
     holdout_ts = None
     if holdout_start:
         try:
@@ -1027,40 +1040,78 @@ def main(
         holdout_ts = pd.Timestamp(holdout_ts).tz_localize(None)
 
     dates = Xy["Date"]
-    if holdout_ts is not None:
-        train_mask = dates < holdout_ts
-        holdout_mask = dates >= holdout_ts
-        print(
-            f"Using holdout_start={holdout_ts.date()} "
-            f"({int(holdout_mask.sum())} rows reserved for holdout)"
-        )
+
+    # Three-way split: feature_selection_period | optimization_period | holdout_period
+    # This prevents data leakage where test folds influence feature selection
+    if feat_sel_end_ts is not None:
+        feat_sel_mask = dates <= feat_sel_end_ts
+        if holdout_ts is not None:
+            optimization_mask = (dates > feat_sel_end_ts) & (dates < holdout_ts)
+            holdout_mask = dates >= holdout_ts
+        else:
+            optimization_mask = dates > feat_sel_end_ts
+            holdout_mask = pd.Series(False, index=Xy.index)
+
+        feat_sel_days = int(pd.to_datetime(Xy.loc[feat_sel_mask, "Date"]).dt.normalize().nunique())
+        opt_days = int(pd.to_datetime(Xy.loc[optimization_mask, "Date"]).dt.normalize().nunique())
+        holdout_days = int(pd.to_datetime(Xy.loc[holdout_mask, "Date"]).dt.normalize().nunique())
+
+        print("=" * 80)
+        print("DATA LEAKAGE PREVENTION: Time-Based Split Active")
+        print("=" * 80)
+        print(f"Feature Selection Period: data <= {feat_sel_end_ts.date()}")
+        print(f"  Rows: {int(feat_sel_mask.sum())} ({feat_sel_days} trading days)")
+        print(f"Optimization Period: data > {feat_sel_end_ts.date()}" + (f" and < {holdout_ts.date()}" if holdout_ts else ""))
+        print(f"  Rows: {int(optimization_mask.sum())} ({opt_days} trading days)")
+        if holdout_ts:
+            print(f"Holdout Period: data >= {holdout_ts.date()}")
+            print(f"  Rows: {int(holdout_mask.sum())} ({holdout_days} trading days)")
+        print()
+        print("This ensures test data NEVER influences feature selection.")
+        print("=" * 80 + "\n")
+
+        train_mask = optimization_mask  # Optimization period is the "training" for hyperparameters
     else:
-        train_mask = pd.Series(True, index=Xy.index)
-        holdout_mask = pd.Series(False, index=Xy.index)
+        # Fallback to old behavior (no feature selection split - NOT RECOMMENDED)
+        print("⚠️  WARNING: No feature_selection_end specified - data leakage possible!")
+        print("   Recommend using --feature_selection_end 2020-12-31\n")
+        if holdout_ts is not None:
+            train_mask = dates < holdout_ts
+            holdout_mask = dates >= holdout_ts
+            print(
+                f"Using holdout_start={holdout_ts.date()} "
+                f"({int(holdout_mask.sum())} rows reserved for holdout)"
+            )
+        else:
+            train_mask = pd.Series(True, index=Xy.index)
+            holdout_mask = pd.Series(False, index=Xy.index)
+
+        feat_sel_mask = train_mask  # Use same data (old, leaky behavior)
 
     if not train_mask.any():
-        raise ValueError("No training data available after applying holdout_start filter")
+        raise ValueError("No training data available after applying date filters")
+    if feat_sel_end_ts is not None and not feat_sel_mask.any():
+        raise ValueError("No feature selection data available - check feature_selection_end date")
 
-    train_days = int(pd.to_datetime(Xy.loc[train_mask, "Date"]).dt.normalize().nunique())
-    holdout_days = int(pd.to_datetime(Xy.loc[holdout_mask, "Date"]).dt.normalize().nunique())
-    print(
-        f"Pre-holdout rows={int(train_mask.sum())} ({train_days} trading days) | "
-        f"Holdout rows={int(holdout_mask.sum())} ({holdout_days} trading days)"
-    )
+    # Prepare data splits
+    X_feat_sel = X.loc[feat_sel_mask].copy()  # Feature selection period (early)
+    Xy_feat_sel = Xy.loc[feat_sel_mask].copy()
 
-    X_train_full = X.loc[train_mask].copy()
+    X_train_full = X.loc[train_mask].copy()  # Optimization period (late)
     Xy_train = Xy.loc[train_mask].copy()
     Xy_holdout = Xy.loc[holdout_mask].copy()
 
-    max_feat = X_train_full.shape[1]
+    # Feature selection on EARLY period ONLY (prevents data leakage)
+    max_feat = X_feat_sel.shape[1]
     if k_features and k_features > 0:
         top_n = min(k_features, max_feat)
     else:
         top_n = max_feat
 
+    print(f"Running feature selection on {len(X_feat_sel)} samples (feature selection period)")
     feats = screen_features(
-        Xy_train,
-        X_train_full,
+        Xy_feat_sel,  # Use ONLY feature selection period data
+        X_feat_sel,
         seed,
         method=screen_method,
         folds=folds,
@@ -1068,10 +1119,13 @@ def main(
         embargo_days=embargo_days,
         top_n=top_n,
     )
+
+    # Lock features and apply to ALL periods
     X = X[feats]
     X_train = X.loc[train_mask].copy()
     X_holdout = X.loc[holdout_mask].copy()
-    print(f"Using top {len(feats)} features: {', '.join(feats)}")
+    print(f"✅ Selected {len(feats)} features (from early period): {', '.join(feats)}")
+    print(f"   Applying these features to optimization period ({len(X_train)} samples)\n")
 
     # ---------- Random Search ----------
     # Calculate total trials for Deflated Sharpe correction
@@ -1460,6 +1514,11 @@ if __name__ == "__main__":
         choices=["importance", "mdi", "permutation", "l1", "none"],
         help="Feature screening strategy",
     )
+    ap.add_argument(
+        "--feature_selection_end",
+        default="2020-12-31",
+        help="YYYY-MM-DD split date: feature selection uses data BEFORE this date, optimization uses data AFTER (fixes data leakage)",
+    )
     ap.add_argument("--embargo_days", type=int, default=2, help="Embargo window between train/test eras (reduced from 5 for meta-labeling)")
     ap.add_argument("--score_metric", default="Sharpe", help="Metric used to rank tuned candidates")
     ap.add_argument("--folds", type=int, default=5, help="Number of CPCV folds")
@@ -1481,5 +1540,6 @@ if __name__ == "__main__":
         turbo=args.turbo,
         k_features=args.k_features,
         screen_method=args.screen_method,
+        feature_selection_end=args.feature_selection_end,
         score_metric=args.score_metric,
     )
