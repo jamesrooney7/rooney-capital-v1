@@ -43,48 +43,60 @@ logger = logging.getLogger(__name__)
 
 
 def get_cpcv_splits(
-    n_samples: int,
+    dates: pd.Series,
     n_splits: int = 5,
-    purge_pct: float = 0.02,
+    embargo_days: int = 3,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    """Generate CPCV splits with purging between train/test sets.
+    """Generate CPCV splits with TIME-BASED purging between train/test sets.
 
     Args:
-        n_samples: Total number of samples
+        dates: Series of trade entry dates
         n_splits: Number of folds (default: 5)
-        purge_pct: Percentage of data to purge between train/test (default: 2%)
+        embargo_days: Number of days to purge between train/test (default: 3)
+                     This should account for max holding period + buffer.
+                     For 1-2 day holds, 3 days is appropriate.
 
     Returns:
         List of (train_indices, test_indices) tuples
+
+    Note:
+        Uses time-based embargo instead of percentage-based purge to ensure
+        the purge window matches actual label finalization time:
+        - Max hold period: ~1-2 days (8 bars or 3PM close)
+        - Buffer: +1 day
+        - Total embargo: 3 days from last possible exit
     """
-    fold_size = n_samples // n_splits
-    purge_size = int(n_samples * purge_pct)
+    # Convert dates to datetime and extract unique dates
+    dates_dt = pd.to_datetime(dates)
+    dates_array = dates_dt.dt.date.values
+    unique_dates = np.array(sorted(pd.Series(dates_array).unique()))
+
+    # Split into chronological folds by date
+    split_points = np.linspace(0, len(unique_dates), n_splits + 1, dtype=int)
+    folds = [unique_dates[split_points[i]:split_points[i+1]] for i in range(n_splits)]
+
+    # Convert to ordinals for distance calculation
+    date_ordinals = pd.to_datetime(dates_array).map(lambda x: x.toordinal()).to_numpy()
 
     splits = []
     for i in range(n_splits):
-        # Test fold
-        test_start = i * fold_size
-        test_end = (i + 1) * fold_size if i < n_splits - 1 else n_samples
-        test_indices = np.arange(test_start, test_end)
+        # Test fold dates
+        test_dates = folds[i]
+        test_mask = np.isin(dates_array, test_dates)
+        test_indices = np.where(test_mask)[0]
 
-        # Train folds (all except test fold)
-        train_indices = np.concatenate([
-            np.arange(0, test_start),
-            np.arange(test_end, n_samples)
-        ])
+        # Calculate distance in DAYS from each sample to nearest test sample
+        test_ordinals = np.array([pd.to_datetime(td).toordinal() for td in test_dates])
+        distances = np.min(np.abs(date_ordinals[:, None] - test_ordinals[None, :]), axis=1)
 
-        # Purge observations close to test fold boundaries
-        if purge_size > 0:
-            # Remove samples near test fold start
-            train_indices = train_indices[
-                (train_indices < test_start - purge_size) |
-                (train_indices >= test_end + purge_size)
-            ]
+        # Train mask: exclude test fold AND samples within embargo_days
+        train_mask = (~test_mask) & (distances > embargo_days)
+        train_indices = np.where(train_mask)[0]
 
         splits.append((train_indices, test_indices))
 
     logger.info(
-        f"Generated {n_splits} CPCV splits with purge={purge_size} samples "
+        f"Generated {n_splits} CPCV splits with embargo={embargo_days} days "
         f"(avg train size: {np.mean([len(tr) for tr, _ in splits]):.0f}, "
         f"avg test size: {np.mean([len(te) for _, te in splits]):.0f})"
     )
@@ -516,12 +528,20 @@ def train_model(
     # Prepare features
     X, y, returns, feature_names = prepare_features(df)
 
+    # Extract dates for time-based CPCV
+    if "Date/Time" in df.columns:
+        dates = pd.to_datetime(df["Date/Time"])
+    elif "Date" in df.columns:
+        dates = pd.to_datetime(df["Date"])
+    else:
+        raise ValueError("No date column found in training data (expected 'Date/Time' or 'Date')")
+
     logger.info(f"Training set: {len(X)} samples, {len(feature_names)} features")
     logger.info(f"Class balance: {(y==1).sum()} wins / {(y==0).sum()} losses")
     logger.info(f"✅ Passed minimum trades requirement ({len(X)} >= {min_total_trades})")
 
-    # Generate CPCV splits
-    splits = get_cpcv_splits(len(X), n_splits=n_folds, purge_pct=0.02)
+    # Generate CPCV splits with time-based embargo (3 days = max 2-day hold + 1 buffer)
+    splits = get_cpcv_splits(dates, n_splits=n_folds, embargo_days=3)
 
     # Hyperparameter optimization
     best_params, best_model, trial_history = bayesian_optimization_search(

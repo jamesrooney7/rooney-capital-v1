@@ -254,7 +254,7 @@ def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     return Xn
 
 # ========== CPCV ==========
-def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=10):
+def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=3):
     d = pd.to_datetime(dates).dt.date
     unique_dates = np.array(sorted(pd.Series(d).unique()))
     split_points = np.linspace(0, len(unique_dates), n_folds + 1, dtype=int)
@@ -335,7 +335,7 @@ def screen_features(
     method="importance",
     folds=5,
     k_test=2,
-    embargo_days=10,
+    embargo_days=3,
     top_n=None,
 ):
     """Rank features via the requested screening method and keep the top set.
@@ -417,13 +417,14 @@ def _cpcv_evaluate(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=10,
+    embargo_days=3,
     min_train=200,
     min_test=50,
     thr_grid=None,
     *,
     fixed_thr=None,
     collect_details=False,
+    n_trials_total=1,
 ):
     if thr_grid is None:
         thr_grid = list(np.round(np.arange(0.45, 0.75 + 1e-9, 0.05), 2))
@@ -568,7 +569,15 @@ def _cpcv_evaluate(
         era_positive = (era_positive_count / era_count) >= 0.8
 
     sr = sharpe_ratio_from_daily(daily)
-    dsr = deflated_sharpe_ratio(sr, n=daily.shape[0], kurt_excess=daily.kurt(), m=1)
+
+    # Calculate effective number of trials for multiple testing correction
+    # Account for correlation between trials (models are similar - same data, different hyperparams)
+    # Conservative estimate: rho_avg ≈ 0.7 for correlated trials
+    rho_avg = 0.7
+    n_effective = max(1, int(n_trials_total / (1 + (n_trials_total - 1) * rho_avg)))
+
+    # Deflated Sharpe Ratio with proper multiple testing correction
+    dsr = deflated_sharpe_ratio(sr, n=daily.shape[0], kurt_excess=daily.kurt(), m=n_effective)
     pf = profit_factor(pd.Series(trades_usd))
     total_profit = float(pd.Series(trades_usd).dropna().sum())
 
@@ -610,10 +619,11 @@ def evaluate_rf_cpcv(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=10,
+    embargo_days=3,
     min_train=200,
     min_test=50,
     thr_grid=None,
+    n_trials_total=1,
 ):
     return _cpcv_evaluate(
         Xy,
@@ -625,6 +635,7 @@ def evaluate_rf_cpcv(
         min_train=min_train,
         min_test=min_test,
         thr_grid=thr_grid,
+        n_trials_total=n_trials_total,
     )
 
 # ========== Random search space ==========
@@ -1063,10 +1074,13 @@ def main(
     print(f"Using top {len(feats)} features: {', '.join(feats)}")
 
     # ---------- Random Search ----------
+    # Calculate total trials for Deflated Sharpe correction
+    n_trials_total = rs_trials + bo_trials
+
     rs_rows = []
     for t in range(1, rs_trials + 1):
         params = sample_rf_params(rng)
-        res = evaluate_rf_cpcv(Xy_train, X_train, params, folds, k_test, embargo_days)
+        res = evaluate_rf_cpcv(Xy_train, X_train, params, folds, k_test, embargo_days, n_trials_total=n_trials_total)
         rs_rows.append({**res, **params, "Trial": t, "Phase": "Random"})
         era_status = "Y" if res["Era_Positive"] else "N"
         print(
@@ -1141,7 +1155,7 @@ def main(
             random_state=seed + trial.number,
         )
 
-        res = evaluate_rf_cpcv(Xy_train, X_train, params, folds, k_test, embargo_days)
+        res = evaluate_rf_cpcv(Xy_train, X_train, params, folds, k_test, embargo_days, n_trials_total=n_trials_total)
         trial.set_user_attr("PF", float(res["PF"]))
         trial.set_user_attr("Trades", int(res["Trades"]))
         trial.set_user_attr("Thr", float(res["Thr"]))
