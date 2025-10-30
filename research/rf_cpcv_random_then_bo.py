@@ -20,6 +20,8 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import squareform
 import joblib
 
 
@@ -328,6 +330,150 @@ def _fold_importances(method: str, X_tr: pd.DataFrame, y_tr: pd.Series, seed: in
     raise ValueError(f"Unsupported screen_method: {method}")
 
 
+def _clustered_feature_selection(
+    X: pd.DataFrame,
+    y: pd.Series,
+    seed: int,
+    n_clusters: int = 15,
+    features_per_cluster: int = 2,
+    max_correlation: float = 0.7,
+):
+    """Select diverse features using correlation-based clustering.
+
+    Algorithm:
+    1. Calculate correlation matrix of all features
+    2. Cluster features by correlation (hierarchical clustering)
+    3. For each cluster, select top K features by permutation importance
+    4. Validate diversity (ensure selected features have correlation < max_correlation)
+
+    Args:
+        X: Feature matrix
+        y: Target labels
+        seed: Random seed
+        n_clusters: Number of clusters to create (default: 15)
+        features_per_cluster: Features to select per cluster (default: 2)
+        max_correlation: Maximum allowed correlation between selected features (default: 0.7)
+
+    Returns:
+        List of selected feature names
+    """
+    logger.info(f"Starting clustered feature selection: {len(X.columns)} features → {n_clusters} clusters")
+
+    # Step 1: Calculate correlation matrix
+    logger.info("  Step 1/4: Calculating correlation matrix...")
+    corr_matrix = X.corr().abs()  # Absolute correlation
+
+    # Step 2: Hierarchical clustering based on correlation distance
+    logger.info("  Step 2/4: Performing hierarchical clustering...")
+    # Distance = 1 - correlation (higher correlation = lower distance)
+    distance_matrix = 1 - corr_matrix
+    # Convert to condensed distance matrix for linkage
+    condensed_dist = squareform(distance_matrix.values, checks=False)
+    # Hierarchical clustering
+    linkage_matrix = linkage(condensed_dist, method='average')
+    # Cut tree to get clusters
+    cluster_labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
+
+    # Group features by cluster
+    clusters = {}
+    for feature, cluster_id in zip(X.columns, cluster_labels):
+        if cluster_id not in clusters:
+            clusters[cluster_id] = []
+        clusters[cluster_id].append(feature)
+
+    logger.info(f"  Created {len(clusters)} clusters (sizes: {[len(c) for c in clusters.values()]})")
+
+    # Step 3: Select best features from each cluster using permutation importance
+    logger.info("  Step 3/4: Selecting features from each cluster...")
+    selected_features = []
+
+    rf = RandomForestClassifier(
+        n_estimators=200,
+        max_depth=6,
+        min_samples_leaf=50,
+        max_features="sqrt",
+        n_jobs=-1,
+        random_state=seed,
+    )
+
+    for cluster_id, cluster_features in clusters.items():
+        if len(cluster_features) == 0:
+            continue
+
+        # Get permutation importance for features in this cluster
+        X_cluster = X[cluster_features]
+
+        try:
+            rf.fit(X_cluster, y)
+            perm = permutation_importance(
+                rf,
+                X_cluster,
+                y,
+                n_repeats=5,  # Fewer repeats for speed (vs 10 for full permutation)
+                random_state=seed,
+                n_jobs=1,
+            )
+            importances = pd.Series(
+                np.maximum(perm.importances_mean, 0.0),
+                index=cluster_features
+            ).sort_values(ascending=False)
+
+            # Select top K from this cluster
+            top_k = min(features_per_cluster, len(importances))
+            cluster_selected = importances.head(top_k).index.tolist()
+            selected_features.extend(cluster_selected)
+
+            logger.info(
+                f"    Cluster {cluster_id}: {len(cluster_features)} features → "
+                f"selected {cluster_selected} (importance: {importances[cluster_selected].values})"
+            )
+
+        except Exception as e:
+            logger.warning(f"    Cluster {cluster_id}: Failed to evaluate - {e}")
+            # Fallback: just take first feature from cluster
+            selected_features.append(cluster_features[0])
+
+    # Step 4: Validate diversity (remove highly correlated features)
+    logger.info("  Step 4/4: Validating diversity...")
+    final_features = []
+    for feature in selected_features:
+        # Check correlation with already-selected features
+        if not final_features:
+            final_features.append(feature)
+            continue
+
+        # Calculate max correlation with existing features
+        existing_corrs = corr_matrix.loc[feature, final_features].values
+        max_corr = np.max(existing_corrs)
+
+        if max_corr < max_correlation:
+            final_features.append(feature)
+        else:
+            logger.debug(
+                f"    Rejected {feature}: max_corr={max_corr:.3f} >= {max_correlation:.3f}"
+            )
+
+    logger.info(
+        f"✅ Clustered selection complete: {len(final_features)} diverse features "
+        f"(from {len(selected_features)} candidates)"
+    )
+
+    # Log correlation statistics
+    if len(final_features) > 1:
+        final_corr_matrix = corr_matrix.loc[final_features, final_features]
+        # Get upper triangle (exclude diagonal)
+        upper_triangle = final_corr_matrix.where(
+            np.triu(np.ones(final_corr_matrix.shape), k=1).astype(bool)
+        )
+        avg_corr = upper_triangle.stack().mean()
+        max_pair_corr = upper_triangle.stack().max()
+        logger.info(
+            f"   Diversity stats: avg_corr={avg_corr:.3f}, max_corr={max_pair_corr:.3f}"
+        )
+
+    return final_features
+
+
 def screen_features(
     Xy,
     X,
@@ -337,14 +483,28 @@ def screen_features(
     k_test=2,
     embargo_days=2,
     top_n=None,
+    n_clusters=15,
+    features_per_cluster=2,
 ):
     """Rank features via the requested screening method and keep the top set.
 
+    Methods:
+    - mdi/importance: Mean Decrease Impurity (fast, traditional)
+    - permutation: Permutation importance (slower, more robust)
+    - l1: L1 regularization
+    - clustered: Correlation-based clustering with diverse selection (expert-recommended)
+    - none: Use all features
+
+    For traditional methods (mdi/permutation/l1):
     The per-fold screening keeps at most ``top_n`` features per CPCV split, logs the
     retained names with their importance scores, and then aggregates by taking the
     union of all kept columns.  The final selection averages the scores for each
     feature across the folds where it survived and returns the top ``top_n`` global
     features.
+
+    For clustered method:
+    Uses correlation-based clustering to group similar features, then selects best
+    features from each cluster to ensure diversity (no redundant features).
     """
 
     method = (method or "importance").lower()
@@ -352,6 +512,37 @@ def screen_features(
 
     if method == "none":
         return list(X.columns)
+
+    # Handle clustered method separately (doesn't use per-fold aggregation)
+    if method == "clustered":
+        logger.info("Using CLUSTERED feature selection (correlation-based)")
+        # Use first fold's data for clustering (or could aggregate, but clustering is deterministic)
+        for fold_idx, (tr_mask, _te_mask) in enumerate(
+            embargoed_cpcv_splits(Xy["Date"], n_folds=folds, k_test=k_test, embargo_days=embargo_days),
+            start=1,
+        ):
+            X_tr = X.loc[tr_mask]
+            y_tr = Xy.loc[tr_mask, "y_binary"]
+            if X_tr.empty or y_tr.nunique() < 2:
+                continue
+
+            # Run clustered selection on first valid fold
+            try:
+                selected = _clustered_feature_selection(
+                    X_tr,
+                    y_tr,
+                    seed,
+                    n_clusters=n_clusters,
+                    features_per_cluster=features_per_cluster,
+                    max_correlation=0.7,
+                )
+                logger.info(f"Clustered selection retained {len(selected)} features")
+                return selected
+            except Exception as e:
+                logger.error(f"Clustered selection failed: {e}")
+                logger.info("Falling back to MDI importance method")
+                method = "mdi"  # Fallback
+                break
 
     if method not in {"mdi", "permutation", "l1"}:
         raise ValueError(f"Unsupported screen_method: {method}")
@@ -990,6 +1181,8 @@ def main(
     turbo=False,
     k_features=30,
     screen_method="importance",
+    n_clusters=15,
+    features_per_cluster=2,
     feature_selection_end="2020-12-31",
     score_metric="Sharpe",
 ): 
@@ -1118,6 +1311,8 @@ def main(
         k_test=k_test,
         embargo_days=embargo_days,
         top_n=top_n,
+        n_clusters=n_clusters,
+        features_per_cluster=features_per_cluster,
     )
 
     # Lock features and apply to ALL periods
@@ -1511,8 +1706,20 @@ if __name__ == "__main__":
     ap.add_argument(
         "--screen_method",
         default="importance",
-        choices=["importance", "mdi", "permutation", "l1", "none"],
-        help="Feature screening strategy",
+        choices=["importance", "mdi", "permutation", "l1", "clustered", "none"],
+        help="Feature screening strategy: importance/mdi (fast), permutation (robust), l1 (sparse), clustered (diverse, expert-recommended), none (all features)",
+    )
+    ap.add_argument(
+        "--n_clusters",
+        type=int,
+        default=15,
+        help="Number of clusters for clustered feature selection (default: 15)",
+    )
+    ap.add_argument(
+        "--features_per_cluster",
+        type=int,
+        default=2,
+        help="Features to select per cluster for clustered method (default: 2, giving ~30 total features)",
     )
     ap.add_argument(
         "--feature_selection_end",
@@ -1540,6 +1747,8 @@ if __name__ == "__main__":
         turbo=args.turbo,
         k_features=args.k_features,
         screen_method=args.screen_method,
+        n_clusters=args.n_clusters,
+        features_per_cluster=args.features_per_cluster,
         feature_selection_end=args.feature_selection_end,
         score_metric=args.score_metric,
     )
