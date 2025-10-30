@@ -254,7 +254,7 @@ def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     return Xn
 
 # ========== CPCV ==========
-def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=3):
+def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=5):
     d = pd.to_datetime(dates).dt.date
     unique_dates = np.array(sorted(pd.Series(d).unique()))
     split_points = np.linspace(0, len(unique_dates), n_folds + 1, dtype=int)
@@ -335,7 +335,7 @@ def screen_features(
     method="importance",
     folds=5,
     k_test=2,
-    embargo_days=3,
+    embargo_days=5,
     top_n=None,
 ):
     """Rank features via the requested screening method and keep the top set.
@@ -417,7 +417,7 @@ def _cpcv_evaluate(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=3,
+    embargo_days=5,
     min_train=200,
     min_test=50,
     thr_grid=None,
@@ -619,7 +619,7 @@ def evaluate_rf_cpcv(
     rf_params,
     folds=5,
     k_test=2,
-    embargo_days=3,
+    embargo_days=5,
     min_train=200,
     min_test=50,
     thr_grid=None,
@@ -1096,39 +1096,17 @@ def main(
 
     if rs_df.empty:
         raise RuntimeError("Random search produced no results.")
-    top = rs_df.head(max(5, max(1, rs_trials // 10)))
-    est_range = sorted(set(int(x) for x in top["n_estimators"]))
 
-    depth_set = {
-        None if pd.isna(x) or str(x) == "None" else int(x)
-        for x in top["max_depth"]
-    }
-    if None in depth_set:
-        depth_opts = [None] + sorted(d for d in depth_set if d is not None)
-    else:
-        depth_opts = sorted(depth_set)
-    leaf_range = sorted(set(int(x) for x in top["min_samples_leaf"]))
-
-    mf_raw = set(top["max_features"])
-    has_none = any(pd.isna(x) or str(x) == "None" for x in mf_raw)
-    str_vals, num_vals = [], []
-    for x in mf_raw:
-        if pd.isna(x) or str(x) == "None":
-            continue
-        try:
-            num_vals.append(float(x))
-        except (TypeError, ValueError):
-            str_vals.append(str(x))
-    mf_opts = ([None] if has_none else []) + sorted(set(str_vals)) + sorted(set(num_vals))
-    boot_opts = sorted(set(bool(x) for x in top["bootstrap"]))
-    cw_raw = {
-        None if pd.isna(x) or str(x).lower() == "none" else str(x)
-        for x in top["class_weight"]
-    }
-    if None in cw_raw:
-        cs_opts = [None] + sorted(x for x in cw_raw if x is not None)
-    else:
-        cs_opts = sorted(cw_raw)
+    # FIXED: Use FULL hyperparameter space for Bayesian optimization
+    # Previous implementation constrained to top Random Search results,
+    # which could miss the global optimum if Random Search found a local maximum.
+    # Now using the same full space as Random Search (from sample_rf_params).
+    est_range = [300, 600, 900, 1200]
+    depth_opts = [3, 5, 7, None]
+    leaf_range = [50, 100, 200]
+    mf_opts = ["sqrt", "log2", 0.3, 0.5]
+    boot_opts = [True, False]
+    cs_opts = [None, "balanced_subsample"]
 
     import optuna
 

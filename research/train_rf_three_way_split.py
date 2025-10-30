@@ -17,7 +17,7 @@ Usage:
         --threshold-end 2020-12-31 \
         --rs-trials 120 \
         --bo-trials 300 \
-        --embargo-days 3
+        --embargo-days 5
 """
 
 import argparse
@@ -225,20 +225,19 @@ def phase1_hyperparameter_tuning(
         import optuna
         optuna.logging.set_verbosity(optuna.logging.WARNING)
 
-        # Narrow parameter space based on top RS results
-        top = rs_df.head(20)
-        est_range = sorted(set(int(x) for x in top["n_estimators"]))[:4]
-        depth_opts = sorted(set(
-            None if pd.isna(x) or str(x).lower() == "none" else int(x)
-            for x in top["max_depth"]
-        ))[:4]
-        leaf_range = sorted(set(int(x) for x in top["min_samples_leaf"]))[:4]
+        # FIXED: Use FULL hyperparameter space for Bayesian optimization
+        # Previous implementation constrained to top Random Search results,
+        # which could miss the global optimum if Random Search found a local maximum.
+        # Now using the same full space as Random Search (from sample_rf_params).
+        est_range = [300, 600, 900, 1200]
+        depth_opts = [3, 5, 7, None]
+        leaf_range = [50, 100, 200]
 
         def objective(trial):
             params = {
-                "n_estimators": trial.suggest_categorical("n_estimators", est_range or [600, 900, 1200]),
-                "max_depth": trial.suggest_categorical("max_depth", depth_opts or [3, 5, 7, None]),
-                "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", leaf_range or [50, 100, 200]),
+                "n_estimators": trial.suggest_categorical("n_estimators", est_range),
+                "max_depth": trial.suggest_categorical("max_depth", depth_opts),
+                "min_samples_leaf": trial.suggest_categorical("min_samples_leaf", leaf_range),
                 "max_features": trial.suggest_categorical("max_features", ["sqrt", "log2", 0.3, 0.5]),
                 "bootstrap": trial.suggest_categorical("bootstrap", [True, False]),
                 "class_weight": trial.suggest_categorical("class_weight", [None, "balanced_subsample"]),
@@ -549,7 +548,7 @@ def main():
     parser.add_argument('--bo-trials', type=int, default=300, help='Bayesian optimization trials')
     parser.add_argument('--folds', type=int, default=5, help='Number of CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Number of test folds in CPCV')
-    parser.add_argument('--embargo-days', type=int, default=3, help='Embargo days for CPCV')
+    parser.add_argument('--embargo-days', type=int, default=5, help='Embargo days for CPCV (default: 5 for robust protection against label leakage)')
     parser.add_argument('--k-features', type=int, default=30, help='Number of features to select')
     parser.add_argument('--screen-method', type=str, default='importance',
                        choices=['importance', 'permutation', 'l1', 'none'],
