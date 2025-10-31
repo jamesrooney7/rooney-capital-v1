@@ -8,7 +8,7 @@ set -e
 SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
 START_DATE="2010-01-01"
 END_DATE="2024-12-31"
-OUTPUT_DIR="data/ml_training"
+OUTPUT_DIR="data/training"
 MAX_PARALLEL=16  # Match your CPU cores
 
 # Color output
