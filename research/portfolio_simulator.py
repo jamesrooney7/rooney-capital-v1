@@ -7,6 +7,8 @@ simulates portfolio performance with:
 - Intraday overlapping position tracking
 - Max positions constraint (based on actual open positions)
 - Daily stop loss with immediate exit of all positions
+- Slippage correction: Deducts 1-tick round-trip slippage from all trades
+  (backtests didn't include slippage in P&L calculations)
 - Proper P&L calculation with exit costs
 
 Usage:
@@ -30,6 +32,30 @@ logging.basicConfig(
     format='%(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# Slippage per contract (1 tick round-trip: 0.5 tick per fill)
+# Based on CONTRACT_SPECS from src/strategy/contract_specs.py
+SLIPPAGE_PER_CONTRACT = {
+    "ES": 12.50,    # 0.25 tick × $50/point
+    "NQ": 5.00,     # 0.25 tick × $20/point
+    "RTY": 5.00,    # 0.10 tick × $50/point
+    "YM": 5.00,     # 1.00 tick × $5/point
+    "GC": 10.00,    # 0.10 tick × $100/oz
+    "SI": 25.00,    # 0.005 tick × $5000/contract
+    "PL": 5.00,     # 0.10 tick × $50/oz
+    "HG": 12.50,    # 0.0005 tick × $25000/contract
+    "CL": 10.00,    # 0.01 tick × $1000/contract
+    "NG": 10.00,    # 0.001 tick × $10000/contract
+    "6A": 10.00,    # 0.0001 tick × $100000 AUD
+    "6B": 6.25,     # 0.0001 tick × $62500 GBP
+    "6C": 10.00,    # 0.0001 tick × $100000 CAD
+    "6E": 6.25,     # 0.00005 tick × $125000 EUR
+    "6J": 6.25,     # 0.0000005 tick
+    "6M": 25.00,    # 0.00005 tick × $500000 MXN
+    "6N": 10.00,    # 0.0001 tick × $100000 NZD
+    "6S": 12.50,    # 0.0001 tick × $125000 CHF
+}
 
 
 def discover_available_symbols(results_dir: Path) -> List[str]:
@@ -84,6 +110,22 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
     else:
         raise ValueError(f"No P&L column found in {symbol} trades")
 
+    # Apply slippage correction (backtests didn't deduct slippage from P&L)
+    # Check if slippage_usd column exists, otherwise use standard slippage
+    if 'slippage_usd' in trades_df.columns:
+        # Use recorded slippage from backtest
+        slippage = trades_df['slippage_usd']
+        total_slippage = slippage.sum()
+    else:
+        # Apply standard 1-tick round-trip slippage
+        slippage_per_trade = SLIPPAGE_PER_CONTRACT.get(symbol, 10.0)  # Default $10 if unknown
+        slippage = slippage_per_trade
+        total_slippage = slippage_per_trade * len(trades_df)
+
+    # Deduct slippage from P&L
+    trades_df['pnl_usd_original'] = trades_df['pnl_usd'].copy()
+    trades_df['pnl_usd'] = trades_df['pnl_usd'] - slippage
+
     # Remove trades with missing data
     trades_df = trades_df.dropna(subset=['entry_time', 'exit_time', 'pnl_usd'])
 
@@ -103,7 +145,10 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
             best_meta = json.load(f)
             metadata.update(best_meta)
 
-    logger.info(f"  {symbol}: Loaded {len(trades_df)} ML-filtered trades")
+    # Log trade count and slippage applied
+    avg_slippage = slippage if isinstance(slippage, (int, float)) else slippage.mean()
+    logger.info(f"  {symbol}: Loaded {len(trades_df)} ML-filtered trades "
+                f"(slippage: ${total_slippage:,.0f} total, ${avg_slippage:.2f}/trade)")
 
     return trades_df, metadata
 
