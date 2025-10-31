@@ -33,8 +33,7 @@ from copy import deepcopy
 from portfolio_simulator import (
     discover_available_symbols,
     load_symbol_trades,
-    simulate_portfolio_intraday,
-    calculate_metrics
+    simulate_portfolio_intraday
 )
 
 logging.basicConfig(
@@ -58,23 +57,13 @@ def evaluate_portfolio(
     filtered_trades = {s: symbol_trades[s] for s in symbols_to_include}
     filtered_metadata = {s: symbol_metadata[s] for s in symbols_to_include}
 
-    # Run simulation
-    equity_df, position_counts, symbol_usage, stop_count = simulate_portfolio_intraday(
+    # Run simulation (returns equity_df and metrics dict)
+    equity_df, metrics = simulate_portfolio_intraday(
         symbol_trades=filtered_trades,
         symbol_metadata=filtered_metadata,
         max_positions=max_positions,
         initial_capital=initial_capital,
         daily_stop_loss=daily_stop_loss
-    )
-
-    # Calculate metrics
-    metrics = calculate_metrics(
-        equity_df=equity_df,
-        position_counts=position_counts,
-        symbol_usage=symbol_usage,
-        stop_count=stop_count,
-        initial_capital=initial_capital,
-        n_symbols_total=len(symbols_to_include)
     )
 
     return metrics
