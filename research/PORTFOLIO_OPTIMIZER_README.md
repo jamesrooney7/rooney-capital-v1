@@ -30,7 +30,22 @@ The system reports comprehensive metrics for each optimization run:
 
 ## Quick Start (Recommended)
 
-**Use pre-computed optimization results** (no backtests needed):
+**Use actual pre-computed trade data** from your optimization runs:
+
+```bash
+python research/portfolio_simulator.py \
+    --results-dir results \
+    --min-positions 1 \
+    --max-positions 10
+```
+
+This loads your **actual ML-filtered trades** from `results/` and simulates the portfolio with:
+- ✅ Real trade sequences from your optimized models
+- ✅ $2,500 daily stop loss applied to combined portfolio
+- ✅ Position sizing and max_positions constraints
+- ✅ Exact P&L tracking with daily stop enforcement
+
+**Alternative (Quick Statistical Estimate):**
 
 ```bash
 python research/portfolio_optimizer_simple.py \
@@ -38,11 +53,61 @@ python research/portfolio_optimizer_simple.py \
     --max-positions 10
 ```
 
-This analyzes your existing optimization results in `src/models/` and provides recommendations in seconds!
+This uses aggregate metrics from `src/models/` for instant estimates (less accurate).
 
 ## Components
 
-### 1. **Simple Optimizer** (⚡ Fast - Uses Pre-Computed Results)
+### 1. **Portfolio Simulator** (✅ RECOMMENDED - Uses Actual Trade Data)
+
+`portfolio_simulator.py` loads your actual ML-filtered trade sequences and simulates portfolio performance.
+
+**What it does:**
+- ✅ Loads daily returns from `results/{SYMBOL}_optimization/{SYMBOL}_trades.csv`
+- ✅ These are already filtered by your optimized ML models
+- ✅ Combines trades across symbols with max_positions limit
+- ✅ Applies $2,500 daily stop loss to the combined portfolio
+- ✅ Ranks symbols by Sharpe or Profit Factor
+- ✅ Provides exact results based on actual trade history
+
+**When to use:**
+- ✅ You have optimization results in `results/` directory
+- ✅ You want accurate simulation using real trade sequences
+- ✅ You want to test daily stop loss on actual trades
+- ✅ This is the MOST ACCURATE method
+
+**Usage:**
+```bash
+# Basic usage (auto-discovers all symbols)
+python research/portfolio_simulator.py \
+    --results-dir results \
+    --min-positions 1 \
+    --max-positions 10
+
+# Specify symbols and ranking method
+python research/portfolio_simulator.py \
+    --symbols ES NQ YM RTY GC SI \
+    --ranking-method sharpe \
+    --output results/portfolio_sim.csv
+
+# Custom capital and stop
+python research/portfolio_simulator.py \
+    --initial-cash 500000 \
+    --daily-stop-loss 5000
+```
+
+**Arguments:**
+- `--symbols`: Symbols to include (default: auto-discover from results/)
+- `--results-dir`: Results directory (default: results)
+- `--min-positions`: Minimum positions (default: 1)
+- `--max-positions`: Maximum positions (default: all available)
+- `--initial-cash`: Starting capital (default: 250,000)
+- `--daily-stop-loss`: Daily stop loss (default: 2,500)
+- `--ranking-method`: How to rank symbols (default: sharpe, options: sharpe, profit_factor)
+- `--output`: Output CSV file
+
+---
+
+### 2. **Simple Optimizer** (⚡ Fast - Uses Aggregate Metrics)
 
 `portfolio_optimizer_simple.py` uses your existing optimization results without re-running backtests.
 
@@ -196,13 +261,29 @@ This creates model files in `src/models/`:
 - `{SYMBOL}_rf_model.pkl`
 - `{SYMBOL}_best.json`
 
-### Step 2: Run Portfolio Optimization
+### Step 2: Run Portfolio Simulation
 
-**Recommended Workflow:**
+**Recommended: Use Actual Trade Data**
 
-**Step 2a: Quick Analysis (Simple Optimizer)**
+Simulate your portfolio using the actual ML-filtered trades:
 
-Get instant recommendations using pre-computed results:
+```bash
+python research/portfolio_simulator.py \
+    --results-dir results \
+    --min-positions 1 \
+    --max-positions 10 \
+    --output results/portfolio_simulation.csv
+```
+
+This uses your **real trade sequences** with:
+- ✅ Actual ML-filtered trades from optimization
+- ✅ Daily stop loss applied to portfolio
+- ✅ Position sizing and ranking
+- ✅ Exact P&L based on your optimized models
+
+**Alternative: Quick Statistical Estimate**
+
+For instant ballpark estimates (less accurate):
 
 ```bash
 python research/portfolio_optimizer_simple.py \
@@ -211,21 +292,7 @@ python research/portfolio_optimizer_simple.py \
     --output results/portfolio_quick.csv
 ```
 
-This completes in seconds and gives you a good starting point.
-
-**Step 2b: Validation (Optional - Full Optimizer)**
-
-If you want precise results with actual trade simulation:
-
-```bash
-python research/portfolio_optimizer_full.py \
-    --start 2023-01-01 \
-    --end 2024-12-31 \
-    --symbols ES NQ YM RTY GC SI \  # Use top symbols from Step 2a
-    --output results/portfolio_full.csv
-```
-
-This runs full backtests and takes longer but provides exact results.
+This uses aggregate metrics only and completes in seconds.
 
 ### Step 3: Analyze Results
 
