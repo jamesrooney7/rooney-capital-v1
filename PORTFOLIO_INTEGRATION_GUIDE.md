@@ -116,15 +116,22 @@ This guide documents the complete integration of portfolio-level position limits
 cd /opt/pine/rooney-capital-v1
 git pull origin claude/portfolio-constructor-optimizer-011CUfmesFwbFCSvWU3NYmmN
 
-# Check imports
-python3 -c "from src.runner.portfolio_coordinator import PortfolioCoordinator; print('✓ Import OK')"
-python3 -c "from src.runner.live_worker import LiveWorker; print('✓ Import OK')"
+# Activate virtual environment (required for dependencies)
+source venv/bin/activate
+
+# Check imports (must set PYTHONPATH to include src/)
+PYTHONPATH=src python3 -c "from runner.portfolio_coordinator import PortfolioCoordinator; print('✓ PortfolioCoordinator import OK')"
+PYTHONPATH=src python3 -c "from runner.live_worker import LiveWorker; print('✓ LiveWorker import OK')"
 
 # Verify config exists
 cat config/portfolio_optimization.json
 ```
 
 **Expected:** No import errors, config file displays correctly
+
+**Notes:**
+- The `PYTHONPATH=src` prefix is required because the codebase uses relative imports that assume `src/` is in the Python path
+- Virtual environment must be activated for dependencies like backtrader, pandas, etc.
 
 ### Phase 3: Paper Trading Test (1-2 Weeks)
 
@@ -329,27 +336,34 @@ Based on 2023-2024 optimization:
 ### Commands Reference
 
 ```bash
+# Activate virtual environment (always required)
+source venv/bin/activate
+
 # Pull latest code
 git pull origin claude/portfolio-constructor-optimizer-011CUfmesFwbFCSvWU3NYmmN
 
 # Regenerate config if needed
-python3 research/export_portfolio_config.py \
+PYTHONPATH=src python3 research/export_portfolio_config.py \
     --results results/greedy_optimization_results.csv \
     --output config/portfolio_optimization.json
 
 # Check portfolio simulator results
-python3 research/portfolio_simulator.py \
+PYTHONPATH=src python3 research/portfolio_simulator.py \
     --results-dir results \
     --min-positions 1 \
     --max-positions 10
 
 # Run greedy optimizer again (if you want to try different constraints)
-python3 research/portfolio_optimizer_greedy.py \
+PYTHONPATH=src python3 research/portfolio_optimizer_greedy.py \
     --results-dir results \
     --min-positions 1 \
     --max-positions 5 \
     --max-dd-limit 9000 \
     --max-breach-events 2
+
+# Test imports (dry run)
+PYTHONPATH=src python3 -c "from runner.portfolio_coordinator import PortfolioCoordinator; print('✓ OK')"
+PYTHONPATH=src python3 -c "from runner.live_worker import LiveWorker; print('✓ OK')"
 ```
 
 ---
