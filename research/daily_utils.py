@@ -10,7 +10,7 @@ def ensure_daily_index(series: pd.Series, dates: pd.Series) -> pd.Series:
 
     Args:
         series: Series of returns (trade-level)
-        dates: Series of dates corresponding to trades
+        dates: Series of dates corresponding to trades (must have same index as series)
 
     Returns:
         Series with daily returns and DatetimeIndex
@@ -18,11 +18,15 @@ def ensure_daily_index(series: pd.Series, dates: pd.Series) -> pd.Series:
     if series.empty:
         return pd.Series(dtype=float)
 
-    # Create DataFrame with dates and values
+    # Ensure series and dates have matching indices
+    # Use series' index to align dates
+    aligned_dates = dates.loc[series.index]
+
+    # Create DataFrame with aligned dates and values
     df = pd.DataFrame({
-        'date': pd.to_datetime(dates),
+        'date': pd.to_datetime(aligned_dates),
         'value': series.values
-    })
+    }, index=series.index)
 
     # Group by date and sum returns
     daily = df.groupby('date')['value'].sum()
