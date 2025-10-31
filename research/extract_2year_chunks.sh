@@ -9,7 +9,7 @@
 set -e
 
 # Configuration
-MAX_PARALLEL=16
+MAX_PARALLEL=12
 DATA_DIR="data/resampled"
 OUTPUT_DIR="data/training_chunks"
 LOG_DIR="logs/extraction_chunks"
