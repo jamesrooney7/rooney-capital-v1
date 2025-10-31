@@ -281,27 +281,51 @@ def combine_portfolio_signals(
 def simulate_portfolio_returns(
     signals_dict: Dict[str, pd.DataFrame],
     portfolio_signals: pd.DataFrame,
-    commission_pct: float = 0.0001
+    commission_pct: float = 0.0001,
+    initial_capital: float = 250000.0,
+    daily_stop_loss: float = 2500.0
 ) -> Tuple[pd.Series, Dict]:
     """
-    Simulate portfolio returns based on signals.
+    Simulate portfolio returns based on signals with daily stop loss.
 
     Parameters:
         signals_dict: {symbol: signal_df with returns}
         portfolio_signals: DataFrame of boolean signals per symbol
         commission_pct: Commission as percentage
+        initial_capital: Starting capital in dollars
+        daily_stop_loss: Maximum daily loss in dollars before stopping trading
 
     Returns:
         equity_curve: Series of portfolio equity
         metrics: Performance metrics dict
     """
     # Initialize
-    equity = 1.0
+    equity = initial_capital
     equity_curve = [equity]
     dates = [portfolio_signals.index[0]]
     portfolio_returns = []
 
+    current_day = None
+    daily_pnl = 0.0
+    stopped_out = False
+    stop_count = 0
+
     for date in portfolio_signals.index:
+        # Check if new trading day
+        day = date.date() if hasattr(date, 'date') else date
+
+        if current_day is None or day != current_day:
+            current_day = day
+            daily_pnl = 0.0
+            stopped_out = False
+
+        # If stopped out for the day, skip all trading
+        if stopped_out:
+            portfolio_returns.append(0.0)
+            equity_curve.append(equity)
+            dates.append(date)
+            continue
+
         # Get active positions for this date
         active_signals = portfolio_signals.loc[date]
         active_symbols = active_signals[active_signals].index.tolist()
@@ -317,6 +341,7 @@ def simulate_portfolio_returns(
 
         # Calculate portfolio return
         period_return = 0.0
+        period_pnl = 0.0
 
         for symbol in active_symbols:
             if symbol not in signals_dict:
@@ -332,7 +357,25 @@ def simulate_portfolio_returns(
             if pd.notna(symbol_return):
                 # Apply commission
                 net_return = symbol_return - commission_pct
-                period_return += weight_per_symbol * net_return
+                position_return = weight_per_symbol * net_return
+                period_return += position_return
+
+                # Calculate P&L in dollars
+                position_pnl = position_return * equity
+                period_pnl += position_pnl
+
+        # Update daily P&L
+        daily_pnl += period_pnl
+
+        # Check if daily stop loss hit
+        if daily_pnl <= -daily_stop_loss:
+            stopped_out = True
+            stop_count += 1
+            # Exit immediately
+            portfolio_returns.append(0.0)
+            equity_curve.append(equity)
+            dates.append(date)
+            continue
 
         portfolio_returns.append(period_return)
         equity *= (1 + period_return)
@@ -344,50 +387,76 @@ def simulate_portfolio_returns(
     returns_series = pd.Series(portfolio_returns)
 
     # Calculate metrics
-    metrics = calculate_performance_metrics(equity_series, returns_series)
+    metrics = calculate_performance_metrics(equity_series, returns_series, initial_capital, stop_count)
 
     return equity_series, metrics
 
 
 def calculate_performance_metrics(
     equity_curve: pd.Series,
-    returns: pd.Series
+    returns: pd.Series,
+    initial_capital: float = 250000.0,
+    stop_count: int = 0
 ) -> Dict:
-    """Calculate portfolio performance metrics."""
+    """Calculate portfolio performance metrics with dollar amounts."""
     if len(equity_curve) < 2:
         return {
             'total_return': 0,
-            'annualized_return': 0,
+            'total_return_dollars': 0,
+            'cagr': 0,
             'annualized_volatility': 0,
             'sharpe_ratio': 0,
             'max_drawdown': 0,
-            'n_periods': 0
+            'max_drawdown_dollars': 0,
+            'profit_factor': 0,
+            'n_periods': 0,
+            'daily_stops_hit': 0
         }
 
-    # Total return
-    total_return = equity_curve.iloc[-1] - 1.0
+    # Total return (percentage and dollars)
+    total_return_pct = (equity_curve.iloc[-1] - initial_capital) / initial_capital
+    total_return_dollars = equity_curve.iloc[-1] - initial_capital
 
     # Annualized metrics
     periods_per_year = 252
     n_periods = len(equity_curve)
     years = n_periods / periods_per_year
 
-    annualized_return = (1 + total_return) ** (1 / years) - 1 if years > 0 else 0
-    annualized_vol = returns.std() * np.sqrt(periods_per_year) if len(returns) > 1 else 0
-    sharpe_ratio = annualized_return / annualized_vol if annualized_vol > 0 else 0
+    # CAGR (Compound Annual Growth Rate)
+    cagr = (1 + total_return_pct) ** (1 / years) - 1 if years > 0 else 0
 
-    # Max drawdown
+    annualized_vol = returns.std() * np.sqrt(periods_per_year) if len(returns) > 1 else 0
+    sharpe_ratio = cagr / annualized_vol if annualized_vol > 0 else 0
+
+    # Win/Loss metrics
+    positive_returns = returns[returns > 0]
+    negative_returns = returns[returns < 0]
+
+    # Gross profits and losses for profit factor
+    gross_profits = positive_returns.sum() * initial_capital if len(positive_returns) > 0 else 0
+    gross_losses = abs(negative_returns.sum() * initial_capital) if len(negative_returns) > 0 else 0
+    profit_factor = gross_profits / gross_losses if gross_losses > 0 else np.inf
+
+    # Max drawdown (percentage and dollars)
     cummax = equity_curve.expanding().max()
-    drawdown = (equity_curve - cummax) / cummax
-    max_drawdown = drawdown.min()
+    drawdown = equity_curve - cummax
+    drawdown_pct = drawdown / cummax
+    max_drawdown_pct = drawdown_pct.min()
+    max_drawdown_dollars = drawdown.min()
 
     return {
-        'total_return': total_return,
-        'annualized_return': annualized_return,
+        'total_return': total_return_pct,
+        'total_return_dollars': total_return_dollars,
+        'cagr': cagr,
         'annualized_volatility': annualized_vol,
         'sharpe_ratio': sharpe_ratio,
-        'max_drawdown': max_drawdown,
-        'n_periods': n_periods
+        'max_drawdown': max_drawdown_pct,
+        'max_drawdown_dollars': max_drawdown_dollars,
+        'profit_factor': profit_factor,
+        'gross_profits': gross_profits,
+        'gross_losses': gross_losses,
+        'n_periods': n_periods,
+        'daily_stops_hit': stop_count
     }
 
 
@@ -395,10 +464,12 @@ def optimize_portfolio(
     signals_dict: Dict[str, pd.DataFrame],
     min_positions: int = 1,
     max_positions: Optional[int] = None,
-    commission_pct: float = 0.0001
+    commission_pct: float = 0.0001,
+    initial_capital: float = 250000.0,
+    daily_stop_loss: float = 2500.0
 ) -> pd.DataFrame:
     """
-    Optimize max_positions parameter.
+    Optimize max_positions parameter with daily stop loss.
 
     Returns:
         DataFrame with optimization results
@@ -410,6 +481,7 @@ def optimize_portfolio(
 
     logger.info(f"\n{'='*80}")
     logger.info(f"OPTIMIZING MAX POSITIONS: {min_positions} to {max_pos}")
+    logger.info(f"Initial Capital: ${initial_capital:,.0f} | Daily Stop Loss: ${daily_stop_loss:,.0f}")
     logger.info(f"{'='*80}\n")
 
     for max_pos_val in range(min_positions, max_pos + 1):
@@ -425,7 +497,9 @@ def optimize_portfolio(
         equity, metrics = simulate_portfolio_returns(
             signals_dict,
             portfolio_signals,
-            commission_pct=commission_pct
+            commission_pct=commission_pct,
+            initial_capital=initial_capital,
+            daily_stop_loss=daily_stop_loss
         )
 
         # Store results
@@ -433,39 +507,45 @@ def optimize_portfolio(
         results.append(result)
 
         logger.info(f"  Sharpe: {metrics['sharpe_ratio']:>7.3f} | "
-                   f"Return: {metrics['annualized_return']*100:>6.2f}% | "
-                   f"Vol: {metrics['annualized_volatility']*100:>6.2f}% | "
-                   f"MaxDD: {metrics['max_drawdown']*100:>6.2f}%\n")
+                   f"CAGR: {metrics['cagr']*100:>6.2f}% | "
+                   f"Return: ${metrics['total_return_dollars']:>10,.0f} | "
+                   f"MaxDD: ${metrics['max_drawdown_dollars']:>10,.0f} | "
+                   f"PF: {metrics['profit_factor']:>5.2f} | "
+                   f"Stops: {metrics['daily_stops_hit']:>3.0f}\n")
 
     # Create results DataFrame
     results_df = pd.DataFrame(results)
     results_df = results_df.sort_values('sharpe_ratio', ascending=False)
 
     # Print summary
-    logger.info(f"\n{'='*80}")
+    logger.info(f"\n{'='*90}")
     logger.info("OPTIMIZATION RESULTS (sorted by Sharpe)")
-    logger.info(f"{'='*80}\n")
+    logger.info(f"{'='*90}\n")
 
-    print(f"{'MaxPos':<10}{'Sharpe':<10}{'AnnRet%':<12}{'AnnVol%':<12}{'MaxDD%':<12}")
-    print("-" * 80)
+    print(f"{'MaxPos':<10}{'Sharpe':<10}{'CAGR%':<10}{'Return $':<15}{'MaxDD $':<15}{'PF':<10}{'Stops':<10}")
+    print("-" * 90)
 
     for _, row in results_df.iterrows():
         print(f"{row['max_positions']:<10.0f}"
               f"{row['sharpe_ratio']:<10.3f}"
-              f"{row['annualized_return']*100:<12.2f}"
-              f"{row['annualized_volatility']*100:<12.2f}"
-              f"{row['max_drawdown']*100:<12.2f}")
+              f"{row['cagr']*100:<10.2f}"
+              f"${row['total_return_dollars']:>13,.0f}"
+              f"${row['max_drawdown_dollars']:>13,.0f}"
+              f"{row['profit_factor']:<10.2f}"
+              f"{row['daily_stops_hit']:<10.0f}")
 
-    print("=" * 80)
+    print("=" * 90)
 
     # Best result
     best = results_df.iloc[0]
     logger.info(f"\n🏆 OPTIMAL CONFIGURATION:")
     logger.info(f"   Max Positions: {int(best['max_positions'])}")
     logger.info(f"   Sharpe Ratio: {best['sharpe_ratio']:.3f}")
-    logger.info(f"   Ann. Return: {best['annualized_return']*100:.2f}%")
-    logger.info(f"   Ann. Vol: {best['annualized_volatility']*100:.2f}%")
-    logger.info(f"   Max Drawdown: {best['max_drawdown']*100:.2f}%\n")
+    logger.info(f"   CAGR: {best['cagr']*100:.2f}%")
+    logger.info(f"   Total Return: ${best['total_return_dollars']:,.2f}")
+    logger.info(f"   Max Drawdown: ${best['max_drawdown_dollars']:,.2f} ({best['max_drawdown']*100:.2f}%)")
+    logger.info(f"   Profit Factor: {best['profit_factor']:.2f}")
+    logger.info(f"   Daily Stops Hit: {best['daily_stops_hit']:.0f}\n")
 
     return results_df
 
@@ -483,7 +563,9 @@ def main():
     parser.add_argument('--min-positions', type=int, default=1)
     parser.add_argument('--max-positions', type=int, default=None)
     parser.add_argument('--commission-pct', type=float, default=0.0001)
-    parser.add_argument('--initial-cash', type=float, default=100000.0)
+    parser.add_argument('--initial-cash', type=float, default=250000.0)
+    parser.add_argument('--daily-stop-loss', type=float, default=2500.0,
+                       help='Daily stop loss in dollars (default: 2500)')
     parser.add_argument('--output', type=str, help='Output CSV file')
     parser.add_argument('--no-ml', action='store_true', help='Disable ML filtering')
 
@@ -538,7 +620,9 @@ def main():
         signals_dict,
         min_positions=args.min_positions,
         max_positions=args.max_positions,
-        commission_pct=args.commission_pct
+        commission_pct=args.commission_pct,
+        initial_capital=args.initial_cash,
+        daily_stop_loss=args.daily_stop_loss
     )
 
     # Save results

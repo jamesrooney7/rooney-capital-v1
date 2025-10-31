@@ -10,6 +10,24 @@ This portfolio optimization system provides three components:
 2. **`optimize_portfolio_positions.py`**: Lightweight optimizer using simplified signal extraction
 3. **`portfolio_optimizer_full.py`**: Full integration with Backtrader and production IbsStrategy
 
+## Key Features
+
+### Daily Stop Loss Protection
+All portfolio optimizers include a **hard daily stop loss** of $2,500 (configurable). When this threshold is hit:
+- All positions are immediately exited
+- No new trades are entered for the remainder of the trading day
+- Trading resumes normally on the next trading day
+- The number of stop-outs is tracked in the metrics
+
+### Enhanced Performance Metrics
+The system reports comprehensive metrics for each optimization run:
+- **Total Return**: Both percentage and dollar amount
+- **CAGR**: Compound Annual Growth Rate
+- **Sharpe Ratio**: Risk-adjusted return metric
+- **Max Drawdown**: Both percentage and dollar amount
+- **Profit Factor**: Gross profits / gross losses
+- **Daily Stops Hit**: Number of times the daily stop loss was triggered
+
 ## Components
 
 ### 1. Portfolio Constructor (Class-Based)
@@ -135,7 +153,8 @@ python research/portfolio_optimizer_full.py \
 - `--min-positions`: Minimum positions to test (default: 1)
 - `--max-positions`: Maximum positions to test (default: n_symbols)
 - `--commission-pct`: Commission as percentage (default: 0.0001)
-- `--initial-cash`: Starting capital (default: 100,000)
+- `--initial-cash`: Starting capital (default: 250,000)
+- `--daily-stop-loss`: Daily stop loss in dollars (default: 2,500)
 - `--output`: Output CSV file
 - `--no-ml`: Disable ML filtering
 
@@ -186,24 +205,39 @@ python research/optimize_portfolio_positions.py \
 The optimizer will output:
 
 ```
-================================================================================
-OPTIMIZATION RESULTS (sorted by Sharpe)
-================================================================================
+==========================================================================================
+OPTIMIZING MAX POSITIONS: 1 to 10
+Initial Capital: $250,000 | Daily Stop Loss: $2,500
+==========================================================================================
 
-MaxPos    Sharpe    AnnRet%     AnnVol%     MaxDD%
---------------------------------------------------------------------------------
-6         1.245     18.50       14.86       -12.30
-5         1.189     17.20       14.47       -13.10
-7         1.156     19.30       16.70       -14.50
-8         1.098     20.10       18.31       -16.20
+Testing max_positions = 1
+  Sharpe:   0.856 | CAGR:  12.30% | Return:   $45,600 | MaxDD:   -$18,200 | PF:  1.45 | Stops:   3
+
+Testing max_positions = 2
+  Sharpe:   1.024 | CAGR:  15.80% | Return:   $58,300 | MaxDD:   -$15,400 | PF:  1.68 | Stops:   2
 ...
+
+==========================================================================================
+OPTIMIZATION RESULTS (sorted by Sharpe)
+==========================================================================================
+
+MaxPos    Sharpe    CAGR%     Return $       MaxDD $        PF        Stops
+------------------------------------------------------------------------------------------
+6         1.245     18.50      $67,200        -$12,800      1.85      1
+5         1.189     17.20      $61,400        -$14,100      1.73      2
+7         1.156     19.30      $72,100        -$16,300      1.79      1
+8         1.098     20.10      $75,800        -$19,500      1.68      3
+...
+==========================================================================================
 
 🏆 OPTIMAL CONFIGURATION:
    Max Positions: 6
    Sharpe Ratio: 1.245
-   Ann. Return: 18.50%
-   Ann. Vol: 14.86%
-   Max Drawdown: -12.30%
+   CAGR: 18.50%
+   Total Return: $67,200.00
+   Max Drawdown: -$12,800.00 (-5.12%)
+   Profit Factor: 1.85
+   Daily Stops Hit: 1
 ```
 
 ### Step 4: Implement Optimal Configuration

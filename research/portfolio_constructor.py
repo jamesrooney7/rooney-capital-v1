@@ -250,10 +250,11 @@ class PortfolioConstructor:
         initial_capital: float = 250000.0,
         position_size_pct: float = 0.95,
         commission_per_side: float = 1.25,
-        slippage_pct: float = 0.0001
+        slippage_pct: float = 0.0001,
+        daily_stop_loss: float = 2500.0
     ) -> Tuple[pd.Series, Dict[str, float]]:
         """
-        Backtest the portfolio strategy.
+        Backtest the portfolio strategy with daily stop loss.
 
         Parameters
         ----------
@@ -269,6 +270,8 @@ class PortfolioConstructor:
             Commission per trade side in dollars
         slippage_pct : float
             Slippage as percentage of price
+        daily_stop_loss : float
+            Maximum daily loss in dollars before stopping trading for the day
 
         Returns
         -------
@@ -284,10 +287,31 @@ class PortfolioConstructor:
         portfolio_returns = []
         portfolio_dates = []
         n_positions_series = []
+        daily_pnl_tracking = []
 
         equity = initial_capital
+        current_day = None
+        daily_pnl = 0.0
+        stopped_out = False
+        stop_count = 0
 
         for idx in common_index:
+            # Check if new trading day
+            day = idx.date() if hasattr(idx, 'date') else idx
+
+            if current_day is None or day != current_day:
+                current_day = day
+                daily_pnl = 0.0
+                stopped_out = False
+
+            # If stopped out for the day, exit all positions and skip new entries
+            if stopped_out:
+                portfolio_returns.append(0.0)
+                portfolio_dates.append(idx)
+                n_positions_series.append(0)
+                daily_pnl_tracking.append(daily_pnl)
+                continue
+
             active_symbols = signals.loc[idx]
             active_symbols = active_symbols[active_symbols].index.tolist()
             n_positions = len(active_symbols)
@@ -296,6 +320,7 @@ class PortfolioConstructor:
             if n_positions == 0:
                 portfolio_returns.append(0.0)
                 portfolio_dates.append(idx)
+                daily_pnl_tracking.append(daily_pnl)
                 continue
 
             # Calculate per-position allocation
@@ -303,6 +328,7 @@ class PortfolioConstructor:
 
             # Calculate portfolio return for this period
             period_return = 0.0
+            period_pnl = 0.0
 
             for symbol in active_symbols:
                 if symbol not in returns_data:
@@ -320,6 +346,23 @@ class PortfolioConstructor:
                 position_return = (symbol_return - total_cost) / n_positions
                 period_return += position_return
 
+                # Calculate P&L in dollars
+                position_pnl = position_return * equity
+                period_pnl += position_pnl
+
+            # Update daily P&L tracker
+            daily_pnl += period_pnl
+            daily_pnl_tracking.append(daily_pnl)
+
+            # Check if daily stop loss hit
+            if daily_pnl <= -daily_stop_loss:
+                stopped_out = True
+                stop_count += 1
+                # Exit immediately - no P&L for this period beyond the stop
+                portfolio_returns.append(0.0)
+                portfolio_dates.append(idx)
+                continue
+
             portfolio_returns.append(period_return)
             portfolio_dates.append(idx)
             equity *= (1 + period_return)
@@ -332,7 +375,9 @@ class PortfolioConstructor:
         metrics = self._calculate_metrics(
             returns_series,
             equity_curve,
-            n_positions_series
+            n_positions_series,
+            initial_capital,
+            stop_count
         )
 
         return equity_curve, metrics
@@ -341,51 +386,62 @@ class PortfolioConstructor:
         self,
         returns: pd.Series,
         equity: pd.Series,
-        n_positions: List[int]
+        n_positions: List[int],
+        initial_capital: float,
+        stop_count: int = 0
     ) -> Dict[str, float]:
-        """Calculate portfolio performance metrics."""
-        total_return = (equity.iloc[-1] - equity.iloc[0]) / equity.iloc[0]
+        """Calculate portfolio performance metrics with dollar amounts."""
+        # Total return (percentage and dollars)
+        total_return_pct = (equity.iloc[-1] - equity.iloc[0]) / equity.iloc[0]
+        total_return_dollars = equity.iloc[-1] - equity.iloc[0]
 
         # Annualized metrics (assuming daily data)
         periods_per_year = 252
         n_periods = len(returns)
         years = n_periods / periods_per_year
 
-        annualized_return = (1 + total_return) ** (1 / years) - 1
-        annualized_vol = returns.std() * np.sqrt(periods_per_year)
-        sharpe_ratio = annualized_return / annualized_vol if annualized_vol > 0 else 0
+        # CAGR (Compound Annual Growth Rate)
+        cagr = (1 + total_return_pct) ** (1 / years) - 1 if years > 0 else 0
 
-        # Additional metrics
+        annualized_vol = returns.std() * np.sqrt(periods_per_year)
+        sharpe_ratio = cagr / annualized_vol if annualized_vol > 0 else 0
+
+        # Win/Loss metrics
         positive_returns = returns[returns > 0]
         negative_returns = returns[returns < 0]
 
         win_rate = len(positive_returns) / len(returns) if len(returns) > 0 else 0
 
-        avg_win = positive_returns.mean() if len(positive_returns) > 0 else 0
-        avg_loss = abs(negative_returns.mean()) if len(negative_returns) > 0 else 0
-        profit_factor = (positive_returns.sum() / abs(negative_returns.sum())
-                        if negative_returns.sum() != 0 else np.inf)
+        # Gross profits and losses for profit factor
+        gross_profits = positive_returns.sum() * initial_capital if len(positive_returns) > 0 else 0
+        gross_losses = abs(negative_returns.sum() * initial_capital) if len(negative_returns) > 0 else 0
+        profit_factor = gross_profits / gross_losses if gross_losses > 0 else np.inf
 
-        # Max drawdown
+        # Max drawdown (percentage and dollars)
         cummax = equity.expanding().max()
-        drawdown = (equity - cummax) / cummax
-        max_drawdown = drawdown.min()
+        drawdown = equity - cummax
+        drawdown_pct = drawdown / cummax
+        max_drawdown_pct = drawdown_pct.min()
+        max_drawdown_dollars = drawdown.min()
 
         # Average positions
         avg_positions = np.mean(n_positions)
 
         return {
-            'total_return': total_return,
-            'annualized_return': annualized_return,
+            'total_return': total_return_pct,
+            'total_return_dollars': total_return_dollars,
+            'cagr': cagr,
             'annualized_volatility': annualized_vol,
             'sharpe_ratio': sharpe_ratio,
-            'max_drawdown': max_drawdown,
+            'max_drawdown': max_drawdown_pct,
+            'max_drawdown_dollars': max_drawdown_dollars,
             'win_rate': win_rate,
             'profit_factor': profit_factor,
-            'avg_win': avg_win,
-            'avg_loss': avg_loss,
+            'gross_profits': gross_profits,
+            'gross_losses': gross_losses,
             'n_periods': n_periods,
-            'avg_positions': avg_positions
+            'avg_positions': avg_positions,
+            'daily_stops_hit': stop_count
         }
 
     def optimize_max_positions(
@@ -447,8 +503,10 @@ class PortfolioConstructor:
             results.append(result)
 
             print(f"  Sharpe: {metrics['sharpe_ratio']:.3f} | "
-                  f"Annual Return: {metrics['annualized_return']*100:.2f}% | "
-                  f"Max DD: {metrics['max_drawdown']*100:.2f}%")
+                  f"CAGR: {metrics['cagr']*100:.2f}% | "
+                  f"Total Return: ${metrics['total_return_dollars']:,.2f} | "
+                  f"Max DD: ${metrics['max_drawdown_dollars']:,.2f} | "
+                  f"PF: {metrics['profit_factor']:.2f}")
 
             # Restore original setting
             self.max_positions = original_max
@@ -459,7 +517,31 @@ class PortfolioConstructor:
         print("\n" + "=" * 80)
         print("OPTIMIZATION RESULTS (sorted by Sharpe Ratio)")
         print("=" * 80)
-        print(results_df.to_string(index=False))
+
+        # Print formatted table with key metrics
+        print(f"\n{'MaxPos':<10}{'Sharpe':<10}{'CAGR%':<10}{'Return $':<15}{'MaxDD $':<15}{'PF':<10}{'Stops':<10}")
+        print("-" * 90)
+        for _, row in results_df.iterrows():
+            print(f"{row['max_positions']:<10.0f}"
+                  f"{row['sharpe_ratio']:<10.3f}"
+                  f"{row['cagr']*100:<10.2f}"
+                  f"${row['total_return_dollars']:>13,.0f}"
+                  f"${row['max_drawdown_dollars']:>13,.0f}"
+                  f"{row['profit_factor']:<10.2f}"
+                  f"{row['daily_stops_hit']:<10.0f}")
+
+        print("=" * 90)
+
+        # Best result
+        best = results_df.iloc[0]
+        print(f"\n🏆 OPTIMAL CONFIGURATION:")
+        print(f"   Max Positions: {best['max_positions']:.0f}")
+        print(f"   Sharpe Ratio: {best['sharpe_ratio']:.3f}")
+        print(f"   CAGR: {best['cagr']*100:.2f}%")
+        print(f"   Total Return: ${best['total_return_dollars']:,.2f}")
+        print(f"   Max Drawdown: ${best['max_drawdown_dollars']:,.2f} ({best['max_drawdown']*100:.2f}%)")
+        print(f"   Profit Factor: {best['profit_factor']:.2f}")
+        print(f"   Daily Stops Hit: {best['daily_stops_hit']:.0f}")
         print("=" * 80)
 
         return results_df
