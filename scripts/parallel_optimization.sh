@@ -63,6 +63,9 @@ optimize_symbol() {
     mkdir -p "$output_dir"
 
     # Run optimization with logging
+    # Set PYTHONPATH to include research and src directories
+    cd /opt/pine/rooney-capital-v1
+    PYTHONPATH="/opt/pine/rooney-capital-v1/research:/opt/pine/rooney-capital-v1/src:$PYTHONPATH" \
     python3 research/rf_cpcv_random_then_bo.py \
         --input "$csv_path" \
         --outdir "$output_dir" \
