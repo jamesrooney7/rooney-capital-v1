@@ -3,7 +3,7 @@
 
 set -e
 
-DATA_DIR="data/ml_training"
+DATA_DIR="data/training"
 
 # Color output
 GREEN='\033[0;32m'

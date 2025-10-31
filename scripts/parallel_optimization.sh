@@ -6,7 +6,7 @@ set -e
 
 # Configuration
 MAX_PARALLEL_JOBS=16  # Optimized for 125GB RAM / 16 cores (change to 12 if running other workloads)
-DATA_DIR="data/ml_training"
+DATA_DIR="data/training"
 OUTPUT_BASE_DIR="results"
 FEATURE_SELECTION_END="2020-12-31"
 HOLDOUT_DATE="2024-01-01"
