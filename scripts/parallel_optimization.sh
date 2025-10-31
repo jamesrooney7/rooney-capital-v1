@@ -4,6 +4,10 @@
 
 set -e
 
+# Get the project root directory (parent of scripts/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Configuration
 MAX_PARALLEL_JOBS=16  # Optimized for 125GB RAM / 16 cores (change to 12 if running other workloads)
 DATA_DIR="data/training"
@@ -64,8 +68,8 @@ optimize_symbol() {
 
     # Run optimization with logging
     # Set PYTHONPATH to include research and src directories
-    cd /home/user/rooney-capital-v1
-    PYTHONPATH="/home/user/rooney-capital-v1/research:/home/user/rooney-capital-v1/src:$PYTHONPATH" \
+    cd "$PROJECT_ROOT"
+    PYTHONPATH="$PROJECT_ROOT/research:$PROJECT_ROOT/src:$PYTHONPATH" \
     python3 research/rf_cpcv_random_then_bo.py \
         --input "$csv_path" \
         --outdir "$output_dir" \
@@ -110,7 +114,7 @@ with open('$output_dir/best.json') as f:
 }
 
 export -f optimize_symbol
-export OUTPUT_BASE_DIR FEATURE_SELECTION_END HOLDOUT_DATE GREEN RED YELLOW NC
+export PROJECT_ROOT OUTPUT_BASE_DIR FEATURE_SELECTION_END HOLDOUT_DATE GREEN RED YELLOW NC
 
 # Run optimizations in parallel
 echo -e "${GREEN}Starting parallel optimization (max $MAX_PARALLEL_JOBS jobs)...${NC}"
