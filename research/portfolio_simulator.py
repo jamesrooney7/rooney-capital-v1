@@ -396,6 +396,21 @@ def calculate_metrics(
     max_drawdown_dollars = drawdown.min()
     max_drawdown_pct = drawdown_pct.min()
 
+    # Drawdown breach analysis (for broker limits like $6000 max DD)
+    drawdown_breach_6k = (drawdown <= -6000)
+    n_breach_periods = drawdown_breach_6k.sum()
+    pct_time_in_breach = (n_breach_periods / len(drawdown)) * 100 if len(drawdown) > 0 else 0
+
+    # Count number of separate breach events
+    breach_events = 0
+    in_breach = False
+    for is_breach in drawdown_breach_6k:
+        if is_breach and not in_breach:
+            breach_events += 1
+            in_breach = True
+        elif not is_breach:
+            in_breach = False
+
     # Average positions
     avg_positions = np.mean(position_counts) if position_counts else 0
 
@@ -418,7 +433,10 @@ def calculate_metrics(
         'n_symbols_used': len(symbol_usage),
         'n_symbols_total': n_symbols_total,
         'symbol_usage': symbol_usage,
-        'most_used_symbols': [s for s, _ in most_used_symbols[:5]]
+        'most_used_symbols': [s for s, _ in most_used_symbols[:5]],
+        'dd_breach_6k_events': breach_events,
+        'dd_breach_6k_periods': n_breach_periods,
+        'dd_breach_6k_pct_time': pct_time_in_breach
     }
 
 
@@ -512,7 +530,11 @@ def optimize_max_positions(
     logger.info(f"   Max Drawdown: ${best['max_drawdown_dollars']:,.2f} ({best['max_drawdown_pct']*100:.2f}%)")
     logger.info(f"   Profit Factor: {best['profit_factor']:.2f}")
     logger.info(f"   Avg Positions: {best['avg_positions']:.2f}")
-    logger.info(f"   Daily Stops Hit: {best['daily_stops_hit']:.0f}\n")
+    logger.info(f"   Daily Stops Hit: {best['daily_stops_hit']:.0f}")
+    logger.info(f"\n⚠️  DRAWDOWN BREACH ANALYSIS ($6000 broker limit):")
+    logger.info(f"   Number of Breach Events: {best['dd_breach_6k_events']:.0f}")
+    logger.info(f"   Total Periods in Breach: {best['dd_breach_6k_periods']:.0f}")
+    logger.info(f"   % Time in Breach: {best['dd_breach_6k_pct_time']:.2f}%\n")
 
     return results_df
 
