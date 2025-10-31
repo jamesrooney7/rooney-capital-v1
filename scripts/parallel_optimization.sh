@@ -64,19 +64,19 @@ optimize_symbol() {
 
     # Run optimization with logging
     python3 research/rf_cpcv_random_then_bo.py \
-        --csv "$csv_path" \
+        --input "$csv_path" \
+        --outdir "$output_dir" \
+        --symbol "$symbol" \
         --screen_method clustered \
         --n_clusters 15 \
         --features_per_cluster 2 \
         --feature_selection_end "$FEATURE_SELECTION_END" \
-        --holdout "$HOLDOUT_DATE" \
-        --n_random 25 \
-        --n_bo 65 \
-        --n_splits 5 \
-        --n_test_folds 2 \
+        --holdout_start "$HOLDOUT_DATE" \
+        --rs_trials 25 \
+        --bo_trials 65 \
+        --folds 5 \
+        --k_test 2 \
         --embargo_days 2 \
-        --output_dir "$output_dir" \
-        --export_all_trials \
         2>&1 | tee "$output_dir/optimization_${symbol}.log"
 
     local exit_code=${PIPESTATUS[0]}
