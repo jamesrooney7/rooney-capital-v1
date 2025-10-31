@@ -7,7 +7,11 @@ simulates portfolio performance with:
 - Intraday overlapping position tracking
 - Max positions constraint (based on actual open positions)
 - Daily stop loss with immediate exit of all positions
-- Proper P&L calculation with exit costs
+- Proper position sizing: Converts trade returns from backtest to actual portfolio P&L
+  based on allocated capital (fixes scaling issue where raw backtest P&L was used)
+
+IMPORTANT: Original backtests used $100k capital. This simulator scales returns based
+on actual portfolio position sizes (e.g., $250k / 3 positions = ~$83k each).
 
 Usage:
     python research/portfolio_simulator.py \
@@ -74,18 +78,28 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
     elif 'selected' in trades_df.columns:
         trades_df = trades_df[trades_df['selected'] == 1].copy()
 
-    # Get P&L in dollars
-    if 'Model_PnL_USD_When_Selected' in trades_df.columns:
+    # Get return percentage for each trade
+    # Option 1: Use Label_Return if available (already a percentage)
+    if 'Label_Return' in trades_df.columns:
+        trades_df['return_pct'] = trades_df['Label_Return']
+    # Option 2: Calculate from Entry/Exit prices
+    elif 'Entry_Price' in trades_df.columns and 'Exit_Price' in trades_df.columns:
+        trades_df['return_pct'] = (trades_df['Exit_Price'] - trades_df['Entry_Price']) / trades_df['Entry_Price']
+    # Option 3: Estimate from P&L (assuming $100k backtest capital)
+    elif 'Model_PnL_USD_When_Selected' in trades_df.columns:
         trades_df['pnl_usd'] = trades_df['Model_PnL_USD_When_Selected']
+        trades_df['return_pct'] = trades_df['pnl_usd'] / 100000.0  # Backtest used $100k
     elif 'pnl_usd_when_selected' in trades_df.columns:
         trades_df['pnl_usd'] = trades_df['pnl_usd_when_selected']
+        trades_df['return_pct'] = trades_df['pnl_usd'] / 100000.0
     elif 'Model_PnL_USD' in trades_df.columns:
         trades_df['pnl_usd'] = trades_df['Model_PnL_USD']
+        trades_df['return_pct'] = trades_df['pnl_usd'] / 100000.0
     else:
-        raise ValueError(f"No P&L column found in {symbol} trades")
+        raise ValueError(f"No return or P&L column found in {symbol} trades")
 
     # Remove trades with missing data
-    trades_df = trades_df.dropna(subset=['entry_time', 'exit_time', 'pnl_usd'])
+    trades_df = trades_df.dropna(subset=['entry_time', 'exit_time', 'return_pct'])
 
     # Sort by entry time
     trades_df = trades_df.sort_values('entry_time').reset_index(drop=True)
@@ -154,7 +168,7 @@ def simulate_portfolio_intraday(
                 'type': 'entry',
                 'symbol': symbol,
                 'trade_id': trade.name,
-                'pnl_usd': trade['pnl_usd'],
+                'return_pct': trade['return_pct'],
                 'exit_time': trade['exit_time']
             })
 
@@ -164,7 +178,7 @@ def simulate_portfolio_intraday(
                 'type': 'exit',
                 'symbol': symbol,
                 'trade_id': trade.name,
-                'pnl_usd': trade['pnl_usd'],
+                'return_pct': trade['return_pct'],
                 'exit_time': trade['exit_time']
             })
 
@@ -173,7 +187,7 @@ def simulate_portfolio_intraday(
 
     # Simulation state
     equity = initial_capital
-    open_positions = {}  # {(symbol, trade_id): {entry_time, pnl_usd, position_size}}
+    open_positions = {}  # {(symbol, trade_id): {entry_time, return_pct, position_size}}
     equity_curve = []
 
     current_day = None
@@ -245,8 +259,9 @@ def simulate_portfolio_intraday(
                     for key in list(open_positions.keys()):
                         if key[0] == symbol_to_close:
                             pos = open_positions[key]
-                            # Realize P&L with slippage penalty
-                            pnl_with_slippage = pos['pnl_usd'] * (1 - exit_slippage)
+                            # Calculate P&L from return % and position size, with slippage penalty
+                            pnl_dollars = pos['position_size'] * pos['return_pct']
+                            pnl_with_slippage = pnl_dollars * (1 - exit_slippage)
                             equity += pnl_with_slippage
                             daily_pnl += pnl_with_slippage
                             del open_positions[key]
@@ -260,7 +275,7 @@ def simulate_portfolio_intraday(
             key = (symbol, event['trade_id'])
             open_positions[key] = {
                 'entry_time': time,
-                'pnl_usd': event['pnl_usd'],
+                'return_pct': event['return_pct'],
                 'position_size': position_value,
                 'exit_time': event['exit_time']
             }
@@ -275,9 +290,10 @@ def simulate_portfolio_intraday(
             if key in open_positions:
                 pos = open_positions[key]
 
-                # Realize P&L (no slippage for normal exits)
-                equity += pos['pnl_usd']
-                daily_pnl += pos['pnl_usd']
+                # Calculate P&L from return % and position size (no slippage for normal exits)
+                pnl_dollars = pos['position_size'] * pos['return_pct']
+                equity += pnl_dollars
+                daily_pnl += pnl_dollars
 
                 # Close position
                 del open_positions[key]
@@ -292,8 +308,9 @@ def simulate_portfolio_intraday(
                     # Immediately close ALL open positions with slippage
                     for open_key in list(open_positions.keys()):
                         open_pos = open_positions[open_key]
-                        # Apply slippage penalty for emergency exit
-                        pnl_with_slippage = open_pos['pnl_usd'] * (1 - exit_slippage)
+                        # Calculate P&L from return % and position size, with slippage penalty
+                        pnl_dollars = open_pos['position_size'] * open_pos['return_pct']
+                        pnl_with_slippage = pnl_dollars * (1 - exit_slippage)
                         equity += pnl_with_slippage
                         daily_pnl += pnl_with_slippage
                         del open_positions[open_key]
