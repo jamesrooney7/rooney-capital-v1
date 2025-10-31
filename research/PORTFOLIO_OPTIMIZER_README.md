@@ -28,9 +28,61 @@ The system reports comprehensive metrics for each optimization run:
 - **Profit Factor**: Gross profits / gross losses
 - **Daily Stops Hit**: Number of times the daily stop loss was triggered
 
+## Quick Start (Recommended)
+
+**Use pre-computed optimization results** (no backtests needed):
+
+```bash
+python research/portfolio_optimizer_simple.py \
+    --min-positions 1 \
+    --max-positions 10
+```
+
+This analyzes your existing optimization results in `src/models/` and provides recommendations in seconds!
+
 ## Components
 
-### 1. Portfolio Constructor (Class-Based)
+### 1. **Simple Optimizer** (⚡ Fast - Uses Pre-Computed Results)
+
+`portfolio_optimizer_simple.py` uses your existing optimization results without re-running backtests.
+
+**When to use:**
+- ✅ Quick analysis and recommendations
+- ✅ You already have optimized models in `src/models/`
+- ✅ You want fast results (seconds vs minutes/hours)
+
+**Usage:**
+```bash
+# Basic usage (auto-discovers all models)
+python research/portfolio_optimizer_simple.py \
+    --min-positions 1 \
+    --max-positions 10
+
+# Specify symbols
+python research/portfolio_optimizer_simple.py \
+    --symbols ES NQ YM RTY GC SI \
+    --output results/portfolio_quick.csv
+
+# Custom capital and stop
+python research/portfolio_optimizer_simple.py \
+    --initial-cash 500000 \
+    --daily-stop-loss 5000
+```
+
+**Arguments:**
+- `--symbols`: Symbols to include (default: auto-discover from src/models/)
+- `--models-dir`: Models directory (default: src/models)
+- `--min-positions`: Minimum positions (default: 1)
+- `--max-positions`: Maximum positions (default: all available)
+- `--initial-cash`: Starting capital (default: 250,000)
+- `--daily-stop-loss`: Daily stop loss (default: 2,500)
+- `--output`: Output CSV file
+
+**Note:** This provides estimates based on individual symbol metrics. For precise results with actual trade-by-trade simulation, use the Full Optimizer.
+
+---
+
+### 2. Portfolio Constructor (Class-Based)
 
 `portfolio_constructor.py` provides a `PortfolioConstructor` class for flexible portfolio management.
 
@@ -73,51 +125,17 @@ results = portfolio.optimize_max_positions(
 )
 ```
 
-### 2. Simplified Position Optimizer
-
-`optimize_portfolio_positions.py` provides a quick way to optimize max_positions using simplified signal extraction.
-
-**Usage:**
-
-```bash
-# Basic usage (auto-discover models)
-python research/optimize_portfolio_positions.py \
-    --start 2023-01-01 \
-    --end 2024-12-31 \
-    --min-positions 1 \
-    --max-positions 10
-
-# Specify custom symbols
-python research/optimize_portfolio_positions.py \
-    --symbols ES NQ YM RTY GC SI \
-    --start 2023-01-01 \
-    --end 2024-12-31 \
-    --output results/portfolio_opt.csv
-
-# Custom parameters
-python research/optimize_portfolio_positions.py \
-    --start 2023-01-01 \
-    --end 2024-12-31 \
-    --initial-capital 500000 \
-    --position-size-pct 0.90 \
-    --commission 1.50
-```
-
-**Arguments:**
-- `--symbols`: Symbols to include (default: auto-discover)
-- `--start`: Start date (YYYY-MM-DD) [required]
-- `--end`: End date (YYYY-MM-DD)
-- `--min-positions`: Minimum max_positions to test (default: 1)
-- `--max-positions`: Maximum max_positions to test (default: all symbols)
-- `--initial-capital`: Starting capital (default: 250,000)
-- `--position-size-pct`: % of capital to allocate (default: 0.95)
-- `--commission`: Commission per side (default: 1.25)
-- `--output`: Output CSV file path
-- `--no-ml`: Disable ML filtering
-
-### 3. Full Portfolio Optimizer (Recommended)
+### 3. Full Portfolio Optimizer (🔬 Precise - Runs Full Backtests)
 
 `portfolio_optimizer_full.py` provides the most accurate optimization by running full Backtrader backtests with the production IbsStrategy.
+
+**When to use:**
+- ✅ Need precise, trade-by-trade simulation
+- ✅ Validating results from Simple Optimizer
+- ✅ Final verification before live trading
+- ⚠️  Slower - requires full backtest runs
+
+**Note:** This re-runs complete backtests for each symbol, which can be time-consuming.
 
 **Usage:**
 
@@ -180,25 +198,34 @@ This creates model files in `src/models/`:
 
 ### Step 2: Run Portfolio Optimization
 
-Choose your preferred optimizer:
+**Recommended Workflow:**
 
-**Option A: Full Optimizer (Most Accurate)**
+**Step 2a: Quick Analysis (Simple Optimizer)**
+
+Get instant recommendations using pre-computed results:
+
+```bash
+python research/portfolio_optimizer_simple.py \
+    --min-positions 1 \
+    --max-positions 10 \
+    --output results/portfolio_quick.csv
+```
+
+This completes in seconds and gives you a good starting point.
+
+**Step 2b: Validation (Optional - Full Optimizer)**
+
+If you want precise results with actual trade simulation:
 
 ```bash
 python research/portfolio_optimizer_full.py \
     --start 2023-01-01 \
     --end 2024-12-31 \
-    --output results/portfolio_opt_full.csv
+    --symbols ES NQ YM RTY GC SI \  # Use top symbols from Step 2a
+    --output results/portfolio_full.csv
 ```
 
-**Option B: Simplified Optimizer (Faster)**
-
-```bash
-python research/optimize_portfolio_positions.py \
-    --start 2023-01-01 \
-    --end 2024-12-31 \
-    --output results/portfolio_opt_simple.csv
-```
+This runs full backtests and takes longer but provides exact results.
 
 ### Step 3: Analyze Results
 
