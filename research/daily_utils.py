@@ -21,8 +21,19 @@ def ensure_daily_index(series: pd.Series, dates: pd.Series = None) -> pd.Series:
     if series.empty:
         return pd.Series(dtype=float)
 
-    # Check if series already has a DatetimeIndex (already aggregated)
-    if isinstance(series.index, pd.DatetimeIndex):
+    # Check if series already has a DatetimeIndex or datetime-like index (already aggregated)
+    is_datetime_index = isinstance(series.index, pd.DatetimeIndex)
+    is_datetime_like = False
+
+    if not is_datetime_index and len(series.index) > 0:
+        # Check if index contains datetime-like objects
+        try:
+            pd.to_datetime(series.index)
+            is_datetime_like = True
+        except (ValueError, TypeError):
+            is_datetime_like = False
+
+    if is_datetime_index or is_datetime_like:
         # Already daily-aggregated, just ensure proper format
         result = series.copy()
         result.index = pd.to_datetime(result.index)
@@ -34,7 +45,13 @@ def ensure_daily_index(series: pd.Series, dates: pd.Series = None) -> pd.Series:
 
     # Ensure series and dates have matching indices
     # Use series' index to align dates
-    aligned_dates = dates.loc[series.index]
+    try:
+        aligned_dates = dates.loc[series.index]
+    except KeyError:
+        # If indices don't match, try reindexing dates to match series
+        aligned_dates = dates.reindex(series.index)
+        if aligned_dates.isna().all():
+            raise ValueError("Cannot align dates with series index")
 
     # Create DataFrame with aligned dates and values
     df = pd.DataFrame({
