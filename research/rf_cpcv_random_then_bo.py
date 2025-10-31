@@ -359,14 +359,33 @@ def _clustered_feature_selection(
     """
     logger.info(f"Starting clustered feature selection: {len(X.columns)} features → {n_clusters} clusters")
 
+    # Step 0: Clean data - remove problematic features
+    logger.info("  Step 0/4: Cleaning features...")
+    # Remove features with zero variance
+    variances = X.var()
+    valid_features = variances[variances > 1e-10].index.tolist()
+    X_clean = X[valid_features].copy()
+
+    # Replace any inf/nan with 0
+    X_clean = X_clean.replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    logger.info(f"   Removed {len(X.columns) - len(valid_features)} zero-variance features, {len(valid_features)} remaining")
+
     # Step 1: Calculate correlation matrix
     logger.info("  Step 1/4: Calculating correlation matrix...")
-    corr_matrix = X.corr().abs()  # Absolute correlation
+    corr_matrix = X_clean.corr().abs()  # Absolute correlation
+
+    # Replace any NaN correlations with 0 (uncorrelated)
+    corr_matrix = corr_matrix.fillna(0)
 
     # Step 2: Hierarchical clustering based on correlation distance
     logger.info("  Step 2/4: Performing hierarchical clustering...")
     # Distance = 1 - correlation (higher correlation = lower distance)
     distance_matrix = 1 - corr_matrix
+
+    # Ensure all values are finite
+    distance_matrix = distance_matrix.clip(lower=0, upper=2)  # Distance should be in [0, 2]
+
     # Convert to condensed distance matrix for linkage
     condensed_dist = squareform(distance_matrix.values, checks=False)
     # Hierarchical clustering
@@ -374,9 +393,9 @@ def _clustered_feature_selection(
     # Cut tree to get clusters
     cluster_labels = fcluster(linkage_matrix, n_clusters, criterion='maxclust')
 
-    # Group features by cluster
+    # Group features by cluster (use X_clean columns, not original X)
     clusters = {}
-    for feature, cluster_id in zip(X.columns, cluster_labels):
+    for feature, cluster_id in zip(X_clean.columns, cluster_labels):
         if cluster_id not in clusters:
             clusters[cluster_id] = []
         clusters[cluster_id].append(feature)
@@ -401,7 +420,7 @@ def _clustered_feature_selection(
             continue
 
         # Get permutation importance for features in this cluster
-        X_cluster = X[cluster_features]
+        X_cluster = X_clean[cluster_features]
 
         try:
             rf.fit(X_cluster, y)
