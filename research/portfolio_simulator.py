@@ -1,33 +1,29 @@
 #!/usr/bin/env python3
 """
-Portfolio Simulator Using Pre-Computed Trade Data
+Portfolio Simulator Using Intraday Trade Data
 
-This script loads the pre-computed, ML-filtered trade data from optimization
-results and simulates portfolio performance with:
-- Max positions constraint
-- Daily stop loss ($2,500 default)
-- Position sizing across symbols
+This script loads detailed trade-level data with entry/exit timestamps and
+simulates portfolio performance with:
+- Intraday overlapping position tracking
+- Max positions constraint (based on actual open positions)
+- Daily stop loss with immediate exit of all positions
+- Proper P&L calculation with exit costs
 
 Usage:
-    # Simulate portfolio with pre-computed trade data
     python research/portfolio_simulator.py \
         --results-dir results \
         --min-positions 1 \
         --max-positions 10
-
-    # Specify custom symbols
-    python research/portfolio_simulator.py \
-        --symbols ES NQ YM RTY GC SI \
-        --max-positions 6
 """
 
 import argparse
 import json
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import numpy as np
 import logging
+from datetime import datetime, timedelta
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,11 +36,10 @@ def discover_available_symbols(results_dir: Path) -> List[str]:
     """Discover symbols with available trade data."""
     symbols = []
 
-    # Look for {SYMBOL}_optimization directories
     for item in results_dir.iterdir():
         if item.is_dir() and item.name.endswith('_optimization'):
             symbol = item.name.replace('_optimization', '')
-            trades_file = item / f"{symbol}_trades.csv"
+            trades_file = item / f"{symbol}_rf_best_trades.csv"
 
             if trades_file.exists():
                 symbols.append(symbol)
@@ -54,21 +49,46 @@ def discover_available_symbols(results_dir: Path) -> List[str]:
 
 def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, dict]:
     """
-    Load daily trade data for a symbol.
+    Load detailed trade data with entry/exit timestamps.
 
     Returns:
-        daily_returns: DataFrame with Date, Symbol, Return columns
+        trades_df: DataFrame with Date/Time, Exit Date/Time, PnL, etc.
         metadata: Dict with symbol optimization metrics
     """
     opt_dir = results_dir / f"{symbol}_optimization"
 
-    # Load daily returns
-    trades_file = opt_dir / f"{symbol}_trades.csv"
+    # Load detailed trades
+    trades_file = opt_dir / f"{symbol}_rf_best_trades.csv"
     if not trades_file.exists():
-        raise FileNotFoundError(f"Trade data not found: {trades_file}")
+        raise FileNotFoundError(f"Detailed trade data not found: {trades_file}")
 
-    daily_df = pd.read_csv(trades_file)
-    daily_df['Date'] = pd.to_datetime(daily_df['Date'])
+    trades_df = pd.read_csv(trades_file)
+
+    # Parse timestamps
+    trades_df['entry_time'] = pd.to_datetime(trades_df['Date/Time'])
+    trades_df['exit_time'] = pd.to_datetime(trades_df['Exit Date/Time'])
+
+    # Only keep trades that were selected by ML model
+    if 'Model_Selected' in trades_df.columns:
+        trades_df = trades_df[trades_df['Model_Selected'] == 1].copy()
+    elif 'selected' in trades_df.columns:
+        trades_df = trades_df[trades_df['selected'] == 1].copy()
+
+    # Get P&L in dollars
+    if 'Model_PnL_USD_When_Selected' in trades_df.columns:
+        trades_df['pnl_usd'] = trades_df['Model_PnL_USD_When_Selected']
+    elif 'pnl_usd_when_selected' in trades_df.columns:
+        trades_df['pnl_usd'] = trades_df['pnl_usd_when_selected']
+    elif 'Model_PnL_USD' in trades_df.columns:
+        trades_df['pnl_usd'] = trades_df['Model_PnL_USD']
+    else:
+        raise ValueError(f"No P&L column found in {symbol} trades")
+
+    # Remove trades with missing data
+    trades_df = trades_df.dropna(subset=['entry_time', 'exit_time', 'pnl_usd'])
+
+    # Sort by entry time
+    trades_df = trades_df.sort_values('entry_time').reset_index(drop=True)
 
     # Load metadata
     metadata = {}
@@ -77,43 +97,43 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
         with open(summary_file, 'r') as f:
             metadata = json.load(f)
 
-    # Also try best.json
     best_file = opt_dir / "best.json"
     if best_file.exists():
         with open(best_file, 'r') as f:
             best_meta = json.load(f)
             metadata.update(best_meta)
 
-    return daily_df, metadata
+    logger.info(f"  {symbol}: Loaded {len(trades_df)} ML-filtered trades")
+
+    return trades_df, metadata
 
 
-def simulate_portfolio(
-    symbol_returns: Dict[str, pd.DataFrame],
+def simulate_portfolio_intraday(
+    symbol_trades: Dict[str, pd.DataFrame],
     symbol_metadata: Dict[str, dict],
     max_positions: int,
     initial_capital: float = 250000.0,
     daily_stop_loss: float = 2500.0,
+    exit_slippage: float = 0.0002,
     ranking_method: str = 'sharpe'
-) -> Tuple[pd.Series, Dict]:
+) -> Tuple[pd.DataFrame, Dict]:
     """
-    Simulate portfolio with DYNAMIC position selection and daily stop loss.
-
-    Key: Positions are selected day-by-day based on which symbols have active
-    trades. This prevents look-ahead bias and simulates real-time trading.
+    Simulate portfolio with intraday position tracking and daily stop loss.
 
     Parameters:
-        symbol_returns: {symbol: daily_returns_df}
+        symbol_trades: {symbol: trades_df with entry/exit times}
         symbol_metadata: {symbol: metadata_dict}
-        max_positions: Maximum positions to hold simultaneously
+        max_positions: Maximum positions open simultaneously
         initial_capital: Starting capital
         daily_stop_loss: Daily loss limit in dollars
-        ranking_method: How to rank symbols ('sharpe', 'profit_factor')
+        exit_slippage: Additional slippage when forced to exit (0.02%)
+        ranking_method: How to rank symbols when limiting positions
 
     Returns:
-        equity_curve: Series of portfolio equity
+        equity_df: DataFrame with timestamp, equity, positions, etc.
         metrics: Performance metrics dict
     """
-    # Create ranking scores for symbols (used as tiebreaker when >max_positions signal)
+    # Create ranking scores
     symbol_scores = {}
     for symbol in symbol_metadata.keys():
         if ranking_method == 'sharpe':
@@ -123,169 +143,203 @@ def simulate_portfolio(
         else:
             symbol_scores[symbol] = 0
 
-    # Get all unique dates across all symbols
-    all_dates = set()
-    for symbol in symbol_returns.keys():
-        all_dates.update(symbol_returns[symbol]['Date'].tolist())
+    # Get all trade events (entries and exits) sorted by time
+    all_events = []
 
-    all_dates = sorted(all_dates)
+    for symbol, trades_df in symbol_trades.items():
+        for _, trade in trades_df.iterrows():
+            # Entry event
+            all_events.append({
+                'time': trade['entry_time'],
+                'type': 'entry',
+                'symbol': symbol,
+                'trade_id': trade.name,
+                'pnl_usd': trade['pnl_usd'],
+                'exit_time': trade['exit_time']
+            })
 
-    # Create portfolio time series
-    portfolio_data = []
+            # Exit event
+            all_events.append({
+                'time': trade['exit_time'],
+                'type': 'exit',
+                'symbol': symbol,
+                'trade_id': trade.name,
+                'pnl_usd': trade['pnl_usd'],
+                'exit_time': trade['exit_time']
+            })
+
+    # Sort all events by time
+    all_events_df = pd.DataFrame(all_events).sort_values('time').reset_index(drop=True)
+
+    # Simulation state
     equity = initial_capital
+    open_positions = {}  # {(symbol, trade_id): {entry_time, pnl_usd, position_size}}
+    equity_curve = []
+
     current_day = None
     daily_pnl = 0.0
     stopped_out = False
     stop_count = 0
 
-    # Track which symbols are selected each day (for reporting)
-    daily_symbol_counts = {}
+    symbol_usage = {}
+    position_counts = []
 
-    for date in all_dates:
+    logger.info(f"\n  Simulating {len(all_events_df)} trade events...")
+
+    for _, event in all_events_df.iterrows():
+        time = event['time']
+        day = time.date()
+
         # Check if new trading day
-        day = date.date() if hasattr(date, 'date') else date
-
         if current_day is None or day != current_day:
+            if stopped_out:
+                logger.debug(f"    Day {current_day}: Stopped out, Daily P&L: ${daily_pnl:,.2f}")
+
             current_day = day
             daily_pnl = 0.0
             stopped_out = False
 
-        # If stopped out for the day, skip trading
+        # If stopped out, only process exits (close positions)
         if stopped_out:
-            portfolio_data.append({
-                'Date': date,
-                'Equity': equity,
-                'Daily_PnL': daily_pnl,
-                'Stopped_Out': 1,
-                'N_Positions': 0
+            if event['type'] == 'exit':
+                key = (event['symbol'], event['trade_id'])
+                if key in open_positions:
+                    # Close position (already counted the P&L when we stopped out)
+                    del open_positions[key]
+
+            # Record state
+            equity_curve.append({
+                'time': time,
+                'equity': equity,
+                'n_positions': len(open_positions),
+                'daily_pnl': daily_pnl,
+                'stopped_out': 1
             })
             continue
 
-        # DYNAMIC SELECTION: Find all symbols with active trades TODAY
-        symbols_with_trades = []
-        symbol_returns_today = {}
+        # Process entry event
+        if event['type'] == 'entry':
+            symbol = event['symbol']
 
-        for symbol in symbol_returns.keys():
-            symbol_df = symbol_returns[symbol]
-            date_rows = symbol_df[symbol_df['Date'] == date]
+            # Check if we're at max positions
+            if len(open_positions) >= max_positions:
+                # Need to rank and potentially reject this entry
+                # Get all symbols with open positions + this new one
+                active_symbols = set(s for s, _ in open_positions.keys())
+                candidate_symbols = active_symbols | {symbol}
 
-            if len(date_rows) > 0:
-                ret = date_rows['Return'].iloc[0]
-                # Only include if there's an actual trade (non-zero return)
-                if pd.notna(ret) and ret != 0:
-                    symbols_with_trades.append(symbol)
-                    symbol_returns_today[symbol] = ret
+                # Rank by score
+                ranked = sorted(candidate_symbols, key=lambda s: symbol_scores.get(s, 0), reverse=True)
 
-        # If more than max_positions have signals, rank and select top N
-        if len(symbols_with_trades) > max_positions:
-            # Sort by ranking score (Sharpe or PF)
-            ranked = sorted(
-                symbols_with_trades,
-                key=lambda s: symbol_scores.get(s, 0),
-                reverse=True
-            )
-            selected_today = ranked[:max_positions]
-        else:
-            selected_today = symbols_with_trades
+                # If this symbol isn't in top N, reject entry
+                if symbol not in ranked[:max_positions]:
+                    continue  # Skip this trade
 
-        # Track symbol usage
-        for sym in selected_today:
-            daily_symbol_counts[sym] = daily_symbol_counts.get(sym, 0) + 1
+                # If we need to make room, close lowest-ranked position
+                if len(open_positions) >= max_positions:
+                    # Find lowest ranked symbol currently open
+                    current_symbols_ranked = [s for s in ranked if s in active_symbols]
+                    symbol_to_close = current_symbols_ranked[-1]
 
-        # Calculate portfolio return
-        if not selected_today:
-            portfolio_data.append({
-                'Date': date,
-                'Equity': equity,
-                'Daily_PnL': daily_pnl,
-                'Stopped_Out': 0,
-                'N_Positions': 0
-            })
-            continue
+                    # Find one position of this symbol to close
+                    for key in list(open_positions.keys()):
+                        if key[0] == symbol_to_close:
+                            pos = open_positions[key]
+                            # Realize P&L with slippage penalty
+                            pnl_with_slippage = pos['pnl_usd'] * (1 - exit_slippage)
+                            equity += pnl_with_slippage
+                            daily_pnl += pnl_with_slippage
+                            del open_positions[key]
+                            break
 
-        # Equal weight across selected positions
-        n_positions = len(selected_today)
-        position_value = equity / n_positions
+            # Calculate position size (equal weight)
+            n_positions = len(open_positions) + 1
+            position_value = equity / n_positions
 
-        period_pnl = 0.0
-        for symbol in selected_today:
-            symbol_return = symbol_returns_today[symbol]
-            position_pnl = position_value * symbol_return
-            period_pnl += position_pnl
+            # Open position
+            key = (symbol, event['trade_id'])
+            open_positions[key] = {
+                'entry_time': time,
+                'pnl_usd': event['pnl_usd'],
+                'position_size': position_value,
+                'exit_time': event['exit_time']
+            }
 
-        # Update daily P&L
-        daily_pnl += period_pnl
+            # Track usage
+            symbol_usage[symbol] = symbol_usage.get(symbol, 0) + 1
 
-        # Check for daily stop loss
-        if daily_pnl <= -daily_stop_loss:
-            stopped_out = True
-            stop_count += 1
-            logger.debug(f"  Daily stop hit on {date}: ${daily_pnl:,.2f}")
+        # Process exit event
+        elif event['type'] == 'exit':
+            key = (event['symbol'], event['trade_id'])
 
-            portfolio_data.append({
-                'Date': date,
-                'Equity': equity,
-                'Daily_PnL': daily_pnl,
-                'Stopped_Out': 1,
-                'N_Positions': n_positions
-            })
-            continue
+            if key in open_positions:
+                pos = open_positions[key]
 
-        # Update equity
-        equity += period_pnl
+                # Realize P&L (no slippage for normal exits)
+                equity += pos['pnl_usd']
+                daily_pnl += pos['pnl_usd']
 
-        portfolio_data.append({
-            'Date': date,
-            'Equity': equity,
-            'Daily_PnL': period_pnl,
-            'Stopped_Out': 0,
-            'N_Positions': n_positions
+                # Close position
+                del open_positions[key]
+
+                # Check for daily stop loss
+                if daily_pnl <= -daily_stop_loss:
+                    stopped_out = True
+                    stop_count += 1
+
+                    logger.debug(f"    STOP LOSS HIT at {time}: Daily P&L: ${daily_pnl:,.2f}")
+
+                    # Immediately close ALL open positions with slippage
+                    for open_key in list(open_positions.keys()):
+                        open_pos = open_positions[open_key]
+                        # Apply slippage penalty for emergency exit
+                        pnl_with_slippage = open_pos['pnl_usd'] * (1 - exit_slippage)
+                        equity += pnl_with_slippage
+                        daily_pnl += pnl_with_slippage
+                        del open_positions[open_key]
+
+                    logger.debug(f"    Closed all positions. Final daily P&L: ${daily_pnl:,.2f}")
+
+        # Record state
+        equity_curve.append({
+            'time': time,
+            'equity': equity,
+            'n_positions': len(open_positions),
+            'daily_pnl': daily_pnl,
+            'stopped_out': 1 if stopped_out else 0
         })
 
+        position_counts.append(len(open_positions))
+
     # Create DataFrame
-    portfolio_df = pd.DataFrame(portfolio_data)
+    equity_df = pd.DataFrame(equity_curve)
 
-    if portfolio_df.empty:
-        return pd.Series(dtype=float), {}
-
-    equity_curve = portfolio_df.set_index('Date')['Equity']
+    if equity_df.empty:
+        return pd.DataFrame(), {}
 
     # Calculate metrics
     metrics = calculate_metrics(
-        equity_curve,
+        equity_df,
         initial_capital,
-        stop_count
+        stop_count,
+        position_counts,
+        symbol_usage,
+        len(symbol_trades)
     )
 
-    # Add symbol usage statistics
-    total_days_traded = sum(daily_symbol_counts.values())
-    most_used_symbols = sorted(
-        daily_symbol_counts.items(),
-        key=lambda x: x[1],
-        reverse=True
-    )
-
-    metrics['symbol_usage'] = daily_symbol_counts
-    metrics['most_used_symbols'] = [s for s, _ in most_used_symbols[:5]]
-    metrics['n_symbols_total'] = len(symbol_returns)
-    metrics['n_symbols_used'] = len(daily_symbol_counts)
-
-    # Log symbol usage
-    logger.info(f"  Symbol usage (days traded):")
-    for symbol, days in most_used_symbols[:10]:
-        pct = (days / len(all_dates)) * 100 if len(all_dates) > 0 else 0
-        logger.info(f"    {symbol}: {days} days ({pct:.1f}%)")
-
-    return equity_curve, metrics
+    return equity_df, metrics
 
 
 def calculate_metrics(
-    equity_curve: pd.Series,
+    equity_df: pd.DataFrame,
     initial_capital: float,
-    stop_count: int
+    stop_count: int,
+    position_counts: List[int],
+    symbol_usage: Dict[str, int],
+    n_symbols_total: int
 ) -> Dict:
     """Calculate portfolio performance metrics."""
-    if len(equity_curve) < 2:
+    if len(equity_df) < 2:
         return {
             'total_return_dollars': 0,
             'total_return_pct': 0,
@@ -294,25 +348,45 @@ def calculate_metrics(
             'max_drawdown_dollars': 0,
             'max_drawdown_pct': 0,
             'profit_factor': 0,
-            'daily_stops_hit': 0
+            'daily_stops_hit': 0,
+            'avg_positions': 0,
+            'n_symbols_used': 0,
+            'n_symbols_total': n_symbols_total
         }
 
-    # Calculate daily returns
-    daily_returns = equity_curve.pct_change().fillna(0)
+    # Get equity curve
+    equity_curve = equity_df['equity']
+
+    # Calculate returns between events
+    returns = equity_curve.pct_change().fillna(0)
 
     # Total return
     final_equity = equity_curve.iloc[-1]
     total_return_dollars = final_equity - initial_capital
     total_return_pct = total_return_dollars / initial_capital
 
-    # Annualized metrics
-    n_days = len(equity_curve)
-    years = n_days / 252
+    # Annualized metrics (estimate based on time span)
+    time_span_days = (equity_df['time'].iloc[-1] - equity_df['time'].iloc[0]).days
+    years = time_span_days / 365.25
 
     cagr = (1 + total_return_pct) ** (1 / years) - 1 if years > 0 else 0
 
-    annualized_vol = daily_returns.std() * np.sqrt(252)
+    # Approximate volatility (this is rough with irregular timestamps)
+    # Resample to daily for better vol estimate
+    daily_equity = equity_df.set_index('time')['equity'].resample('D').last().ffill()
+    daily_returns = daily_equity.pct_change().dropna()
+
+    annualized_vol = daily_returns.std() * np.sqrt(252) if len(daily_returns) > 1 else 0
     sharpe_ratio = cagr / annualized_vol if annualized_vol > 0 else 0
+
+    # Profit factor
+    positive_returns = returns[returns > 0]
+    negative_returns = returns[returns < 0]
+
+    gross_profits = (positive_returns * initial_capital).sum()
+    gross_losses = abs((negative_returns * initial_capital).sum())
+
+    profit_factor = gross_profits / gross_losses if gross_losses > 0 else np.inf
 
     # Max drawdown
     cummax = equity_curve.expanding().max()
@@ -322,14 +396,11 @@ def calculate_metrics(
     max_drawdown_dollars = drawdown.min()
     max_drawdown_pct = drawdown_pct.min()
 
-    # Profit factor
-    positive_returns = daily_returns[daily_returns > 0]
-    negative_returns = daily_returns[daily_returns < 0]
+    # Average positions
+    avg_positions = np.mean(position_counts) if position_counts else 0
 
-    gross_profits = (positive_returns * initial_capital).sum()
-    gross_losses = abs((negative_returns * initial_capital).sum())
-
-    profit_factor = gross_profits / gross_losses if gross_losses > 0 else np.inf
+    # Symbol usage
+    most_used_symbols = sorted(symbol_usage.items(), key=lambda x: x[1], reverse=True)
 
     return {
         'total_return_dollars': total_return_dollars,
@@ -342,29 +413,34 @@ def calculate_metrics(
         'profit_factor': profit_factor,
         'gross_profits': gross_profits,
         'gross_losses': gross_losses,
-        'n_days': n_days,
-        'daily_stops_hit': stop_count
+        'daily_stops_hit': stop_count,
+        'avg_positions': avg_positions,
+        'n_symbols_used': len(symbol_usage),
+        'n_symbols_total': n_symbols_total,
+        'symbol_usage': symbol_usage,
+        'most_used_symbols': [s for s, _ in most_used_symbols[:5]]
     }
 
 
 def optimize_max_positions(
-    symbol_returns: Dict[str, pd.DataFrame],
+    symbol_trades: Dict[str, pd.DataFrame],
     symbol_metadata: Dict[str, dict],
     min_positions: int,
     max_positions: int,
     initial_capital: float,
     daily_stop_loss: float,
+    exit_slippage: float,
     ranking_method: str = 'sharpe'
 ) -> pd.DataFrame:
     """Optimize max_positions parameter."""
-    n_symbols = len(symbol_returns)
+    n_symbols = len(symbol_trades)
     max_pos = min(max_positions, n_symbols)
 
     logger.info(f"\n{'='*90}")
-    logger.info(f"PORTFOLIO OPTIMIZATION - DYNAMIC POSITION SELECTION")
-    logger.info(f"Using pre-computed ML-filtered trade data")
+    logger.info(f"PORTFOLIO OPTIMIZATION - INTRADAY POSITION TRACKING")
+    logger.info(f"Using detailed trade data with entry/exit timestamps")
     logger.info(f"Initial Capital: ${initial_capital:,.0f} | Daily Stop Loss: ${daily_stop_loss:,.0f}")
-    logger.info(f"Positions selected DAILY based on active signals (prevents look-ahead bias)")
+    logger.info(f"Tracks ACTUAL overlapping positions (prevents look-ahead bias)")
     logger.info(f"{'='*90}\n")
 
     results = []
@@ -372,12 +448,13 @@ def optimize_max_positions(
     for max_pos_val in range(min_positions, max_pos + 1):
         logger.info(f"Testing max_positions = {max_pos_val}")
 
-        equity, metrics = simulate_portfolio(
-            symbol_returns,
+        equity_df, metrics = simulate_portfolio_intraday(
+            symbol_trades,
             symbol_metadata,
             max_pos_val,
             initial_capital=initial_capital,
             daily_stop_loss=daily_stop_loss,
+            exit_slippage=exit_slippage,
             ranking_method=ranking_method
         )
 
@@ -394,7 +471,7 @@ def optimize_max_positions(
     # Create results DataFrame
     results_df = pd.DataFrame(results)
 
-    # Drop dict/list columns for CSV compatibility
+    # Drop dict/list columns for CSV
     columns_to_drop = ['symbol_usage', 'most_used_symbols']
     for col in columns_to_drop:
         if col in results_df.columns:
@@ -421,7 +498,7 @@ def optimize_max_positions(
 
     print("=" * 90)
 
-    # Best result (get from original results list to access all metrics)
+    # Best result
     best_idx = results_df.index[0]
     best = results[best_idx]
 
@@ -434,6 +511,7 @@ def optimize_max_positions(
     logger.info(f"   Total Return: ${best['total_return_dollars']:,.2f}")
     logger.info(f"   Max Drawdown: ${best['max_drawdown_dollars']:,.2f} ({best['max_drawdown_pct']*100:.2f}%)")
     logger.info(f"   Profit Factor: {best['profit_factor']:.2f}")
+    logger.info(f"   Avg Positions: {best['avg_positions']:.2f}")
     logger.info(f"   Daily Stops Hit: {best['daily_stops_hit']:.0f}\n")
 
     return results_df
@@ -441,7 +519,7 @@ def optimize_max_positions(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Portfolio simulator using pre-computed trade data'
+        description='Portfolio simulator using intraday trade data'
     )
 
     parser.add_argument('--symbols', nargs='+', help='Symbols to include')
@@ -451,6 +529,8 @@ def main():
     parser.add_argument('--max-positions', type=int, default=None)
     parser.add_argument('--initial-cash', type=float, default=250000.0)
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
+    parser.add_argument('--exit-slippage', type=float, default=0.0002,
+                       help='Slippage when forced to exit (default: 0.02%%)')
     parser.add_argument('--ranking-method', type=str, default='sharpe',
                        choices=['sharpe', 'profit_factor'],
                        help='How to rank symbols')
@@ -476,44 +556,38 @@ def main():
         return 1
 
     # Load trade data
-    logger.info("\nLoading pre-computed trade data...")
+    logger.info("\nLoading detailed trade data with entry/exit timestamps...")
     logger.info("=" * 80)
 
-    symbol_returns = {}
+    symbol_trades = {}
     symbol_metadata = {}
 
     for symbol in symbols:
         try:
-            daily_df, metadata = load_symbol_trades(results_dir, symbol)
-            symbol_returns[symbol] = daily_df
+            trades_df, metadata = load_symbol_trades(results_dir, symbol)
+            symbol_trades[symbol] = trades_df
             symbol_metadata[symbol] = metadata
-
-            sharpe = metadata.get('Sharpe_OOS_CPCV', 0)
-            pf = metadata.get('Profit_Factor', 0)
-            trades = metadata.get('Trades_Selected', 0)
-
-            logger.info(f"{symbol:6s} | Sharpe: {sharpe:6.3f} | PF: {pf:6.2f} | Trades: {trades:4d}")
-
         except Exception as e:
             logger.warning(f"Failed to load {symbol}: {e}")
 
     logger.info("=" * 80)
-    logger.info(f"✅ Loaded {len(symbol_returns)} symbols\n")
+    logger.info(f"✅ Loaded {len(symbol_trades)} symbols\n")
 
-    if not symbol_returns:
+    if not symbol_trades:
         logger.error("No trade data loaded")
         return 1
 
     # Run optimization
-    max_pos = args.max_positions or len(symbol_returns)
+    max_pos = args.max_positions or len(symbol_trades)
 
     results_df = optimize_max_positions(
-        symbol_returns,
+        symbol_trades,
         symbol_metadata,
         args.min_positions,
         max_pos,
         args.initial_cash,
         args.daily_stop_loss,
+        args.exit_slippage,
         args.ranking_method
     )
 
