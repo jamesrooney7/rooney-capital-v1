@@ -8,3 +8,6 @@ joblib
 scikit-learn
 pandas
 pyyaml
+optuna
+scipy
+numpy
