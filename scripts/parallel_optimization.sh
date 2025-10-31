@@ -63,7 +63,7 @@ optimize_symbol() {
     mkdir -p "$output_dir"
 
     # Run optimization with logging
-    python research/rf_cpcv_random_then_bo.py \
+    python3 research/rf_cpcv_random_then_bo.py \
         --csv "$csv_path" \
         --screen_method clustered \
         --n_clusters 15 \
