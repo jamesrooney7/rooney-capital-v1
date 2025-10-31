@@ -10,19 +10,26 @@ def build_normalised_feature_matrix(Xy: pd.DataFrame) -> pd.DataFrame:
     """
     Build normalized feature matrix from raw features.
 
-    Normalizes all numeric columns except the target variables and metadata columns.
+    Extracts and normalizes only feature columns, excluding target variables and metadata.
 
     Args:
         Xy: DataFrame with features and target variables
 
     Returns:
-        DataFrame with normalized features
+        DataFrame with ONLY normalized feature columns (excludes targets and metadata)
     """
-    # Columns to exclude from normalization
+    # Columns to EXCLUDE (these are NOT features)
     exclude_cols = [
+        # Metadata
         'Date/Time', 'Exit Date/Time', 'Date', 'Exit_Date',
+
+        # Price information (look-ahead bias)
         'Entry_Price', 'Exit_Price',
+
+        # Target variables (what we're predicting)
         'y_return', 'y_binary', 'y_pnl_usd', 'y_pnl_gross',
+
+        # Other metadata
         'Symbol', 'Trade_ID'
     ]
 
@@ -31,17 +38,20 @@ def build_normalised_feature_matrix(Xy: pd.DataFrame) -> pd.DataFrame:
                    if col not in exclude_cols and pd.api.types.is_numeric_dtype(Xy[col])]
 
     if not feature_cols:
-        return Xy
+        return pd.DataFrame()
 
-    # Create copy
-    result = Xy.copy()
+    # Extract ONLY features (not the whole DataFrame!)
+    X_features = Xy[feature_cols].copy()
 
     # Normalize features
     scaler = StandardScaler()
-    result[feature_cols] = scaler.fit_transform(Xy[feature_cols].fillna(0))
+    X_normalized = pd.DataFrame(
+        scaler.fit_transform(X_features.fillna(0)),
+        index=X_features.index,
+        columns=X_features.columns
+    )
 
     # Replace any inf or extreme values
-    result[feature_cols] = result[feature_cols].replace([np.inf, -np.inf], np.nan)
-    result[feature_cols] = result[feature_cols].fillna(0)
+    X_normalized = X_normalized.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    return result
+    return X_normalized
