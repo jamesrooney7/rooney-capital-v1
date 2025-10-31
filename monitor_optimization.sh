@@ -9,8 +9,17 @@ while true; do
     if [ ! -d "$dir" ]; then continue; fi
 
     symbol=$(basename "$dir" | sed 's/_optimization//')
+
+    # Get counts, ensure they're single integers
     rs_count=$(grep -c "^\[RS" "$dir/optimization_${symbol}.log" 2>/dev/null || echo "0")
     bo_count=$(grep -c "^\[BO" "$dir/optimization_${symbol}.log" 2>/dev/null || echo "0")
+
+    # Strip any whitespace/newlines and default to 0 if empty
+    rs_count=$(echo "$rs_count" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
+    bo_count=$(echo "$bo_count" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
+    rs_count=${rs_count:-0}
+    bo_count=${bo_count:-0}
+
     total=$((rs_count + bo_count))
 
     # Get best Sharpe
