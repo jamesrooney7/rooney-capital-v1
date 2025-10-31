@@ -653,6 +653,7 @@ class IbsStrategy(bt.Strategy):
     params = dict(
         size=1,
         symbol="ES",
+        portfolio_coordinator=None,  # Portfolio-wide position/risk coordinator
         filter_columns=None,
         ml_model=None,
         ml_features=None,
@@ -5859,6 +5860,13 @@ class IbsStrategy(bt.Strategy):
 
                         # Only place order if ML filter passes
                         if ml_passed:
+                            # Check portfolio coordinator before entry
+                            if self.p.portfolio_coordinator:
+                                allowed, reason = self.p.portfolio_coordinator.can_open_position(self.p.symbol)
+                                if not allowed:
+                                    logger.info(f"⛔ {self.p.symbol} ENTRY BLOCKED BY PORTFOLIO: {reason}")
+                                    return
+
                             logger.debug(f"🔵 {self.p.symbol} PLACING BUY ORDER | Size: {self.p.size} | Bar: {len(self.hourly)}")
                             # Use Market order for immediate execution at bar close price
                             order = self.buy(
@@ -6053,6 +6061,15 @@ class IbsStrategy(bt.Strategy):
                         f"Exit checks will be skipped on this bar"
                     )
                     self.current_signal = None
+
+                    # Register position opened with portfolio coordinator
+                    if self.p.portfolio_coordinator:
+                        self.p.portfolio_coordinator.register_position_opened(
+                            symbol=self.p.symbol,
+                            size=abs(order.executed.size),
+                            entry_price=order.executed.price,
+                            entry_time=bt.num2date(order.executed.dt)
+                        )
                 else:
                     self.pending_exit = {
                         "price": order.executed.price,
@@ -6079,6 +6096,15 @@ class IbsStrategy(bt.Strategy):
             # Always calculate P&L with point_value multiplier
             # trade.pnl is the price difference in points
             pnl_usd = trade.pnl * pv - commission_usd
+
+            # Register position closed with portfolio coordinator
+            if self.p.portfolio_coordinator:
+                self.p.portfolio_coordinator.register_position_closed(
+                    symbol=self.p.symbol,
+                    pnl=pnl_usd,
+                    exit_time=bt.num2date(trade.dtclose)
+                )
+
             sma200_ready = self.sma200 is not None and len(self.sma200) > 0
             if sma200_ready:
                 dclose = timeframed_line_val(
