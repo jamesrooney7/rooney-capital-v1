@@ -96,12 +96,15 @@ def simulate_portfolio(
     ranking_method: str = 'sharpe'
 ) -> Tuple[pd.Series, Dict]:
     """
-    Simulate portfolio with position limit and daily stop loss.
+    Simulate portfolio with DYNAMIC position selection and daily stop loss.
+
+    Key: Positions are selected day-by-day based on which symbols have active
+    trades. This prevents look-ahead bias and simulates real-time trading.
 
     Parameters:
         symbol_returns: {symbol: daily_returns_df}
         symbol_metadata: {symbol: metadata_dict}
-        max_positions: Maximum positions to hold
+        max_positions: Maximum positions to hold simultaneously
         initial_capital: Starting capital
         daily_stop_loss: Daily loss limit in dollars
         ranking_method: How to rank symbols ('sharpe', 'profit_factor')
@@ -110,32 +113,20 @@ def simulate_portfolio(
         equity_curve: Series of portfolio equity
         metrics: Performance metrics dict
     """
-    # Rank symbols by performance
-    if ranking_method == 'sharpe':
-        ranked_symbols = sorted(
-            symbol_metadata.keys(),
-            key=lambda s: symbol_metadata[s].get('Sharpe_OOS_CPCV', 0),
-            reverse=True
-        )
-    elif ranking_method == 'profit_factor':
-        ranked_symbols = sorted(
-            symbol_metadata.keys(),
-            key=lambda s: symbol_metadata[s].get('Profit_Factor', 0),
-            reverse=True
-        )
-    else:
-        ranked_symbols = list(symbol_metadata.keys())
+    # Create ranking scores for symbols (used as tiebreaker when >max_positions signal)
+    symbol_scores = {}
+    for symbol in symbol_metadata.keys():
+        if ranking_method == 'sharpe':
+            symbol_scores[symbol] = symbol_metadata[symbol].get('Sharpe_OOS_CPCV', 0)
+        elif ranking_method == 'profit_factor':
+            symbol_scores[symbol] = symbol_metadata[symbol].get('Profit_Factor', 0)
+        else:
+            symbol_scores[symbol] = 0
 
-    # Select top symbols
-    selected_symbols = ranked_symbols[:max_positions]
-
-    logger.info(f"  Selected symbols: {', '.join(selected_symbols)}")
-
-    # Combine daily returns across selected symbols
+    # Get all unique dates across all symbols
     all_dates = set()
-    for symbol in selected_symbols:
-        if symbol in symbol_returns:
-            all_dates.update(symbol_returns[symbol]['Date'].tolist())
+    for symbol in symbol_returns.keys():
+        all_dates.update(symbol_returns[symbol]['Date'].tolist())
 
     all_dates = sorted(all_dates)
 
@@ -146,6 +137,9 @@ def simulate_portfolio(
     daily_pnl = 0.0
     stopped_out = False
     stop_count = 0
+
+    # Track which symbols are selected each day (for reporting)
+    daily_symbol_counts = {}
 
     for date in all_dates:
         # Check if new trading day
@@ -162,43 +156,59 @@ def simulate_portfolio(
                 'Date': date,
                 'Equity': equity,
                 'Daily_PnL': daily_pnl,
-                'Stopped_Out': 1
+                'Stopped_Out': 1,
+                'N_Positions': 0
             })
             continue
 
-        # Get returns for this date
-        active_symbols = []
+        # DYNAMIC SELECTION: Find all symbols with active trades TODAY
+        symbols_with_trades = []
         symbol_returns_today = {}
 
-        for symbol in selected_symbols:
-            if symbol not in symbol_returns:
-                continue
-
+        for symbol in symbol_returns.keys():
             symbol_df = symbol_returns[symbol]
             date_rows = symbol_df[symbol_df['Date'] == date]
 
             if len(date_rows) > 0:
                 ret = date_rows['Return'].iloc[0]
+                # Only include if there's an actual trade (non-zero return)
                 if pd.notna(ret) and ret != 0:
-                    active_symbols.append(symbol)
+                    symbols_with_trades.append(symbol)
                     symbol_returns_today[symbol] = ret
 
+        # If more than max_positions have signals, rank and select top N
+        if len(symbols_with_trades) > max_positions:
+            # Sort by ranking score (Sharpe or PF)
+            ranked = sorted(
+                symbols_with_trades,
+                key=lambda s: symbol_scores.get(s, 0),
+                reverse=True
+            )
+            selected_today = ranked[:max_positions]
+        else:
+            selected_today = symbols_with_trades
+
+        # Track symbol usage
+        for sym in selected_today:
+            daily_symbol_counts[sym] = daily_symbol_counts.get(sym, 0) + 1
+
         # Calculate portfolio return
-        if not active_symbols:
+        if not selected_today:
             portfolio_data.append({
                 'Date': date,
                 'Equity': equity,
                 'Daily_PnL': daily_pnl,
-                'Stopped_Out': 0
+                'Stopped_Out': 0,
+                'N_Positions': 0
             })
             continue
 
-        # Equal weight across active positions
-        n_positions = len(active_symbols)
+        # Equal weight across selected positions
+        n_positions = len(selected_today)
         position_value = equity / n_positions
 
         period_pnl = 0.0
-        for symbol in active_symbols:
+        for symbol in selected_today:
             symbol_return = symbol_returns_today[symbol]
             position_pnl = position_value * symbol_return
             period_pnl += position_pnl
@@ -216,7 +226,8 @@ def simulate_portfolio(
                 'Date': date,
                 'Equity': equity,
                 'Daily_PnL': daily_pnl,
-                'Stopped_Out': 1
+                'Stopped_Out': 1,
+                'N_Positions': n_positions
             })
             continue
 
@@ -227,7 +238,8 @@ def simulate_portfolio(
             'Date': date,
             'Equity': equity,
             'Daily_PnL': period_pnl,
-            'Stopped_Out': 0
+            'Stopped_Out': 0,
+            'N_Positions': n_positions
         })
 
     # Create DataFrame
@@ -245,9 +257,24 @@ def simulate_portfolio(
         stop_count
     )
 
-    # Add symbol info
-    metrics['selected_symbols'] = selected_symbols
-    metrics['n_symbols'] = len(selected_symbols)
+    # Add symbol usage statistics
+    total_days_traded = sum(daily_symbol_counts.values())
+    most_used_symbols = sorted(
+        daily_symbol_counts.items(),
+        key=lambda x: x[1],
+        reverse=True
+    )
+
+    metrics['symbol_usage'] = daily_symbol_counts
+    metrics['most_used_symbols'] = [s for s, _ in most_used_symbols[:5]]
+    metrics['n_symbols_total'] = len(symbol_returns)
+    metrics['n_symbols_used'] = len(daily_symbol_counts)
+
+    # Log symbol usage
+    logger.info(f"  Symbol usage (days traded):")
+    for symbol, days in most_used_symbols[:10]:
+        pct = (days / len(all_dates)) * 100 if len(all_dates) > 0 else 0
+        logger.info(f"    {symbol}: {days} days ({pct:.1f}%)")
 
     return equity_curve, metrics
 
@@ -334,8 +361,10 @@ def optimize_max_positions(
     max_pos = min(max_positions, n_symbols)
 
     logger.info(f"\n{'='*90}")
-    logger.info(f"PORTFOLIO OPTIMIZATION - USING PRE-COMPUTED TRADE DATA")
+    logger.info(f"PORTFOLIO OPTIMIZATION - DYNAMIC POSITION SELECTION")
+    logger.info(f"Using pre-computed ML-filtered trade data")
     logger.info(f"Initial Capital: ${initial_capital:,.0f} | Daily Stop Loss: ${daily_stop_loss:,.0f}")
+    logger.info(f"Positions selected DAILY based on active signals (prevents look-ahead bias)")
     logger.info(f"{'='*90}\n")
 
     results = []
@@ -365,9 +394,11 @@ def optimize_max_positions(
     # Create results DataFrame
     results_df = pd.DataFrame(results)
 
-    # Drop list columns for CSV compatibility
-    if 'selected_symbols' in results_df.columns:
-        results_df = results_df.drop(columns=['selected_symbols'])
+    # Drop dict/list columns for CSV compatibility
+    columns_to_drop = ['symbol_usage', 'most_used_symbols']
+    for col in columns_to_drop:
+        if col in results_df.columns:
+            results_df = results_df.drop(columns=[col])
 
     results_df = results_df.sort_values('sharpe_ratio', ascending=False)
 
@@ -390,10 +421,14 @@ def optimize_max_positions(
 
     print("=" * 90)
 
-    # Best result
-    best = results_df.iloc[0]
+    # Best result (get from original results list to access all metrics)
+    best_idx = results_df.index[0]
+    best = results[best_idx]
+
     logger.info(f"\n🏆 OPTIMAL CONFIGURATION:")
     logger.info(f"   Max Positions: {int(best['max_positions'])}")
+    logger.info(f"   Symbols Used: {best['n_symbols_used']} of {best['n_symbols_total']} available")
+    logger.info(f"   Most Frequently Used: {', '.join(best.get('most_used_symbols', []))}")
     logger.info(f"   Sharpe Ratio: {best['sharpe_ratio']:.3f}")
     logger.info(f"   CAGR: {best['cagr']*100:.2f}%")
     logger.info(f"   Total Return: ${best['total_return_dollars']:,.2f}")

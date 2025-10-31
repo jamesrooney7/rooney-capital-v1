@@ -59,20 +59,35 @@ This uses aggregate metrics from `src/models/` for instant estimates (less accur
 
 ### 1. **Portfolio Simulator** (✅ RECOMMENDED - Uses Actual Trade Data)
 
-`portfolio_simulator.py` loads your actual ML-filtered trade sequences and simulates portfolio performance.
+`portfolio_simulator.py` loads your actual ML-filtered trade sequences and simulates portfolio performance with **DYNAMIC position selection**.
+
+**Key Feature: Dynamic Position Selection (Prevents Look-Ahead Bias)**
+
+The simulator works **day-by-day**:
+1. Each day, it checks which symbols have active trades
+2. If more than `max_positions` have signals, it ranks them and takes the top N
+3. Positions can rotate daily based on which symbols are signaling
+4. This simulates **real-time trading** - you can't cherry-pick the best performers!
+
+**Example (max_positions = 6):**
+- **Monday**: 8 symbols signal → Rank by Sharpe → Trade top 6
+- **Tuesday**: 3 symbols signal → Trade all 3 (under limit)
+- **Wednesday**: 10 symbols signal → Rank → Trade different top 6
 
 **What it does:**
 - ✅ Loads daily returns from `results/{SYMBOL}_optimization/{SYMBOL}_trades.csv`
 - ✅ These are already filtered by your optimized ML models
-- ✅ Combines trades across symbols with max_positions limit
+- ✅ **Dynamically selects positions each day** based on active signals
 - ✅ Applies $2,500 daily stop loss to the combined portfolio
-- ✅ Ranks symbols by Sharpe or Profit Factor
+- ✅ Ranks symbols by Sharpe or Profit Factor when limiting positions
 - ✅ Provides exact results based on actual trade history
+- ✅ **Prevents look-ahead bias** - no cherry-picking best performers
 
 **When to use:**
 - ✅ You have optimization results in `results/` directory
 - ✅ You want accurate simulation using real trade sequences
 - ✅ You want to test daily stop loss on actual trades
+- ✅ You want realistic, day-by-day position selection
 - ✅ This is the MOST ACCURATE method
 
 **Usage:**
