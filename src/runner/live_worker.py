@@ -44,6 +44,7 @@ from runner.databento_bridge import (
 )
 from runner.historical_loader import load_historical_data
 from runner.ml_feature_tracker import MlFeatureTracker
+from runner.portfolio_coordinator import PortfolioCoordinator
 from runner.traderspost_client import (
     TradersPostClient,
     TradersPostError,
@@ -765,6 +766,82 @@ class LiveWorker:
             logger.info("Discord notifier disabled: no webhook URL configured")
             self.discord_notifier = None
 
+        # Initialize portfolio coordinator for portfolio-wide constraints
+        self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
+        portfolio_config_path = Path("config/portfolio_optimization.json")
+        if portfolio_config_path.exists():
+            try:
+                with open(portfolio_config_path, 'r') as f:
+                    portfolio_config = json.load(f)
+
+                max_positions = portfolio_config['portfolio_constraints']['max_positions']
+                daily_stop_loss = portfolio_config['portfolio_constraints']['daily_stop_loss']
+                optimized_symbols = portfolio_config['portfolio_constraints']['symbols']
+
+                logger.info(
+                    "Portfolio optimization config loaded: max_positions=%d, "
+                    "daily_stop_loss=$%.0f, optimized_symbols=%s",
+                    max_positions, daily_stop_loss, ', '.join(optimized_symbols)
+                )
+
+                # Filter to only optimized symbols if config exists
+                original_count = len(config.symbols)
+                filtered_symbols = tuple(s for s in config.symbols if s in optimized_symbols)
+                if len(filtered_symbols) < original_count:
+                    logger.warning(
+                        "Filtered symbols from %d to %d based on portfolio optimization",
+                        original_count, len(filtered_symbols)
+                    )
+                    self.symbols = filtered_symbols
+
+                # Create portfolio coordinator with emergency exit callback
+                def emergency_exit_callback(reason: str, context: dict) -> None:
+                    """Handle portfolio stop loss trigger."""
+                    logger.critical(
+                        "🚨 PORTFOLIO STOP LOSS TRIGGERED 🚨\n"
+                        "Reason: %s\nDaily P&L: $%.2f\nOpen positions: %s",
+                        reason,
+                        context.get('daily_pnl', 0),
+                        ', '.join(context.get('open_positions', []))
+                    )
+
+                    # Send Discord alert
+                    if self.discord_notifier:
+                        try:
+                            self.discord_notifier.send_system_alert(
+                                title="🚨 PORTFOLIO STOP LOSS HIT",
+                                message=(
+                                    f"Daily P&L: ${context.get('daily_pnl', 0):,.2f}\n"
+                                    f"Limit: ${context.get('stop_loss_limit', 0):,.2f}\n"
+                                    f"Open positions: {', '.join(context.get('open_positions', []))}\n"
+                                    f"Time: {context.get('trigger_time', 'unknown')}"
+                                ),
+                                alert_type="critical"
+                            )
+                        except Exception:
+                            logger.exception("Failed to send Discord alert for stop loss")
+
+                    # Note: Individual strategies will handle closing their positions
+                    # when they receive the stopped_out signal from coordinator
+
+                self.portfolio_coordinator = PortfolioCoordinator(
+                    max_positions=max_positions,
+                    daily_stop_loss=daily_stop_loss,
+                    emergency_exit_callback=emergency_exit_callback
+                )
+                logger.info("Portfolio coordinator initialized successfully")
+
+            except Exception as exc:
+                logger.exception("Failed to load portfolio config: %s", exc)
+                logger.warning("Portfolio coordinator disabled - running without portfolio constraints")
+                self.portfolio_coordinator = None
+        else:
+            logger.info(
+                "No portfolio optimization config found at %s - running without portfolio constraints",
+                portfolio_config_path
+            )
+            self.portfolio_coordinator = None
+
         self._setup_data_and_strategies()
 
         self._historical_warmup_counts: dict[str, int] = {}
@@ -987,6 +1064,10 @@ class LiveWorker:
             strategy_kwargs: Dict[str, Any] = {"symbol": symbol, "size": instrument_cfg.size}
             strategy_kwargs.update(bundle_kwargs)
             strategy_kwargs.update(instrument_cfg.strategy_overrides)
+
+            # Inject portfolio coordinator if available
+            if self.portfolio_coordinator:
+                strategy_kwargs['portfolio_coordinator'] = self.portfolio_coordinator
 
             canonical_symbol = symbol.strip().upper()
             if self._strategy_uses_minute_timeframe(NotifyingIbsStrategy, strategy_kwargs):
