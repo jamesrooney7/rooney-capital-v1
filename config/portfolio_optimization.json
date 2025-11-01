@@ -1,0 +1,33 @@
+{
+  "optimization_metadata": {
+    "generated_date": "2024-10-31T23:39:36",
+    "optimization_period": "2023-2024",
+    "selected_configuration": "Best Sharpe from greedy optimizer",
+    "backtest_sharpe": 16.23,
+    "backtest_cagr": 246.05,
+    "note": "Backtest results are in-sample. Expect 30-50% degradation in live trading."
+  },
+  "portfolio_constraints": {
+    "max_positions": 4,
+    "daily_stop_loss": 2500.0,
+    "symbols": ["6A", "6B", "6C", "6N", "6S", "CL", "ES", "PL", "RTY", "SI"],
+    "n_symbols": 10
+  },
+  "expected_performance": {
+    "backtest": {
+      "sharpe_ratio": 16.23,
+      "cagr_pct": 246.05,
+      "max_drawdown_dollars": 10957.48,
+      "max_drawdown_pct": 3.69,
+      "monthly_win_rate_pct": 100.0,
+      "total_return_pct": 1087.4
+    },
+    "realistic_live_expectations": {
+      "sharpe_ratio": "3.0 - 6.0",
+      "cagr_pct": "30 - 50",
+      "max_drawdown_pct": "8 - 15",
+      "monthly_win_rate_pct": "60 - 75",
+      "note": "These are conservative estimates accounting for slippage, execution issues, and market regime changes"
+    }
+  }
+}
