@@ -584,10 +584,12 @@ def main():
     # Load trades for all symbols
     logger.info("\nLoading trade data...")
     symbol_trades = {}
+    symbol_metadata = {}
     for symbol in symbols:
         try:
             trades_df, metadata = load_symbol_trades(args.results_dir, symbol)
             symbol_trades[symbol] = trades_df
+            symbol_metadata[symbol] = metadata
             logger.info(f"  {symbol}: {len(trades_df)} trades")
         except Exception as e:
             logger.warning(f"  {symbol}: Failed to load - {e}")
@@ -600,6 +602,7 @@ def main():
     logger.info(f"\nRunning portfolio simulation (max_positions={args.max_positions})...")
     equity_df, sim_metrics = simulate_portfolio_intraday(
         symbol_trades,
+        symbol_metadata,
         max_positions=args.max_positions,
         daily_stop_loss=args.daily_stop_loss,
         initial_capital=100000
