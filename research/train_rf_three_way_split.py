@@ -199,13 +199,15 @@ def phase1_hyperparameter_tuning(
 
     # Random Search
     logger.info(f"\nStarting Random Search ({rs_trials} trials)...")
+    logger.info("FIX: Using fixed_thr=0.50 during hyperparameter tuning to prevent threshold optimization on training data")
     rs_rows = []
     for t in range(1, rs_trials + 1):
         params = sample_rf_params(rng)
         res = evaluate_rf_cpcv(
             Xy_train, X_train_selected, params,
             folds, k_test, embargo_days,
-            n_trials_total=n_trials_total
+            n_trials_total=n_trials_total,
+            fixed_thr=0.50  # FIX: Use fixed threshold during hyperparameter tuning
         )
         rs_rows.append({**res, **params, "Trial": t, "Phase": "Random"})
 
@@ -258,7 +260,8 @@ def phase1_hyperparameter_tuning(
             res = evaluate_rf_cpcv(
                 Xy_train, X_train_selected, params,
                 folds, k_test, embargo_days,
-                n_trials_total=n_trials_total
+                n_trials_total=n_trials_total,
+                fixed_thr=0.50  # FIX: Use fixed threshold during hyperparameter tuning
             )
 
             trial.set_user_attr("PF", float(res["PF"]))

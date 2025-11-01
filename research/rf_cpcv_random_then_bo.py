@@ -267,8 +267,15 @@ def embargoed_cpcv_splits(dates, n_folds=5, k_test=2, embargo_days=2):
         if test_dates.size==0: continue
         test_ord = np.array([pd.to_datetime(td).toordinal() for td in test_dates])
         dist = np.min(np.abs(d_ord[:, None] - test_ord[None, :]), axis=1)
+
+        # Maximum test date (latest date in any test fold)
+        max_test_ord = np.max(test_ord)
+
         te_mask = np.isin(d, test_dates)
-        tr_mask = (~te_mask) & (dist > embargo_days)
+        # FIX: Prevent future data leakage - only use training data that comes BEFORE test dates
+        # Original: tr_mask = (~te_mask) & (dist > embargo_days)  # BUG: allows future data
+        # Fixed: Also require d_ord < max_test_ord to prevent using data after test period
+        tr_mask = (~te_mask) & (dist > embargo_days) & (d_ord < max_test_ord)
         yield tr_mask, te_mask
 
 # ========== Feature screening ==========
@@ -834,6 +841,7 @@ def evaluate_rf_cpcv(
     min_test=50,
     thr_grid=None,
     n_trials_total=1,
+    fixed_thr=None,  # FIX: Add fixed_thr parameter to prevent threshold optimization during hyperparameter tuning
 ):
     return _cpcv_evaluate(
         Xy,
@@ -846,6 +854,7 @@ def evaluate_rf_cpcv(
         min_test=min_test,
         thr_grid=thr_grid,
         n_trials_total=n_trials_total,
+        fixed_thr=fixed_thr,  # FIX: Pass through fixed_thr parameter
     )
 
 # ========== Random search space ==========

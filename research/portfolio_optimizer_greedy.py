@@ -10,8 +10,20 @@ Finds optimal symbol combinations and max_positions that satisfy:
 Uses greedy removal: iteratively removes symbols that contribute most to drawdowns
 until constraints are satisfied.
 
-WARNING: This optimizes on the full dataset - results will be optimistic.
-Use paper trading to validate before going live.
+🚨 CRITICAL DATA LEAKAGE WARNING 🚨
+This script optimizes portfolio parameters (symbol selection, max_positions) on
+the SAME data used to evaluate performance. This is PORTFOLIO-LEVEL LEAKAGE.
+
+DO NOT use this on your test/validation period!
+
+CORRECT USAGE:
+1. Run this ONLY on training data (e.g., 2010-2020)
+2. Lock in the configuration (symbols + max_positions)
+3. Test the locked configuration on holdout data (e.g., 2021-2024)
+4. NEVER re-optimize on test data
+
+If you optimize on test data, you'll get 5-10% optimistic bias on top of
+any ML training leakage.
 
 Usage:
     python research/portfolio_optimizer_greedy.py \
