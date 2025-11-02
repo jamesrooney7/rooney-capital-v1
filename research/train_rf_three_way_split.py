@@ -122,9 +122,16 @@ def load_and_split_data(
     logger.info(f"{'='*60}\n")
 
     # Prepare feature matrices
-    Xy_train = build_core_features(df_train)
-    Xy_threshold = build_core_features(df_threshold)
-    Xy_test = build_core_features(df_test)
+    # build_core_features() returns ONLY normalized features (no Date/targets)
+    X_train_norm = build_core_features(df_train)
+    X_threshold_norm = build_core_features(df_threshold)
+    X_test_norm = build_core_features(df_test)
+
+    # Build Xy dataframes with Date and targets preserved
+    # These are needed for CPCV which requires Date column
+    Xy_train = df_train.copy()
+    Xy_threshold = df_threshold.copy()
+    Xy_test = df_test.copy()
 
     # Extract feature columns (exclude metadata and targets)
     exclude_cols = {
@@ -133,12 +140,12 @@ def load_and_split_data(
         "Unnamed: 0",
     }
 
-    feature_cols = [col for col in Xy_train.columns if col not in exclude_cols]
+    feature_cols = [col for col in X_train_norm.columns if col not in exclude_cols]
 
     # Add engineered features
-    X_train_raw = add_engineered(Xy_train[feature_cols])
-    X_threshold_raw = add_engineered(Xy_threshold[feature_cols])
-    X_test_raw = add_engineered(Xy_test[feature_cols])
+    X_train_raw = add_engineered(X_train_norm[feature_cols])
+    X_threshold_raw = add_engineered(X_threshold_norm[feature_cols])
+    X_test_raw = add_engineered(X_test_norm[feature_cols])
 
     # Ensure all splits have same features (intersection)
     common_features = set(X_train_raw.columns) & set(X_threshold_raw.columns) & set(X_test_raw.columns)
