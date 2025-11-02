@@ -33,8 +33,8 @@ K_TEST=2        # CPCV k_test parameter
 EMBARGO_DAYS=2  # Embargo period (days)
 
 # Feature screening
-FEATURE_SCREEN_METHOD="mdi"  # or "permutation" or "l1"
-N_FEATURES=30                # Top N features to select
+FEATURE_SCREEN_METHOD="importance"  # Valid: "importance", "permutation", "l1", "none"
+N_FEATURES=30                        # Top N features to select
 
 # Create log directory
 mkdir -p results/logs
@@ -127,7 +127,8 @@ for symbol in "${SYMBOLS[@]}"; do
         --output-dir "$OUTPUT_DIR" \
         2>&1 | tee "$LOGFILE"
 
-    if [ $? -eq 0 ]; then
+    # Check exit code of python command (not tee)
+    if [ ${PIPESTATUS[0]} -eq 0 ]; then
         SYMBOL_END=$(date +%s)
         SYMBOL_DURATION=$((SYMBOL_END - SYMBOL_START))
         SYMBOL_MINUTES=$((SYMBOL_DURATION / 60))
