@@ -115,16 +115,15 @@ for symbol in "${SYMBOLS[@]}"; do
     python3 research/train_rf_three_way_split.py \
         --symbol "$symbol" \
         --data-dir "$DATA_DIR" \
-        --start "$START_DATE" \
         --train-end "$TRAIN_END" \
         --threshold-end "$THRESHOLD_END" \
         --rs-trials "$RS_TRIALS" \
         --bo-trials "$BO_TRIALS" \
-        --n-folds "$N_FOLDS" \
+        --folds "$N_FOLDS" \
         --k-test "$K_TEST" \
         --embargo-days "$EMBARGO_DAYS" \
-        --feature-screen-method "$FEATURE_SCREEN_METHOD" \
-        --n-features "$N_FEATURES" \
+        --screen-method "$FEATURE_SCREEN_METHOD" \
+        --k-features "$N_FEATURES" \
         --output-dir "$OUTPUT_DIR" \
         2>&1 | tee "$LOGFILE"
 
