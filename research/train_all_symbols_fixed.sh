@@ -76,12 +76,16 @@ echo -e "${YELLOW}⚠️  Results will be 15-25% lower than previous (biased) re
 echo -e "${YELLOW}⚠️  This is EXPECTED and GOOD - the new results are trustworthy!${NC}"
 echo ""
 
-# Confirm before proceeding
-read -p "Continue with retraining? (y/n) " -n 1 -r
-echo
-if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    echo "Cancelled."
-    exit 0
+# Confirm before proceeding (skip if --yes flag or non-interactive)
+if [[ "$1" != "--yes" ]] && [ -t 0 ]; then
+    read -p "Continue with retraining? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Cancelled."
+        exit 0
+    fi
+else
+    echo "Starting retraining (non-interactive mode or --yes flag)..."
 fi
 
 # Track results
