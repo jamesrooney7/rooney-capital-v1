@@ -161,6 +161,7 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
                       max_positions: int,
                       daily_stop_loss: float,
                       initial_cash: float,
+                      position_size_multiplier: float = 1.0,
                       ranking_method: str = 'sharpe') -> Tuple[pd.DataFrame, Dict]:
     """
     Simulate portfolio with position limits and daily stop loss.
@@ -171,6 +172,7 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
         max_positions: Maximum concurrent positions
         daily_stop_loss: Daily stop loss in USD
         initial_cash: Starting capital
+        position_size_multiplier: Scale factor for position sizes (e.g., 0.5 = half contracts)
         ranking_method: How to rank symbols ('sharpe', 'profit_factor', 'proba')
 
     Returns:
@@ -216,8 +218,8 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
         if len(day_signals) > max_positions:
             day_signals = sorted(day_signals, key=lambda x: x['ranking'], reverse=True)[:max_positions]
 
-        # Calculate daily P&L
-        daily_pnl = sum(s['pnl_usd'] for s in day_signals)
+        # Calculate daily P&L (scaled by position size multiplier)
+        daily_pnl = sum(s['pnl_usd'] * position_size_multiplier for s in day_signals)
 
         # Check daily stop loss
         if daily_pnl < -daily_stop_loss:
@@ -334,7 +336,7 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
         logger.info(f"Testing max_positions = {n_pos}")
 
         equity_df, metrics = simulate_portfolio(
-            predictions, models, n_pos, daily_stop_loss, initial_cash, ranking_method
+            predictions, models, n_pos, daily_stop_loss, initial_cash, 1.0, ranking_method
         )
 
         result = {
@@ -429,6 +431,137 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
     return results_df
 
 
+def optimize_positions_and_sizing(predictions: Dict[str, pd.DataFrame],
+                                 models: Dict,
+                                 min_positions: int,
+                                 max_positions: int,
+                                 position_size_range: Tuple[float, float],
+                                 position_size_step: float,
+                                 daily_stop_loss: float,
+                                 initial_cash: float,
+                                 max_drawdown_limit: float = None,
+                                 ranking_method: str = 'sharpe') -> pd.DataFrame:
+    """
+    Test combinations of max_positions and position_size_multiplier to find optimal.
+
+    Args:
+        position_size_range: (min, max) multiplier range, e.g., (0.1, 1.0)
+        position_size_step: Step size for position_size_multiplier, e.g., 0.05
+
+    Returns:
+        DataFrame with results for each combination
+    """
+    results = []
+
+    print(f"\n{'='*110}")
+    print(f"2D PORTFOLIO OPTIMIZATION: max_positions ({min_positions}-{max_positions}) × position_size ({position_size_range[0]}-{position_size_range[1]})")
+    print(f"Initial Capital: ${initial_cash:,.0f} | Daily Stop Loss: ${daily_stop_loss:,.0f}")
+    if max_drawdown_limit:
+        print(f"Max Drawdown Constraint: ${abs(max_drawdown_limit):,.0f}")
+    print(f"Test Period: 2022-2024 (TRUE out-of-sample)")
+    print(f"Ranking Method: {ranking_method}")
+    print(f"{'='*110}\n")
+
+    # Generate position size multipliers
+    pos_sizes = np.arange(position_size_range[0], position_size_range[1] + position_size_step, position_size_step)
+
+    total_combos = (max_positions - min_positions + 1) * len(pos_sizes)
+    combo_num = 0
+
+    for n_pos in range(min_positions, max_positions + 1):
+        for pos_size in pos_sizes:
+            combo_num += 1
+            logger.info(f"Testing [{combo_num}/{total_combos}]: max_positions={n_pos}, position_size={pos_size:.2f}")
+
+            equity_df, metrics = simulate_portfolio(
+                predictions, models, n_pos, daily_stop_loss, initial_cash, pos_size, ranking_method
+            )
+
+            result = {
+                'max_positions': n_pos,
+                'position_size': pos_size,
+                **metrics
+            }
+            results.append(result)
+
+            # Print compact progress
+            meets_constraint = '✓' if (max_drawdown_limit is None or metrics['max_drawdown'] >= -abs(max_drawdown_limit)) else '✗'
+            print(f"  [{n_pos:2d}, {pos_size:.2f}] Sharpe: {metrics['sharpe']:6.3f}  MaxDD: ${metrics['max_drawdown']:>9,.0f}  {meets_constraint}")
+
+    results_df = pd.DataFrame(results)
+
+    # Find unconstrained optimal (best Sharpe overall)
+    best_unconstrained_idx = results_df['sharpe'].idxmax()
+    best_unconstrained = results_df.loc[best_unconstrained_idx]
+
+    # Find constrained optimal (best Sharpe with drawdown <= limit)
+    best_constrained = None
+    if max_drawdown_limit:
+        constrained_df = results_df[results_df['max_drawdown'] >= -abs(max_drawdown_limit)]
+        if len(constrained_df) > 0:
+            best_constrained_idx = constrained_df['sharpe'].idxmax()
+            best_constrained = constrained_df.loc[best_constrained_idx]
+
+    # Show top 20 configurations
+    print(f"\n{'='*110}")
+    print("TOP 20 CONFIGURATIONS (sorted by Sharpe)")
+    print(f"{'='*110}\n")
+
+    results_sorted = results_df.sort_values('sharpe', ascending=False).head(20)
+
+    print(f"{'MaxPos':<9}{'PosSize':<10}{'Sharpe':<10}{'Sortino':<10}{'CAGR%':<10}{'Return $':<13}{'MaxDD $':<13}{'PF':<8}{'WR%':<8}{'OK?':<5}")
+    print("-" * 110)
+    for _, row in results_sorted.iterrows():
+        meets_constraint = ''
+        if max_drawdown_limit:
+            meets_constraint = '✓' if row['max_drawdown'] >= -abs(max_drawdown_limit) else '✗'
+
+        print(f"{row['max_positions']:<9.0f}{row['position_size']:<10.2f}{row['sharpe']:<10.3f}{row['sortino']:<10.3f}"
+              f"{row['cagr']*100:<10.1f}${row['total_return']:<12,.0f}"
+              f"${row['max_drawdown']:<12,.0f}{row['profit_factor']:<8.2f}"
+              f"{row['win_rate']*100:<8.1f}{meets_constraint:<5}")
+
+    # Show both unconstrained and constrained optimal
+    print(f"\n{'='*110}")
+    print("🏆 UNCONSTRAINED OPTIMAL (Best Sharpe Overall):")
+    print(f"{'='*110}")
+    print(f"  Max Positions:        {int(best_unconstrained['max_positions'])}")
+    print(f"  Position Size:        {best_unconstrained['position_size']:.2f}x")
+    print(f"  Sharpe Ratio:         {best_unconstrained['sharpe']:.3f}")
+    print(f"  Sortino Ratio:        {best_unconstrained['sortino']:.3f}")
+    print(f"  CAGR:                 {best_unconstrained['cagr']*100:.2f}%")
+    print(f"  Total Return:         ${best_unconstrained['total_return']:,.0f}")
+    print(f"  Max Drawdown:         ${best_unconstrained['max_drawdown']:,.0f} ({best_unconstrained['max_drawdown_pct']*100:.2f}%)")
+    print(f"  Profit Factor:        {best_unconstrained['profit_factor']:.2f}")
+    print(f"  Win Rate:             {best_unconstrained['win_rate']*100:.2f}%")
+    print(f"  Avg Positions:        {best_unconstrained['avg_positions']:.2f}")
+    print(f"  Daily Stops Hit:      {int(best_unconstrained['daily_stops_hit'])}")
+    print(f"{'='*110}\n")
+
+    if best_constrained is not None:
+        print(f"{'='*110}")
+        print(f"🎯 CONSTRAINED OPTIMAL (Best Sharpe with MaxDD <= ${abs(max_drawdown_limit):,.0f}):")
+        print(f"{'='*110}")
+        print(f"  Max Positions:        {int(best_constrained['max_positions'])}")
+        print(f"  Position Size:        {best_constrained['position_size']:.2f}x")
+        print(f"  Sharpe Ratio:         {best_constrained['sharpe']:.3f}")
+        print(f"  Sortino Ratio:        {best_constrained['sortino']:.3f}")
+        print(f"  CAGR:                 {best_constrained['cagr']*100:.2f}%")
+        print(f"  Total Return:         ${best_constrained['total_return']:,.0f}")
+        print(f"  Max Drawdown:         ${best_constrained['max_drawdown']:,.0f} ({best_constrained['max_drawdown_pct']*100:.2f}%)")
+        print(f"  Profit Factor:        {best_constrained['profit_factor']:.2f}")
+        print(f"  Win Rate:             {best_constrained['win_rate']*100:.2f}%")
+        print(f"  Avg Positions:        {best_constrained['avg_positions']:.2f}")
+        print(f"  Daily Stops Hit:      {int(best_constrained['daily_stops_hit'])}")
+        print(f"{'='*110}\n")
+    elif max_drawdown_limit:
+        print(f"\n{'='*110}")
+        print(f"⚠️  WARNING: No configurations meet drawdown constraint of ${abs(max_drawdown_limit):,.0f}")
+        print(f"{'='*110}\n")
+
+    return results_df
+
+
 def main():
     parser = argparse.ArgumentParser(description='Simulate portfolio from three-way split models')
     parser.add_argument('--models-dir', type=str, default='src/models',
@@ -449,6 +582,14 @@ def main():
                        help='Daily stop loss in USD')
     parser.add_argument('--max-drawdown-limit', type=float, default=None,
                        help='Maximum allowed drawdown in USD (e.g., 6000). Will find best Sharpe with DD <= this limit')
+    parser.add_argument('--optimize-sizing', action='store_true',
+                       help='Enable 2D optimization (max_positions + position sizing) to meet drawdown constraint')
+    parser.add_argument('--position-size-min', type=float, default=0.1,
+                       help='Minimum position size multiplier (default: 0.1)')
+    parser.add_argument('--position-size-max', type=float, default=1.0,
+                       help='Maximum position size multiplier (default: 1.0)')
+    parser.add_argument('--position-size-step', type=float, default=0.05,
+                       help='Position size step (default: 0.05)')
     parser.add_argument('--ranking-method', type=str, default='sharpe',
                        choices=['sharpe', 'profit_factor', 'proba'],
                        help='Method to rank symbols for position selection')
@@ -478,17 +619,33 @@ def main():
 
     logger.info(f"\nGenerated predictions for {len(predictions)} symbols")
 
-    # Optimize max_positions
-    results_df = optimize_max_positions(
-        predictions,
-        models,
-        args.min_positions,
-        min(args.max_positions, len(predictions)),
-        args.daily_stop_loss,
-        args.initial_cash,
-        args.max_drawdown_limit,
-        args.ranking_method
-    )
+    # Choose optimization mode
+    if args.optimize_sizing:
+        # 2D optimization: max_positions + position sizing
+        results_df = optimize_positions_and_sizing(
+            predictions,
+            models,
+            args.min_positions,
+            min(args.max_positions, len(predictions)),
+            (args.position_size_min, args.position_size_max),
+            args.position_size_step,
+            args.daily_stop_loss,
+            args.initial_cash,
+            args.max_drawdown_limit,
+            args.ranking_method
+        )
+    else:
+        # 1D optimization: max_positions only (full contract size)
+        results_df = optimize_max_positions(
+            predictions,
+            models,
+            args.min_positions,
+            min(args.max_positions, len(predictions)),
+            args.daily_stop_loss,
+            args.initial_cash,
+            args.max_drawdown_limit,
+            args.ranking_method
+        )
 
     # Save results
     if args.output:
