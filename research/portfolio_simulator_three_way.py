@@ -303,9 +303,13 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
                           max_positions: int,
                           daily_stop_loss: float,
                           initial_cash: float,
+                          max_drawdown_limit: float = None,
                           ranking_method: str = 'sharpe') -> pd.DataFrame:
     """
     Test different max_positions values and find optimal.
+
+    Args:
+        max_drawdown_limit: If specified, find optimal config that keeps drawdown <= this value
 
     Returns:
         DataFrame with results for each max_positions value
@@ -315,6 +319,8 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
     print(f"\n{'='*100}")
     print(f"PORTFOLIO OPTIMIZATION: Testing max_positions from {min_positions} to {max_positions}")
     print(f"Initial Capital: ${initial_cash:,.0f} | Daily Stop Loss: ${daily_stop_loss:,.0f}")
+    if max_drawdown_limit:
+        print(f"Max Drawdown Constraint: ${abs(max_drawdown_limit):,.0f}")
     print(f"Test Period: 2022-2024 (TRUE out-of-sample)")
     print(f"Ranking Method: {ranking_method}")
     print(f"{'='*100}\n")
@@ -347,9 +353,18 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
 
     results_df = pd.DataFrame(results)
 
-    # Find optimal
-    best_idx = results_df['sharpe'].idxmax()
-    best = results_df.loc[best_idx]
+    # Find unconstrained optimal (best Sharpe overall)
+    best_unconstrained_idx = results_df['sharpe'].idxmax()
+    best_unconstrained = results_df.loc[best_unconstrained_idx]
+
+    # Find constrained optimal (best Sharpe with drawdown <= limit)
+    best_constrained = None
+    if max_drawdown_limit:
+        # Filter to configs meeting drawdown constraint (drawdown is negative, so >= -limit)
+        constrained_df = results_df[results_df['max_drawdown'] >= -abs(max_drawdown_limit)]
+        if len(constrained_df) > 0:
+            best_constrained_idx = constrained_df['sharpe'].idxmax()
+            best_constrained = constrained_df.loc[best_constrained_idx]
 
     print(f"\n{'='*100}")
     print("OPTIMIZATION RESULTS (sorted by Sharpe)")
@@ -357,28 +372,54 @@ def optimize_max_positions(predictions: Dict[str, pd.DataFrame],
 
     results_sorted = results_df.sort_values('sharpe', ascending=False)
 
-    print(f"{'MaxPos':<10}{'Sharpe':<12}{'Sortino':<12}{'CAGR%':<12}{'Return $':<15}{'MaxDD $':<15}{'PF':<10}{'WR%':<10}{'Stops':<8}")
-    print("-" * 100)
+    # Mark configs that meet drawdown constraint
+    print(f"{'MaxPos':<10}{'Sharpe':<12}{'Sortino':<12}{'CAGR%':<12}{'Return $':<15}{'MaxDD $':<15}{'PF':<10}{'WR%':<10}{'Stops':<8}{'OK?':<5}")
+    print("-" * 105)
     for _, row in results_sorted.iterrows():
+        meets_constraint = ''
+        if max_drawdown_limit:
+            meets_constraint = '✓' if row['max_drawdown'] >= -abs(max_drawdown_limit) else '✗'
+
         print(f"{row['max_positions']:<10}{row['sharpe']:<12.3f}{row['sortino']:<12.3f}"
               f"{row['cagr']*100:<12.2f}${row['total_return']:<14,.0f}"
               f"${row['max_drawdown']:<14,.0f}{row['profit_factor']:<10.2f}"
-              f"{row['win_rate']*100:<10.2f}{row['daily_stops_hit']:<8.0f}")
+              f"{row['win_rate']*100:<10.2f}{row['daily_stops_hit']:<8.0f}{meets_constraint:<5}")
 
+    # Show both unconstrained and constrained optimal
     print(f"\n{'='*100}")
-    print("🏆 OPTIMAL CONFIGURATION:")
+    print("🏆 UNCONSTRAINED OPTIMAL (Best Sharpe Overall):")
     print(f"{'='*100}")
-    print(f"  Max Positions:        {int(best['max_positions'])}")
-    print(f"  Sharpe Ratio:         {best['sharpe']:.3f}")
-    print(f"  Sortino Ratio:        {best['sortino']:.3f}")
-    print(f"  CAGR:                 {best['cagr']*100:.2f}%")
-    print(f"  Total Return:         ${best['total_return']:,.0f}")
-    print(f"  Max Drawdown:         ${best['max_drawdown']:,.0f} ({best['max_drawdown_pct']*100:.2f}%)")
-    print(f"  Profit Factor:        {best['profit_factor']:.2f}")
-    print(f"  Win Rate:             {best['win_rate']*100:.2f}%")
-    print(f"  Avg Positions:        {best['avg_positions']:.2f}")
-    print(f"  Daily Stops Hit:      {int(best['daily_stops_hit'])}")
+    print(f"  Max Positions:        {int(best_unconstrained['max_positions'])}")
+    print(f"  Sharpe Ratio:         {best_unconstrained['sharpe']:.3f}")
+    print(f"  Sortino Ratio:        {best_unconstrained['sortino']:.3f}")
+    print(f"  CAGR:                 {best_unconstrained['cagr']*100:.2f}%")
+    print(f"  Total Return:         ${best_unconstrained['total_return']:,.0f}")
+    print(f"  Max Drawdown:         ${best_unconstrained['max_drawdown']:,.0f} ({best_unconstrained['max_drawdown_pct']*100:.2f}%)")
+    print(f"  Profit Factor:        {best_unconstrained['profit_factor']:.2f}")
+    print(f"  Win Rate:             {best_unconstrained['win_rate']*100:.2f}%")
+    print(f"  Avg Positions:        {best_unconstrained['avg_positions']:.2f}")
+    print(f"  Daily Stops Hit:      {int(best_unconstrained['daily_stops_hit'])}")
     print(f"{'='*100}\n")
+
+    if best_constrained is not None:
+        print(f"{'='*100}")
+        print(f"🎯 CONSTRAINED OPTIMAL (Best Sharpe with MaxDD <= ${abs(max_drawdown_limit):,.0f}):")
+        print(f"{'='*100}")
+        print(f"  Max Positions:        {int(best_constrained['max_positions'])}")
+        print(f"  Sharpe Ratio:         {best_constrained['sharpe']:.3f}")
+        print(f"  Sortino Ratio:        {best_constrained['sortino']:.3f}")
+        print(f"  CAGR:                 {best_constrained['cagr']*100:.2f}%")
+        print(f"  Total Return:         ${best_constrained['total_return']:,.0f}")
+        print(f"  Max Drawdown:         ${best_constrained['max_drawdown']:,.0f} ({best_constrained['max_drawdown_pct']*100:.2f}%)")
+        print(f"  Profit Factor:        {best_constrained['profit_factor']:.2f}")
+        print(f"  Win Rate:             {best_constrained['win_rate']*100:.2f}%")
+        print(f"  Avg Positions:        {best_constrained['avg_positions']:.2f}")
+        print(f"  Daily Stops Hit:      {int(best_constrained['daily_stops_hit'])}")
+        print(f"{'='*100}\n")
+    elif max_drawdown_limit:
+        print(f"\n{'='*100}")
+        print(f"⚠️  WARNING: No configurations meet drawdown constraint of ${abs(max_drawdown_limit):,.0f}")
+        print(f"{'='*100}\n")
 
     return results_df
 
@@ -401,6 +442,8 @@ def main():
                        help='Initial capital')
     parser.add_argument('--daily-stop-loss', type=float, default=2500,
                        help='Daily stop loss in USD')
+    parser.add_argument('--max-drawdown-limit', type=float, default=None,
+                       help='Maximum allowed drawdown in USD (e.g., 6000). Will find best Sharpe with DD <= this limit')
     parser.add_argument('--ranking-method', type=str, default='sharpe',
                        choices=['sharpe', 'profit_factor', 'proba'],
                        help='Method to rank symbols for position selection')
@@ -438,6 +481,7 @@ def main():
         min(args.max_positions, len(predictions)),
         args.daily_stop_loss,
         args.initial_cash,
+        args.max_drawdown_limit,
         args.ranking_method
     )
 
