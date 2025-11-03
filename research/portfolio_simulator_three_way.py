@@ -569,7 +569,8 @@ def greedy_symbol_selection(predictions: Dict[str, pd.DataFrame],
                            initial_cash: float,
                            max_drawdown_limit: float,
                            position_size_multiplier: float = 1.0,
-                           ranking_method: str = 'sharpe') -> Tuple[Set[str], int, float, Dict]:
+                           ranking_method: str = 'sharpe',
+                           period_name: str = 'optimization') -> Tuple[Set[str], int, float, Dict]:
     """
     Greedy optimization: iteratively remove symbols to meet drawdown constraint.
 
@@ -578,6 +579,9 @@ def greedy_symbol_selection(predictions: Dict[str, pd.DataFrame],
     2. Remove the symbol that contributes most to drawdown
     3. Repeat until drawdown <= limit or can't remove more
     4. Track the best configuration
+
+    Args:
+        period_name: Name of the period being optimized (for display)
 
     Returns:
         optimal_symbols: Set of symbols in optimal portfolio
@@ -591,6 +595,7 @@ def greedy_symbol_selection(predictions: Dict[str, pd.DataFrame],
 
     print(f"\n{'='*110}")
     print(f"GREEDY SYMBOL SELECTION WITH DRAWDOWN CONSTRAINT")
+    print(f"Period: {period_name}")
     print(f"Max Drawdown Limit: ${abs(max_drawdown_limit):,.0f}")
     print(f"Testing max_positions: {max_positions_range[0]} to {max_positions_range[1]}")
     print(f"Position Size: {position_size_multiplier:.2f}x")
@@ -722,10 +727,14 @@ def main():
                        help='Directory with trained models')
     parser.add_argument('--data-dir', type=str, default='data/training',
                        help='Directory with training data')
+    parser.add_argument('--portfolio-train-start', type=str, default=None,
+                       help='Portfolio optimization period start (e.g., 2021-01-01 for threshold period)')
+    parser.add_argument('--portfolio-train-end', type=str, default=None,
+                       help='Portfolio optimization period end (e.g., 2021-12-31 for threshold period)')
     parser.add_argument('--test-start', type=str, default='2022-01-01',
-                       help='Test period start date')
+                       help='Test period start date for final evaluation')
     parser.add_argument('--test-end', type=str, default='2024-12-31',
-                       help='Test period end date')
+                       help='Test period end date for final evaluation')
     parser.add_argument('--min-positions', type=int, default=1,
                        help='Minimum max_positions to test')
     parser.add_argument('--max-positions', type=int, default=18,
@@ -767,16 +776,6 @@ def main():
         logger.error("No models found!")
         return 1
 
-    # Generate predictions on test data
-    logger.info(f"\nGenerating predictions for test period {args.test_start} to {args.test_end}...")
-    predictions = generate_predictions(models, data_dir, args.test_start, args.test_end)
-
-    if len(predictions) == 0:
-        logger.error("No predictions generated!")
-        return 1
-
-    logger.info(f"\nGenerated predictions for {len(predictions)} symbols")
-
     # Choose optimization mode
     if args.greedy_selection:
         # Greedy symbol selection: find optimal subset of instruments
@@ -784,43 +783,187 @@ def main():
             logger.error("--max-drawdown-limit is required for greedy selection!")
             return 1
 
-        optimal_symbols, optimal_max_pos, optimal_pos_size, optimal_metrics = greedy_symbol_selection(
-            predictions,
-            models,
-            (args.min_positions, min(args.max_positions, len(predictions))),
-            args.daily_stop_loss,
-            args.initial_cash,
-            args.max_drawdown_limit,
-            args.position_size,
-            args.ranking_method
-        )
+        # Phase 1: Optimize on portfolio train period (avoid leakage)
+        if args.portfolio_train_start and args.portfolio_train_end:
+            logger.info(f"\n{'='*80}")
+            logger.info(f"PHASE 1: PORTFOLIO OPTIMIZATION (In-Sample)")
+            logger.info(f"Period: {args.portfolio_train_start} to {args.portfolio_train_end}")
+            logger.info(f"{'='*80}\n")
 
-        if optimal_symbols is None:
-            logger.error("Could not find configuration meeting drawdown constraint")
-            return 1
+            # Generate predictions for portfolio train period
+            logger.info(f"Generating predictions for portfolio train period...")
+            train_predictions = generate_predictions(models, data_dir, args.portfolio_train_start, args.portfolio_train_end)
 
-        # Save optimal config
-        if args.output:
-            output_path = Path(args.output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
+            if len(train_predictions) == 0:
+                logger.error("No predictions generated for portfolio train period!")
+                return 1
 
-            # Save as JSON with symbol list
-            config = {
-                'symbols': sorted(list(optimal_symbols)),
-                'max_positions': optimal_max_pos,
-                'position_size': optimal_pos_size,
-                'metrics': {k: float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
-                           for k, v in optimal_metrics.items()}
-            }
+            # Run greedy selection on train period
+            optimal_symbols, optimal_max_pos, optimal_pos_size, train_metrics = greedy_symbol_selection(
+                train_predictions,
+                models,
+                (args.min_positions, min(args.max_positions, len(train_predictions))),
+                args.daily_stop_loss,
+                args.initial_cash,
+                args.max_drawdown_limit,
+                args.position_size,
+                args.ranking_method,
+                period_name=f"Portfolio Train ({args.portfolio_train_start} to {args.portfolio_train_end})"
+            )
 
-            with open(output_path, 'w') as f:
-                json.dump(config, f, indent=2)
+            if optimal_symbols is None:
+                logger.error("Could not find configuration meeting drawdown constraint on train period")
+                return 1
 
-            logger.info(f"\nOptimal configuration saved to: {output_path}")
+            # Phase 2: Evaluate locked config on test period (true out-of-sample)
+            logger.info(f"\n{'='*80}")
+            logger.info(f"PHASE 2: TEST EVALUATION (Out-of-Sample)")
+            logger.info(f"Period: {args.test_start} to {args.test_end}")
+            logger.info(f"Testing locked configuration:")
+            logger.info(f"  Symbols: {', '.join(sorted(optimal_symbols))}")
+            logger.info(f"  Max Positions: {optimal_max_pos}")
+            logger.info(f"  Position Size: {optimal_pos_size:.2f}x")
+            logger.info(f"{'='*80}\n")
+
+            # Generate predictions for test period
+            logger.info(f"Generating predictions for test period...")
+            test_predictions = generate_predictions(models, data_dir, args.test_start, args.test_end)
+
+            if len(test_predictions) == 0:
+                logger.error("No predictions generated for test period!")
+                return 1
+
+            # Filter to only optimal symbols
+            test_predictions_filtered = {s: test_predictions[s] for s in optimal_symbols if s in test_predictions}
+
+            # Evaluate locked config on test period
+            _, test_metrics = simulate_portfolio(
+                test_predictions_filtered,
+                models,
+                optimal_max_pos,
+                args.daily_stop_loss,
+                args.initial_cash,
+                optimal_pos_size,
+                args.ranking_method
+            )
+
+            # Display results
+            print(f"\n{'='*110}")
+            print(f"📊 FINAL RESULTS")
+            print(f"{'='*110}\n")
+
+            print(f"Optimal Configuration (from portfolio train period):")
+            print(f"  Symbols: {', '.join(sorted(optimal_symbols))}")
+            print(f"  Max Positions: {optimal_max_pos}")
+            print(f"  Position Size: {optimal_pos_size:.2f}x")
+            print()
+
+            print(f"Portfolio Train Period ({args.portfolio_train_start} to {args.portfolio_train_end}):")
+            print(f"  Sharpe:        {train_metrics['sharpe']:.3f}")
+            print(f"  Max Drawdown:  ${train_metrics['max_drawdown']:,.0f}")
+            print(f"  CAGR:          {train_metrics['cagr']*100:.2f}%")
+            print()
+
+            print(f"✅ Test Period ({args.test_start} to {args.test_end}) - TRUE OUT-OF-SAMPLE:")
+            print(f"  Sharpe:        {test_metrics['sharpe']:.3f}")
+            print(f"  Sortino:       {test_metrics['sortino']:.3f}")
+            print(f"  Max Drawdown:  ${test_metrics['max_drawdown']:,.0f} ({test_metrics['max_drawdown_pct']*100:.2f}%)")
+            print(f"  CAGR:          {test_metrics['cagr']*100:.2f}%")
+            print(f"  Total Return:  ${test_metrics['total_return']:,.0f}")
+            print(f"  Profit Factor: {test_metrics['profit_factor']:.2f}")
+            print(f"  Win Rate:      {test_metrics['win_rate']*100:.2f}%")
+            print(f"  Avg Positions: {test_metrics['avg_positions']:.2f}")
+            print(f"  Stops Hit:     {int(test_metrics['daily_stops_hit'])}")
+            print(f"{'='*110}\n")
+
+            # Save both configs and metrics
+            if args.output:
+                output_path = Path(args.output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                config = {
+                    'symbols': sorted(list(optimal_symbols)),
+                    'max_positions': optimal_max_pos,
+                    'position_size': optimal_pos_size,
+                    'portfolio_train_period': {
+                        'start': args.portfolio_train_start,
+                        'end': args.portfolio_train_end,
+                        'metrics': {k: float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
+                                   for k, v in train_metrics.items()}
+                    },
+                    'test_period': {
+                        'start': args.test_start,
+                        'end': args.test_end,
+                        'metrics': {k: float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
+                                   for k, v in test_metrics.items()}
+                    }
+                }
+
+                with open(output_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+
+                logger.info(f"\nResults saved to: {output_path}")
+
+        else:
+            # Backward compatible: optimize directly on test period (NOT RECOMMENDED - causes leakage!)
+            logger.warning("⚠️  WARNING: No portfolio train period specified!")
+            logger.warning("⚠️  Optimizing on test period will cause PORTFOLIO-LEVEL DATA LEAKAGE!")
+            logger.warning("⚠️  Use --portfolio-train-start and --portfolio-train-end to avoid this.")
+            logger.warning("⚠️  Example: --portfolio-train-start 2021-01-01 --portfolio-train-end 2021-12-31\n")
+
+            # Generate predictions for test period
+            logger.info(f"Generating predictions for test period {args.test_start} to {args.test_end}...")
+            predictions = generate_predictions(models, data_dir, args.test_start, args.test_end)
+
+            if len(predictions) == 0:
+                logger.error("No predictions generated!")
+                return 1
+
+            optimal_symbols, optimal_max_pos, optimal_pos_size, optimal_metrics = greedy_symbol_selection(
+                predictions,
+                models,
+                (args.min_positions, min(args.max_positions, len(predictions))),
+                args.daily_stop_loss,
+                args.initial_cash,
+                args.max_drawdown_limit,
+                args.position_size,
+                args.ranking_method,
+                period_name=f"Test Period (LEAKAGE!) ({args.test_start} to {args.test_end})"
+            )
+
+            if optimal_symbols is None:
+                logger.error("Could not find configuration meeting drawdown constraint")
+                return 1
+
+            # Save config
+            if args.output:
+                output_path = Path(args.output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                config = {
+                    'symbols': sorted(list(optimal_symbols)),
+                    'max_positions': optimal_max_pos,
+                    'position_size': optimal_pos_size,
+                    'metrics': {k: float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
+                               for k, v in optimal_metrics.items()}
+                }
+
+                with open(output_path, 'w') as f:
+                    json.dump(config, f, indent=2)
+
+                logger.info(f"\nConfiguration saved to: {output_path}")
 
         return 0
 
     elif args.optimize_sizing:
+        # Generate predictions for test period
+        logger.info(f"Generating predictions for test period {args.test_start} to {args.test_end}...")
+        predictions = generate_predictions(models, data_dir, args.test_start, args.test_end)
+
+        if len(predictions) == 0:
+            logger.error("No predictions generated!")
+            return 1
+
         # 2D optimization: max_positions + position sizing
         results_df = optimize_positions_and_sizing(
             predictions,
@@ -835,6 +978,14 @@ def main():
             args.ranking_method
         )
     else:
+        # Generate predictions for test period
+        logger.info(f"Generating predictions for test period {args.test_start} to {args.test_end}...")
+        predictions = generate_predictions(models, data_dir, args.test_start, args.test_end)
+
+        if len(predictions) == 0:
+            logger.error("No predictions generated!")
+            return 1
+
         # 1D optimization: max_positions only (full contract size)
         results_df = optimize_max_positions(
             predictions,
