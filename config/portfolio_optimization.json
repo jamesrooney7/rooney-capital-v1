@@ -1,0 +1,45 @@
+{
+  "optimization_metadata": {
+    "generated_date": "2025-11-03T23:30:00",
+    "source_file": "results/optimal_portfolio.json",
+    "portfolio_train_period": {
+      "start": "2019-01-01",
+      "end": "2021-12-31"
+    },
+    "test_period": {
+      "start": "2022-01-01",
+      "end": "2024-12-31"
+    }
+  },
+  "portfolio_constraints": {
+    "symbols": [
+      "6A",
+      "6B",
+      "6C",
+      "6E",
+      "6M",
+      "6N",
+      "6S",
+      "CL",
+      "ES",
+      "GC",
+      "HG",
+      "NG",
+      "NQ",
+      "PL",
+      "RTY",
+      "YM"
+    ],
+    "max_positions": 2,
+    "daily_stop_loss": 2500.0
+  },
+  "expected_performance": {
+    "train_sharpe": 10.55074005819256,
+    "test_sharpe": 7.883701721117275,
+    "train_max_drawdown": -3397.75,
+    "test_max_drawdown": -6774.0,
+    "test_cagr": 0.6743485552836803,
+    "test_total_return": 1055171.25,
+    "test_win_rate": 0.7884187082405345
+  }
+}
