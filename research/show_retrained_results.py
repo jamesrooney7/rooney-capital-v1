@@ -27,7 +27,9 @@ def load_results(models_dir='src/models'):
         test_results = {}
         if test_file.exists():
             with open(test_file) as f:
-                test_results = json.load(f)
+                data = json.load(f)
+                # The actual metrics are nested under 'test_metrics' key
+                test_results = data.get('test_metrics', {})
 
         # Extract key metrics
         result = {
@@ -53,7 +55,7 @@ def load_results(models_dir='src/models'):
             result['test_wr'] = test_results.get('win_rate', 0) * 100
             result['test_cagr'] = test_results.get('cagr', 0) * 100
             result['test_max_dd'] = test_results.get('max_drawdown_pct', 0) * 100
-            result['test_pnl'] = test_results.get('total_pnl', 0)
+            result['test_pnl'] = test_results.get('total_pnl_usd', 0)  # Fixed: was 'total_pnl'
 
         results.append(result)
 
@@ -63,9 +65,9 @@ def load_results(models_dir='src/models'):
 def print_results(results):
     """Print formatted results table."""
 
-    print("=" * 100)
+    print("=" * 120)
     print("INDIVIDUAL SYMBOL RESULTS - UNBIASED (NO LEAKAGE)")
-    print("=" * 100)
+    print("=" * 120)
     print()
 
     # Threshold Period (2021) - Validation
@@ -90,9 +92,9 @@ def print_results(results):
     # Test Period (2022-2024) - TRUE OUT-OF-SAMPLE
     print("🎯 TEST PERIOD (2022-2024) - TRUE OUT-OF-SAMPLE PERFORMANCE")
     print("   (Model NEVER saw this data during training)")
-    print("-" * 100)
-    print(f"{'Symbol':<8} {'Sharpe':<10} {'Sortino':<10} {'Trades':<10} {'PF':<10} {'Win%':<10} {'CAGR%':<10} {'MaxDD%':<10}")
-    print("-" * 100)
+    print("-" * 120)
+    print(f"{'Symbol':<8} {'Sharpe':<10} {'Sortino':<10} {'Trades':<10} {'PF':<10} {'Win%':<10} {'CAGR%':<10} {'MaxDD%':<10} {'PnL $':<15}")
+    print("-" * 120)
 
     for r in results:
         print(f"{r['symbol']:<8} "
@@ -102,7 +104,8 @@ def print_results(results):
               f"{r.get('test_pf', 0):<10.2f} "
               f"{r.get('test_wr', 0):<10.1f} "
               f"{r.get('test_cagr', 0):<10.1f} "
-              f"{r.get('test_max_dd', 0):<10.1f}")
+              f"{r.get('test_max_dd', 0):<10.1f} "
+              f"${r.get('test_pnl', 0):>13,.0f}")
 
     # Calculate averages
     avg_test_sharpe = sum(r.get('test_sharpe', 0) for r in results) / len(results)
@@ -110,8 +113,9 @@ def print_results(results):
     avg_test_pf = sum(r.get('test_pf', 0) for r in results) / len(results)
     avg_test_wr = sum(r.get('test_wr', 0) for r in results) / len(results)
     avg_test_cagr = sum(r.get('test_cagr', 0) for r in results) / len(results)
+    total_test_pnl = sum(r.get('test_pnl', 0) for r in results)
 
-    print("-" * 100)
+    print("-" * 120)
     print(f"{'AVERAGE':<8} "
           f"{avg_test_sharpe:<10.3f} "
           f"{avg_test_sortino:<10.3f} "
@@ -119,15 +123,18 @@ def print_results(results):
           f"{avg_test_pf:<10.2f} "
           f"{avg_test_wr:<10.1f} "
           f"{avg_test_cagr:<10.1f}")
-    print("=" * 100)
+    print(f"{'TOTAL PNL':<8} {'':10} {'':10} {'':10} {'':10} {'':10} {'':10} {'':10} ${total_test_pnl:>13,.0f}")
+    print("=" * 120)
     print()
 
     # Summary
     print("📈 SUMMARY")
-    print("-" * 100)
+    print("-" * 120)
     print(f"Total Symbols: {len(results)}")
     print(f"Average Threshold Sharpe (2021): {avg_thresh_sharpe:.3f}")
     print(f"Average Test Sharpe (2022-2024): {avg_test_sharpe:.3f}")
+    print(f"Average Test CAGR: {avg_test_cagr:.1f}%")
+    print(f"Total Test PnL (all symbols): ${total_test_pnl:,.2f}")
     print(f"All using FIXED threshold: 0.50 (no optimization)")
     print()
     print("✅ These are UNBIASED results (all data leakage bugs fixed)")
@@ -136,7 +143,7 @@ def print_results(results):
     print("✅ CPCV bug fixed (no future data contamination)")
     print()
     print("Next step: Calculate portfolio-level Sharpe with max_positions constraint")
-    print("=" * 100)
+    print("=" * 120)
 
 
 if __name__ == '__main__':
