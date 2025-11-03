@@ -31,8 +31,8 @@ import pandas as pd
 import requests
 from requests import exceptions as requests_exceptions
 
-from config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
-from models import load_model_bundle, strategy_kwargs_from_bundle
+from ..config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
+from ..models import load_model_bundle, strategy_kwargs_from_bundle
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import (
     Bar,
@@ -51,9 +51,9 @@ from runner.traderspost_client import (
     order_notification_to_message,
     trade_notification_to_message,
 )
-from strategy.contract_specs import CONTRACT_SPECS
-from strategy.ibs_strategy import IbsStrategy
-from utils.discord_notifier import DiscordNotifier
+from ..strategy.contract_specs import CONTRACT_SPECS
+from ..strategy.ibs_strategy import IbsStrategy
+from ..utils.discord_notifier import DiscordNotifier
 
 logger = logging.getLogger(__name__)
 
