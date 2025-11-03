@@ -11,18 +11,22 @@ contract_map: Data/Databento_contract_map.yml
 models_path: src/models
 
 symbols:
-  - ES
-  - NQ
-  - RTY
-  - YM
-  - GC
-  - SI
-  - HG
-  - CL
-  - NG
   - 6A
   - 6B
+  - 6C
   - 6E
+  - 6M
+  - 6N
+  - 6S
+  - CL
+  - ES
+  - GC
+  - HG
+  - NG
+  - NQ
+  - PL
+  - RTY
+  - YM
 
 databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
