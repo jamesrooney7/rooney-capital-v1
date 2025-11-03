@@ -24,9 +24,11 @@ from datetime import datetime
 import joblib
 
 # Add parent directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+sys.path.insert(0, str(project_root / 'src'))
 
-from research.feature_builder import build_core_features, add_engineered
+from research.rf_cpcv_random_then_bo import build_core_features, add_engineered
 
 logging.basicConfig(
     level=logging.INFO,
