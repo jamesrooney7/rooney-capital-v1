@@ -69,7 +69,7 @@ def load_models_and_metadata(models_dir: Path) -> Dict:
 
 def load_test_data(symbol: str, data_dir: Path) -> pd.DataFrame:
     """Load test period data for a symbol."""
-    data_file = data_dir / f"{symbol}_trades.csv"
+    data_file = data_dir / f"{symbol}_transformed_features.csv"
 
     if not data_file.exists():
         raise FileNotFoundError(f"Data file not found: {data_file}")
@@ -80,8 +80,11 @@ def load_test_data(symbol: str, data_dir: Path) -> pd.DataFrame:
     if 'Date' in df.columns:
         df['Date'] = pd.to_datetime(df['Date'])
     elif 'Date/Time' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date/Time']).dt.date
-        df['Date'] = pd.to_datetime(df['Date'])
+        df['Date'] = pd.to_datetime(df['Date/Time'])
+        # Also create a Date column for filtering
+        if 'Date' not in df.columns:
+            df['Date'] = df['Date/Time'].dt.date
+            df['Date'] = pd.to_datetime(df['Date'])
 
     return df
 
