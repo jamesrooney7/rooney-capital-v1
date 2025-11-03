@@ -95,7 +95,7 @@ def generate_predictions(models: Dict, data_dir: Path,
     Generate predictions for all symbols during test period.
 
     Returns:
-        Dict of DataFrames with Date, prediction, proba, pnl_usd for each symbol
+        Dict of DataFrames with Date, entry_time, exit_time, prediction, proba, pnl_usd for each symbol
     """
     predictions = {}
 
@@ -135,9 +135,15 @@ def generate_predictions(models: Dict, data_dir: Path,
             probas = model.predict_proba(X_model)[:, 1]
             preds = (probas >= threshold).astype(int)
 
+            # Parse timestamps
+            entry_times = pd.to_datetime(df['Date/Time'])
+            exit_times = pd.to_datetime(df['Exit Date/Time'])
+
             # Build result DataFrame
             result = pd.DataFrame({
                 'Date': df['Date'].values,
+                'entry_time': entry_times.values,
+                'exit_time': exit_times.values,
                 'prediction': preds,
                 'proba': probas,
                 'pnl_usd': df['pnl_usd'].values if 'pnl_usd' in df.columns else df['y_pnl_usd'].values,
@@ -164,12 +170,12 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
                       position_size_multiplier: float = 1.0,
                       ranking_method: str = 'sharpe') -> Tuple[pd.DataFrame, Dict]:
     """
-    Simulate portfolio with position limits and daily stop loss.
+    Simulate portfolio with HOUR-BY-HOUR position tracking and limits.
 
     Args:
-        predictions: Dict of symbol -> DataFrame with Date, prediction, proba, pnl_usd
+        predictions: Dict of symbol -> DataFrame with entry_time, exit_time, proba, pnl_usd
         models: Dict of model info with metadata
-        max_positions: Maximum concurrent positions
+        max_positions: Maximum concurrent positions (enforced hour-by-hour)
         daily_stop_loss: Daily stop loss in USD
         initial_cash: Starting capital
         position_size_multiplier: Scale factor for position sizes (e.g., 0.5 = half contracts)
@@ -186,54 +192,109 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
     elif ranking_method == 'profit_factor':
         rankings = {symbol: models[symbol]['metadata'].get('threshold_optimization', {}).get('profit_factor', 0)
                    for symbol in predictions.keys()}
-    else:  # proba - will rank dynamically each day
+    else:  # proba - will rank dynamically
         rankings = None
 
-    # Combine all predictions into single timeline
-    all_dates = set()
-    for df in predictions.values():
-        all_dates.update(df['Date'].values)
-    all_dates = sorted(all_dates)
+    # Collect all potential trades
+    all_trades = []
+    trade_id = 0
+    for symbol, df in predictions.items():
+        for _, row in df.iterrows():
+            all_trades.append({
+                'trade_id': trade_id,
+                'symbol': symbol,
+                'entry_time': row['entry_time'],
+                'exit_time': row['exit_time'],
+                'proba': row['proba'],
+                'pnl_usd': row['pnl_usd'],
+                'ranking': rankings[symbol] if rankings else row['proba'],
+                'taken': False  # Will be set to True if position is accepted
+            })
+            trade_id += 1
 
-    # Simulate day by day
+    # Sort trades by entry time
+    all_trades = sorted(all_trades, key=lambda x: x['entry_time'])
+
+    # Track positions hour-by-hour
+    open_positions = []  # List of currently open trade dicts
+    completed_trades = []  # List of completed trades with P&L
+
+    # Create hourly timeline
+    if len(all_trades) == 0:
+        return pd.DataFrame(), {}
+
+    start_time = min(t['entry_time'] for t in all_trades)
+    end_time = max(t['exit_time'] for t in all_trades)
+
+    # Process trades chronologically by entry time
+    for trade in all_trades:
+        entry_time = trade['entry_time']
+
+        # Close any positions that exited before this entry
+        still_open = []
+        for pos in open_positions:
+            if pos['exit_time'] <= entry_time:
+                # Position closed
+                completed_trades.append(pos)
+            else:
+                still_open.append(pos)
+        open_positions = still_open
+
+        # Try to open this position
+        if len(open_positions) < max_positions:
+            # Accept this trade
+            trade['taken'] = True
+            open_positions.append(trade)
+        else:
+            # At max capacity - check if this trade should replace a lower-ranked one
+            # Find lowest ranked currently open position
+            lowest_ranked = min(open_positions, key=lambda x: x['ranking'])
+            if trade['ranking'] > lowest_ranked['ranking']:
+                # Replace the lowest ranked position
+                open_positions.remove(lowest_ranked)
+                lowest_ranked['taken'] = False  # Mark as rejected
+                trade['taken'] = True
+                open_positions.append(trade)
+
+    # Close any remaining open positions at end
+    completed_trades.extend(open_positions)
+
+    # Build daily equity curve from completed trades
+    daily_pnl = {}
+    for trade in completed_trades:
+        if trade['taken']:
+            exit_date = pd.Timestamp(trade['exit_time']).date()
+            pnl = trade['pnl_usd'] * position_size_multiplier
+            daily_pnl[exit_date] = daily_pnl.get(exit_date, 0) + pnl
+
+    # Create equity curve
+    if len(daily_pnl) == 0:
+        return pd.DataFrame(), {}
+
     equity = initial_cash
     equity_curve = []
     daily_stops_hit = 0
 
-    for date in all_dates:
-        # Get all signals for this date
-        day_signals = []
-        for symbol, df in predictions.items():
-            day_df = df[df['Date'] == date]
-            if len(day_df) > 0:
-                for _, row in day_df.iterrows():
-                    day_signals.append({
-                        'symbol': symbol,
-                        'proba': row['proba'],
-                        'pnl_usd': row['pnl_usd'],
-                        'ranking': rankings[symbol] if rankings else row['proba']
-                    })
-
-        # Rank and select top N signals
-        if len(day_signals) > max_positions:
-            day_signals = sorted(day_signals, key=lambda x: x['ranking'], reverse=True)[:max_positions]
-
-        # Calculate daily P&L (scaled by position size multiplier)
-        daily_pnl = sum(s['pnl_usd'] * position_size_multiplier for s in day_signals)
+    for date in sorted(daily_pnl.keys()):
+        pnl = daily_pnl[date]
 
         # Check daily stop loss
-        if daily_pnl < -daily_stop_loss:
+        if pnl < -daily_stop_loss:
             daily_stops_hit += 1
-            daily_pnl = -daily_stop_loss  # Cap loss at stop loss
+            pnl = -daily_stop_loss  # Cap loss at stop loss
 
-        equity += daily_pnl
+        equity += pnl
+
+        # Count average positions on this day
+        day_positions = [t for t in completed_trades
+                        if t['taken'] and
+                        pd.Timestamp(t['exit_time']).date() == date]
 
         equity_curve.append({
             'Date': date,
             'equity': equity,
-            'daily_pnl': daily_pnl,
-            'positions': len(day_signals),
-            'symbols': ','.join([s['symbol'] for s in day_signals]) if day_signals else ''
+            'daily_pnl': pnl,
+            'positions': len(day_positions),
         })
 
     equity_df = pd.DataFrame(equity_curve)
