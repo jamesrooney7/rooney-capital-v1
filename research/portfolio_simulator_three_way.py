@@ -16,7 +16,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Set
 import pandas as pd
 import numpy as np
 import logging
@@ -562,6 +562,160 @@ def optimize_positions_and_sizing(predictions: Dict[str, pd.DataFrame],
     return results_df
 
 
+def greedy_symbol_selection(predictions: Dict[str, pd.DataFrame],
+                           models: Dict,
+                           max_positions_range: Tuple[int, int],
+                           daily_stop_loss: float,
+                           initial_cash: float,
+                           max_drawdown_limit: float,
+                           position_size_multiplier: float = 1.0,
+                           ranking_method: str = 'sharpe') -> Tuple[Set[str], int, float, Dict]:
+    """
+    Greedy optimization: iteratively remove symbols to meet drawdown constraint.
+
+    For each max_positions value:
+    1. Start with all symbols
+    2. Remove the symbol that contributes most to drawdown
+    3. Repeat until drawdown <= limit or can't remove more
+    4. Track the best configuration
+
+    Returns:
+        optimal_symbols: Set of symbols in optimal portfolio
+        optimal_max_pos: Optimal max_positions
+        optimal_pos_size: Optimal position size multiplier
+        optimal_metrics: Performance metrics of optimal config
+    """
+    from copy import deepcopy
+
+    all_symbols = set(predictions.keys())
+
+    print(f"\n{'='*110}")
+    print(f"GREEDY SYMBOL SELECTION WITH DRAWDOWN CONSTRAINT")
+    print(f"Max Drawdown Limit: ${abs(max_drawdown_limit):,.0f}")
+    print(f"Testing max_positions: {max_positions_range[0]} to {max_positions_range[1]}")
+    print(f"Position Size: {position_size_multiplier:.2f}x")
+    print(f"Starting with {len(all_symbols)} symbols: {', '.join(sorted(all_symbols))}")
+    print(f"{'='*110}\n")
+
+    best_config = None
+    best_sharpe = -np.inf
+
+    for max_pos in range(max_positions_range[0], max_positions_range[1] + 1):
+        print(f"\n{'='*90}")
+        print(f"Testing max_positions = {max_pos}")
+        print(f"{'='*90}")
+
+        current_symbols = deepcopy(all_symbols)
+        iteration = 0
+
+        while len(current_symbols) > max_pos:  # Need at least max_positions symbols
+            iteration += 1
+
+            # Evaluate current portfolio
+            current_preds = {s: predictions[s] for s in current_symbols}
+            _, current_metrics = simulate_portfolio(
+                current_preds, models, max_pos, daily_stop_loss,
+                initial_cash, position_size_multiplier, ranking_method
+            )
+
+            current_dd = current_metrics['max_drawdown']
+            current_sharpe = current_metrics['sharpe']
+
+            print(f"\nIteration {iteration}: {len(current_symbols)} symbols")
+            print(f"  Sharpe: {current_sharpe:.3f}  MaxDD: ${current_dd:,.0f}  ", end='')
+
+            # Check if constraint is met
+            if current_dd >= -abs(max_drawdown_limit):
+                print(f"✓ MEETS CONSTRAINT")
+
+                # Track best configuration
+                if current_sharpe > best_sharpe:
+                    best_sharpe = current_sharpe
+                    best_config = {
+                        'symbols': deepcopy(current_symbols),
+                        'max_positions': max_pos,
+                        'position_size': position_size_multiplier,
+                        'metrics': current_metrics
+                    }
+                    print(f"  🏆 NEW BEST: Sharpe {current_sharpe:.3f}")
+
+                # Try removing more symbols to see if we can improve Sharpe
+                # but stop if we're down to max_positions symbols
+                if len(current_symbols) <= max_pos:
+                    break
+
+            else:
+                print(f"✗ Exceeds constraint")
+
+            # Try removing each symbol, see which improves drawdown most
+            best_removal = None
+            best_removal_dd = current_dd
+            best_removal_sharpe = -np.inf
+
+            for symbol_to_remove in current_symbols:
+                test_symbols = current_symbols - {symbol_to_remove}
+
+                # Need at least max_positions symbols
+                if len(test_symbols) < max_pos:
+                    continue
+
+                test_preds = {s: predictions[s] for s in test_symbols}
+                _, test_metrics = simulate_portfolio(
+                    test_preds, models, max_pos, daily_stop_loss,
+                    initial_cash, position_size_multiplier, ranking_method
+                )
+
+                test_dd = test_metrics['max_drawdown']
+                test_sharpe = test_metrics['sharpe']
+
+                # Choose removal that improves drawdown most (less negative = better)
+                # If multiple improve drawdown equally, pick the one with best Sharpe
+                if test_dd > best_removal_dd or (test_dd == best_removal_dd and test_sharpe > best_removal_sharpe):
+                    best_removal = symbol_to_remove
+                    best_removal_dd = test_dd
+                    best_removal_sharpe = test_sharpe
+
+            if best_removal is None:
+                print(f"  No beneficial removal found, stopping.")
+                break
+
+            # Remove the worst symbol
+            current_symbols.remove(best_removal)
+            dd_improvement = best_removal_dd - current_dd
+            print(f"  Removing {best_removal}: DD improves by ${dd_improvement:,.0f} → ${best_removal_dd:,.0f}")
+
+    if best_config is None:
+        print(f"\n{'='*110}")
+        print(f"⚠️  WARNING: Could not find any configuration meeting drawdown constraint of ${abs(max_drawdown_limit):,.0f}")
+        print(f"{'='*110}\n")
+        return None, None, None, None
+
+    # Display final result
+    print(f"\n{'='*110}")
+    print(f"🎯 OPTIMAL CONFIGURATION:")
+    print(f"{'='*110}")
+    print(f"  Symbols ({len(best_config['symbols'])}): {', '.join(sorted(best_config['symbols']))}")
+    print(f"  Max Positions:        {best_config['max_positions']}")
+    print(f"  Position Size:        {best_config['position_size']:.2f}x")
+    print(f"  Sharpe Ratio:         {best_config['metrics']['sharpe']:.3f}")
+    print(f"  Sortino Ratio:        {best_config['metrics']['sortino']:.3f}")
+    print(f"  CAGR:                 {best_config['metrics']['cagr']*100:.2f}%")
+    print(f"  Total Return:         ${best_config['metrics']['total_return']:,.0f}")
+    print(f"  Max Drawdown:         ${best_config['metrics']['max_drawdown']:,.0f} ({best_config['metrics']['max_drawdown_pct']*100:.2f}%)")
+    print(f"  Profit Factor:        {best_config['metrics']['profit_factor']:.2f}")
+    print(f"  Win Rate:             {best_config['metrics']['win_rate']*100:.2f}%")
+    print(f"  Avg Positions:        {best_config['metrics']['avg_positions']:.2f}")
+    print(f"  Daily Stops Hit:      {int(best_config['metrics']['daily_stops_hit'])}")
+    print(f"{'='*110}\n")
+
+    return (
+        best_config['symbols'],
+        best_config['max_positions'],
+        best_config['position_size'],
+        best_config['metrics']
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description='Simulate portfolio from three-way split models')
     parser.add_argument('--models-dir', type=str, default='src/models',
@@ -582,14 +736,18 @@ def main():
                        help='Daily stop loss in USD')
     parser.add_argument('--max-drawdown-limit', type=float, default=None,
                        help='Maximum allowed drawdown in USD (e.g., 6000). Will find best Sharpe with DD <= this limit')
+    parser.add_argument('--greedy-selection', action='store_true',
+                       help='Enable greedy symbol selection to find optimal instrument subset')
     parser.add_argument('--optimize-sizing', action='store_true',
                        help='Enable 2D optimization (max_positions + position sizing) to meet drawdown constraint')
+    parser.add_argument('--position-size', type=float, default=1.0,
+                       help='Position size multiplier for greedy selection (default: 1.0)')
     parser.add_argument('--position-size-min', type=float, default=0.1,
-                       help='Minimum position size multiplier (default: 0.1)')
+                       help='Minimum position size multiplier for 2D opt (default: 0.1)')
     parser.add_argument('--position-size-max', type=float, default=1.0,
-                       help='Maximum position size multiplier (default: 1.0)')
+                       help='Maximum position size multiplier for 2D opt (default: 1.0)')
     parser.add_argument('--position-size-step', type=float, default=0.05,
-                       help='Position size step (default: 0.05)')
+                       help='Position size step for 2D opt (default: 0.05)')
     parser.add_argument('--ranking-method', type=str, default='sharpe',
                        choices=['sharpe', 'profit_factor', 'proba'],
                        help='Method to rank symbols for position selection')
@@ -620,7 +778,49 @@ def main():
     logger.info(f"\nGenerated predictions for {len(predictions)} symbols")
 
     # Choose optimization mode
-    if args.optimize_sizing:
+    if args.greedy_selection:
+        # Greedy symbol selection: find optimal subset of instruments
+        if not args.max_drawdown_limit:
+            logger.error("--max-drawdown-limit is required for greedy selection!")
+            return 1
+
+        optimal_symbols, optimal_max_pos, optimal_pos_size, optimal_metrics = greedy_symbol_selection(
+            predictions,
+            models,
+            (args.min_positions, min(args.max_positions, len(predictions))),
+            args.daily_stop_loss,
+            args.initial_cash,
+            args.max_drawdown_limit,
+            args.position_size,
+            args.ranking_method
+        )
+
+        if optimal_symbols is None:
+            logger.error("Could not find configuration meeting drawdown constraint")
+            return 1
+
+        # Save optimal config
+        if args.output:
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Save as JSON with symbol list
+            config = {
+                'symbols': sorted(list(optimal_symbols)),
+                'max_positions': optimal_max_pos,
+                'position_size': optimal_pos_size,
+                'metrics': {k: float(v) if isinstance(v, (int, float, np.integer, np.floating)) else v
+                           for k, v in optimal_metrics.items()}
+            }
+
+            with open(output_path, 'w') as f:
+                json.dump(config, f, indent=2)
+
+            logger.info(f"\nOptimal configuration saved to: {output_path}")
+
+        return 0
+
+    elif args.optimize_sizing:
         # 2D optimization: max_positions + position sizing
         results_df = optimize_positions_and_sizing(
             predictions,
