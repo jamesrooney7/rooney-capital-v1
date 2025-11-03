@@ -241,20 +241,15 @@ def simulate_portfolio(predictions: Dict[str, pd.DataFrame],
         open_positions = still_open
 
         # Try to open this position
+        # Match live system behavior: simple first-come-first-served, no replacement
         if len(open_positions) < max_positions:
             # Accept this trade
             trade['taken'] = True
             open_positions.append(trade)
         else:
-            # At max capacity - check if this trade should replace a lower-ranked one
-            # Find lowest ranked currently open position
-            lowest_ranked = min(open_positions, key=lambda x: x['ranking'])
-            if trade['ranking'] > lowest_ranked['ranking']:
-                # Replace the lowest ranked position
-                open_positions.remove(lowest_ranked)
-                lowest_ranked['taken'] = False  # Mark as rejected
-                trade['taken'] = True
-                open_positions.append(trade)
+            # At max capacity - block this entry
+            # (Live PortfolioCoordinator does NOT replace lower-ranked positions)
+            trade['taken'] = False
 
     # Close any remaining open positions at end
     completed_trades.extend(open_positions)
