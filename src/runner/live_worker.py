@@ -1622,6 +1622,17 @@ class LiveWorker:
             else:
                 continue
 
+            # Fix zero-range bars that cause Backtrader infinite loop
+            # Add minimal epsilon to ensure high >= low with valid range
+            if high_value == low_value:
+                # Use 0.01 tick increment for futures (appropriate for most contracts)
+                epsilon = 0.01
+                high_value = low_value + epsilon
+                logger.debug(
+                    "Adjusted zero-range bar at %s for %s (added epsilon=%.4f)",
+                    timestamp, symbol, epsilon
+                )
+
             bars.append(
                 Bar(
                     symbol=symbol,
