@@ -925,9 +925,21 @@ class ResampledLiveData(bt.feeds.DataBase):
     def _populate_lines_from_bar(self, bar: Bar) -> bool:
         """Populate feed lines from a Bar object."""
         self.lines.datetime[0] = bt.date2num(bar.timestamp)
+
+        # Fix zero-range bars that cause Backtrader infinite loop
+        high_value = bar.high
+        low_value = bar.low
+        if high_value == low_value:
+            epsilon = 0.01
+            high_value = low_value + epsilon
+            logger.debug(
+                "Adjusted zero-range bar in %s at %s (added epsilon=%.4f)",
+                getattr(self, '_name', 'unknown'), bar.timestamp, epsilon
+            )
+
         self.lines.open[0] = bar.open
-        self.lines.high[0] = bar.high
-        self.lines.low[0] = bar.low
+        self.lines.high[0] = high_value
+        self.lines.low[0] = low_value
         self.lines.close[0] = bar.close
         self.lines.volume[0] = bar.volume
         return True
@@ -935,9 +947,21 @@ class ResampledLiveData(bt.feeds.DataBase):
     def _populate_lines_from_dict(self, bar_dict: dict) -> bool:
         """Populate feed lines from a dictionary."""
         self.lines.datetime[0] = bt.date2num(bar_dict['timestamp'])
+
+        # Fix zero-range bars that cause Backtrader infinite loop
+        high_value = bar_dict['high']
+        low_value = bar_dict['low']
+        if high_value == low_value:
+            epsilon = 0.01
+            high_value = low_value + epsilon
+            logger.debug(
+                "Adjusted zero-range bar in %s at %s (added epsilon=%.4f)",
+                getattr(self, '_name', 'unknown'), bar_dict['timestamp'], epsilon
+            )
+
         self.lines.open[0] = bar_dict['open']
-        self.lines.high[0] = bar_dict['high']
-        self.lines.low[0] = bar_dict['low']
+        self.lines.high[0] = high_value
+        self.lines.low[0] = low_value
         self.lines.close[0] = bar_dict['close']
         self.lines.volume[0] = bar_dict['volume']
         return True

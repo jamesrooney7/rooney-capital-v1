@@ -1981,10 +1981,10 @@ class LiveWorker:
         else:
             self._record_traderspost_result("order", payload, success=True)
             logger.info(
-                "Posted order event to TradersPost: %s %s size=%s",
-                payload.get("symbol"),
-                payload.get("side"),
-                payload.get("size"),
+                "Posted order event to TradersPost: %s %s quantity=%s",
+                payload.get("ticker"),
+                payload.get("action"),
+                payload.get("quantity"),
             )
 
     def _traderspost_trade_callback(

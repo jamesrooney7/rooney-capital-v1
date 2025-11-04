@@ -247,10 +247,13 @@ def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[st
         )
     )
 
+    # Use absolute value of size - direction determined by action (buy/sell)
+    quantity = abs(size) if size is not None else None
+
     payload = {
         "ticker": _extract_symbol(strategy, getattr(order, "data", None)),
         "action": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
-        "quantity": size,
+        "quantity": quantity,
         "price": price,
         "thresholds": thresholds,
         "metadata": metadata,
