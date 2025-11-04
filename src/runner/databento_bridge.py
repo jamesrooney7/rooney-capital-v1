@@ -266,6 +266,10 @@ class DatabentoSubscriber:
         self._last_connect_time: Optional[dt.datetime] = None
         self._last_disconnect_time: Optional[dt.datetime] = None
         self._instrument_roots: Dict[int, Optional[str]] = {}
+        # Diagnostic counters for trade/bar activity
+        self._trade_count: int = 0
+        self._bar_count: int = 0
+        self._last_activity_log: float = 0.0
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -482,6 +486,17 @@ class DatabentoSubscriber:
         ts = self._normalize_timestamp(trade.ts_event)
         minute = ts.replace(second=0, microsecond=0)
 
+        # Increment trade counter and log activity periodically
+        self._trade_count += 1
+        now = time.monotonic()
+        if now - self._last_activity_log >= 30.0:  # Log every 30 seconds
+            logger.info(
+                "Databento activity: %d trades processed, %d bars emitted",
+                self._trade_count,
+                self._bar_count
+            )
+            self._last_activity_log = now
+
         with self._lock:
             self._last_trade_ts[root] = ts
             bar = self._current_bars.get(root)
@@ -535,7 +550,13 @@ class DatabentoSubscriber:
             close=float(payload["close"]),
             volume=float(payload["volume"]),
         )
-        logger.debug("Emitting bar %s %s", root, payload["minute"])
+        self._bar_count += 1
+        # Log first few bars at INFO level for diagnostics
+        if self._bar_count <= 10:
+            logger.info("Emitting bar #%d: %s @ %s (O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f)",
+                       self._bar_count, root, payload["minute"], bar.open, bar.high, bar.low, bar.close, bar.volume)
+        else:
+            logger.debug("Emitting bar %s %s", root, payload["minute"])
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
