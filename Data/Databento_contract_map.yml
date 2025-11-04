@@ -152,7 +152,7 @@
         "stype_in": "parent"
       },
       "tradovate_description": "E-Micro British Pound (CME)",
-      "optimized": false
+      "optimized": true
     },
     {
       "symbol": "6E",
@@ -166,50 +166,85 @@
         "stype_in": "parent"
       },
       "tradovate_description": "E-Micro Euro (CME)",
-      "optimized": false
-    }
-  ],
-  "reference_feeds": [
-    {
-      "symbol": "PL",
-      "databento": {
-        "dataset": "GLBX.MDP3",
-        "product_id": "PL.FUT"
-      }
+      "optimized": true
     },
     {
       "symbol": "6C",
+      "tradovate_symbol": "6C",
       "databento": {
         "dataset": "GLBX.MDP3",
+        "feed_symbol": null,
         "product_id": "6C.FUT"
-      }
+      },
+      "roll": {
+        "stype_in": "parent"
+      },
+      "tradovate_description": "Canadian Dollar (CME)",
+      "optimized": true
     },
+    {
+      "symbol": "6M",
+      "tradovate_symbol": "6M",
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": null,
+        "product_id": "6M.FUT"
+      },
+      "roll": {
+        "stype_in": "parent"
+      },
+      "tradovate_description": "Mexican Peso (CME)",
+      "optimized": true
+    },
+    {
+      "symbol": "6N",
+      "tradovate_symbol": "6N",
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": null,
+        "product_id": "6N.FUT"
+      },
+      "roll": {
+        "stype_in": "parent"
+      },
+      "tradovate_description": "New Zealand Dollar (CME)",
+      "optimized": true
+    },
+    {
+      "symbol": "6S",
+      "tradovate_symbol": "6S",
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": null,
+        "product_id": "6S.FUT"
+      },
+      "roll": {
+        "stype_in": "parent"
+      },
+      "tradovate_description": "Swiss Franc (CME)",
+      "optimized": true
+    },
+    {
+      "symbol": "PL",
+      "tradovate_symbol": "PL",
+      "databento": {
+        "dataset": "GLBX.MDP3",
+        "feed_symbol": null,
+        "product_id": "PL.FUT"
+      },
+      "roll": {
+        "stype_in": "parent"
+      },
+      "tradovate_description": "Platinum (NYMEX)",
+      "optimized": true
+    }
+  ],
+  "reference_feeds": [
     {
       "symbol": "6J",
       "databento": {
         "dataset": "GLBX.MDP3",
         "product_id": "6J.FUT"
-      }
-    },
-    {
-      "symbol": "6M",
-      "databento": {
-        "dataset": "GLBX.MDP3",
-        "product_id": "6M.FUT"
-      }
-    },
-    {
-      "symbol": "6N",
-      "databento": {
-        "dataset": "GLBX.MDP3",
-        "product_id": "6N.FUT"
-      }
-    },
-    {
-      "symbol": "6S",
-      "databento": {
-        "dataset": "GLBX.MDP3",
-        "product_id": "6S.FUT"
       }
     },
     {
