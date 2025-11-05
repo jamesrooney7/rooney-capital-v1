@@ -13,10 +13,13 @@ Run with: streamlit run app.py
 
 from __future__ import annotations
 
+import math
 import streamlit as st
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import numpy as np
 
 from utils import (
     read_heartbeat,
@@ -580,10 +583,18 @@ if DB_AVAILABLE and db_trades:
             threshold=0.65,
         )
 
-        # Get all trade PnLs for returns calculation
-        all_trade_pnls = [t["pnl"] for t in db_trades if t.get("pnl") != 0 and t.get("exit_time")]
+        # Get all trade PnLs for returns calculation (sorted by exit time, newest first)
+        completed_trades_sorted = sorted(
+            [t for t in db_trades if t.get("pnl") != 0 and t.get("exit_time")],
+            key=lambda x: x.get("exit_time", ""),
+            reverse=True
+        )
+        all_trade_pnls = [t["pnl"] for t in completed_trades_sorted]
 
-        # Convert portfolio metrics to LivePerformance format
+        # Calculate rolling 50 trades if we have enough data
+        rolling_50_pnls = all_trade_pnls[:50] if len(all_trade_pnls) >= 50 else None
+
+        # Convert portfolio metrics to LivePerformance format (ALL-TIME)
         portfolio_live = LivePerformance(
             symbol="PORTFOLIO",
             n_trades=portfolio_metrics.get('total_trades', 0),
@@ -597,10 +608,56 @@ if DB_AVAILABLE and db_trades:
             returns=all_trade_pnls,
         )
 
-        # Run statistical tests
+        # Calculate rolling 50 LivePerformance if available
+        portfolio_live_rolling = None
+        if rolling_50_pnls:
+            rolling_array = np.array(rolling_50_pnls)
+            rolling_win_rate = float((rolling_array > 0).sum() / len(rolling_50_pnls) * 100)
+            rolling_avg_return = float(rolling_array.mean())
+            rolling_std_return = float(rolling_array.std(ddof=1))
+            rolling_sharpe = rolling_avg_return / rolling_std_return * math.sqrt(252) if rolling_std_return > 0 else 0.0
+
+            gross_profit = float(rolling_array[rolling_array > 0].sum())
+            gross_loss = float(abs(rolling_array[rolling_array < 0].sum()))
+            rolling_profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
+
+            cumsum = rolling_array.cumsum()
+            running_max = np.maximum.accumulate(cumsum)
+            drawdown = running_max - cumsum
+            rolling_max_drawdown = float(drawdown.max())
+
+            portfolio_live_rolling = LivePerformance(
+                symbol="PORTFOLIO_ROLLING_50",
+                n_trades=len(rolling_50_pnls),
+                sharpe=rolling_sharpe,
+                profit_factor=rolling_profit_factor,
+                win_rate=rolling_win_rate,
+                total_pnl=float(rolling_array.sum()),
+                max_drawdown=rolling_max_drawdown,
+                avg_return=rolling_avg_return,
+                std_return=rolling_std_return,
+                returns=rolling_50_pnls,
+            )
+
+        # Run statistical tests for ALL-TIME
         portfolio_tests = monitor.run_statistical_tests(portfolio_bl, portfolio_live, confidence=0.95)
 
-        # Determine overall portfolio status
+        # Run statistical tests for ROLLING 50 if available
+        portfolio_tests_rolling = None
+        portfolio_status_rolling = None
+        if portfolio_live_rolling:
+            portfolio_tests_rolling = monitor.run_statistical_tests(portfolio_bl, portfolio_live_rolling, confidence=0.95)
+
+            # Determine rolling status
+            portfolio_status_rolling = "green"
+            for test in portfolio_tests_rolling:
+                if test.status == "red":
+                    portfolio_status_rolling = "red"
+                    break
+                elif test.status == "yellow" and portfolio_status_rolling != "red":
+                    portfolio_status_rolling = "yellow"
+
+        # Determine overall portfolio status (all-time)
         portfolio_status = "green"
         for test in portfolio_tests:
             if test.status == "red":
@@ -609,111 +666,238 @@ if DB_AVAILABLE and db_trades:
             elif test.status == "yellow" and portfolio_status != "red":
                 portfolio_status = "yellow"
 
-        # Display overall status banner
-        if portfolio_status == "green":
-            st.success("🟢 **Portfolio Status: HEALTHY** - Performance matches backtest expectations")
-        elif portfolio_status == "yellow":
-            st.warning("🟡 **Portfolio Status: CAUTION** - Some metrics deviating from baseline")
-        else:
-            st.error("🔴 **Portfolio Status: ALERT** - Significant deviation detected")
+        # Display status banners
+        col_banner1, col_banner2 = st.columns(2)
 
-        # Show key metrics comparison
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.metric(
-                "Live Trades",
-                f"{portfolio_live.n_trades}",
-                help=f"Baseline: {portfolio_bl.trades} trades in test period"
-            )
-
-        with col2:
-            sharpe_delta = portfolio_live.sharpe - portfolio_bl.sharpe
-            st.metric(
-                "Sharpe Ratio",
-                f"{portfolio_live.sharpe:.2f}",
-                delta=f"{sharpe_delta:+.2f}",
-                help=f"Expected: {portfolio_bl.sharpe:.2f}"
-            )
-
-        with col3:
-            wr_delta = portfolio_live.win_rate - portfolio_bl.win_rate
-            st.metric(
-                "Win Rate",
-                f"{portfolio_live.win_rate:.1f}%",
-                delta=f"{wr_delta:+.1f}%",
-                help=f"Expected: {portfolio_bl.win_rate:.1f}%"
-            )
-
-        with col4:
-            # Sample size recommendation
-            rec_n = monitor.get_sample_size_recommendation(portfolio_bl, power=0.80, alpha=0.05)
-            if portfolio_live.n_trades >= rec_n:
-                st.metric("Sample Size", "✅ Sufficient", help=f"Have {portfolio_live.n_trades} ≥ {rec_n} needed")
+        with col_banner1:
+            st.markdown("**All-Time Performance**")
+            if portfolio_status == "green":
+                st.success("🟢 HEALTHY - Matches backtest")
+            elif portfolio_status == "yellow":
+                st.warning("🟡 CAUTION - Some deviation")
             else:
-                st.metric("Sample Size", f"⚠️ {portfolio_live.n_trades}/{rec_n}", help="Need more trades for full power")
+                st.error("🔴 ALERT - Significant deviation")
 
-        # Detailed test results in expander
-        with st.expander("📊 Detailed Statistical Tests"):
-            for test in portfolio_tests:
-                # Color code
-                if test.status == "green":
-                    color = "#d4edda"
-                    border = "#c3e6cb"
-                elif test.status == "yellow":
-                    color = "#fff3cd"
-                    border = "#ffeaa7"
+        with col_banner2:
+            if portfolio_live_rolling:
+                st.markdown("**Recent Performance (Last 50 Trades)**")
+                if portfolio_status_rolling == "green":
+                    st.success("🟢 HEALTHY - Matches backtest")
+                elif portfolio_status_rolling == "yellow":
+                    st.warning("🟡 CAUTION - Some deviation")
                 else:
-                    color = "#f8d7da"
-                    border = "#f5c6cb"
+                    st.error("🔴 ALERT - Significant deviation")
+            else:
+                st.markdown("**Recent Performance (Last 50 Trades)**")
+                st.info(f"⏳ Need 50 trades (have {len(all_trade_pnls)})")
 
-                # Format values
-                if test.metric_name == "Average Return":
-                    obs_str = f"${test.observed:.2f}"
-                    exp_str = f"${test.expected:.2f}"
-                    ci_str = f"[${test.ci_lower:.2f}, ${test.ci_upper:.2f}]"
-                else:
-                    obs_str = f"{test.observed:.2f}"
-                    exp_str = f"{test.expected:.2f}"
-                    ci_str = f"[{test.ci_lower:.2f}, {test.ci_upper:.2f}]"
+        # Show key metrics comparison - SIDE BY SIDE
+        st.markdown("---")
 
-                st.markdown(
-                    f"""
-                    <div style='background-color: {color}; padding: 10px; border-radius: 5px;
-                                border: 1px solid {border}; margin-bottom: 10px;'>
-                        <b>{test.metric_name}</b><br>
-                        Observed: {obs_str} | Expected: {exp_str}<br>
-                        Z-score: {test.z_score:.2f} | P-value: {test.p_value:.4f}<br>
-                        95% CI: {ci_str}<br>
-                        <b>Status: {test.status.upper()}</b>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+        # Create tabs for All-Time vs Rolling 50
+        if portfolio_live_rolling:
+            tab1, tab2 = st.tabs(["📊 All-Time", "🔄 Rolling 50 Trades"])
+        else:
+            tab1, tab2 = st.tabs(["📊 All-Time", "🔄 Rolling 50 Trades (Not Ready)"])
 
-        # SPRT for portfolio
-        with st.expander("🔬 Sequential Testing (SPRT)"):
-            sprt_result = monitor.run_sprt(portfolio_bl, portfolio_live, alpha=0.05, beta=0.20)
+        with tab1:
+            st.caption("Cumulative performance since going live")
 
-            col1, col2, col3 = st.columns(3)
+            col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                st.write(f"**Log-Likelihood Ratio:** {sprt_result['log_likelihood_ratio']:.2f}")
+                st.metric(
+                    "Live Trades",
+                    f"{portfolio_live.n_trades}",
+                    help=f"Baseline: {portfolio_bl.trades} trades in test period"
+                )
 
             with col2:
-                st.write(f"**Upper Threshold (H0):** {sprt_result['threshold_upper']:.2f}")
-                st.write(f"**Lower Threshold (H1):** {sprt_result['threshold_lower']:.2f}")
+                sharpe_delta = portfolio_live.sharpe - portfolio_bl.sharpe
+                st.metric(
+                    "Sharpe Ratio",
+                    f"{portfolio_live.sharpe:.2f}",
+                    delta=f"{sharpe_delta:+.2f}",
+                    help=f"Expected: {portfolio_bl.sharpe:.2f}"
+                )
 
             with col3:
-                decision = sprt_result['decision']
-                if decision == "accept_H0":
-                    st.success("✅ PASS - Performance OK")
-                elif decision == "accept_H1":
-                    st.error("❌ FAIL - Performance degraded")
-                else:
-                    st.info("⏳ CONTINUE - Keep monitoring")
+                wr_delta = portfolio_live.win_rate - portfolio_bl.win_rate
+                st.metric(
+                    "Win Rate",
+                    f"{portfolio_live.win_rate:.1f}%",
+                    delta=f"{wr_delta:+.1f}%",
+                    help=f"Expected: {portfolio_bl.win_rate:.1f}%"
+                )
 
-            st.caption(sprt_result['message'])
+            with col4:
+                # Sample size recommendation
+                rec_n = monitor.get_sample_size_recommendation(portfolio_bl, power=0.80, alpha=0.05)
+                if portfolio_live.n_trades >= rec_n:
+                    st.metric("Sample Size", "✅ Sufficient", help=f"Have {portfolio_live.n_trades} ≥ {rec_n} needed")
+                else:
+                    st.metric("Sample Size", f"⚠️ {portfolio_live.n_trades}/{rec_n}", help="Need more trades for full power")
+
+            # Detailed test results in expander
+            with st.expander("📊 Detailed Statistical Tests (All-Time)"):
+                for test in portfolio_tests:
+                    # Color code
+                    if test.status == "green":
+                        color = "#d4edda"
+                        border = "#c3e6cb"
+                    elif test.status == "yellow":
+                        color = "#fff3cd"
+                        border = "#ffeaa7"
+                    else:
+                        color = "#f8d7da"
+                        border = "#f5c6cb"
+
+                    # Format values
+                    if test.metric_name == "Average Return":
+                        obs_str = f"${test.observed:.2f}"
+                        exp_str = f"${test.expected:.2f}"
+                        ci_str = f"[${test.ci_lower:.2f}, ${test.ci_upper:.2f}]"
+                    else:
+                        obs_str = f"{test.observed:.2f}"
+                        exp_str = f"{test.expected:.2f}"
+                        ci_str = f"[{test.ci_lower:.2f}, {test.ci_upper:.2f}]"
+
+                    st.markdown(
+                        f"""
+                        <div style='background-color: {color}; padding: 10px; border-radius: 5px;
+                                    border: 1px solid {border}; margin-bottom: 10px;'>
+                            <b>{test.metric_name}</b><br>
+                            Observed: {obs_str} | Expected: {exp_str}<br>
+                            Z-score: {test.z_score:.2f} | P-value: {test.p_value:.4f}<br>
+                            95% CI: {ci_str}<br>
+                            <b>Status: {test.status.upper()}</b>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            # SPRT for portfolio (all-time)
+            with st.expander("🔬 Sequential Testing (SPRT - All-Time)"):
+                sprt_result = monitor.run_sprt(portfolio_bl, portfolio_live, alpha=0.05, beta=0.20)
+
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.write(f"**Log-Likelihood Ratio:** {sprt_result['log_likelihood_ratio']:.2f}")
+
+                with col2:
+                    st.write(f"**Upper Threshold (H0):** {sprt_result['threshold_upper']:.2f}")
+                    st.write(f"**Lower Threshold (H1):** {sprt_result['threshold_lower']:.2f}")
+
+                with col3:
+                    decision = sprt_result['decision']
+                    if decision == "accept_H0":
+                        st.success("✅ PASS - Performance OK")
+                    elif decision == "accept_H1":
+                        st.error("❌ FAIL - Performance degraded")
+                    else:
+                        st.info("⏳ CONTINUE - Keep monitoring")
+
+                st.caption(sprt_result['message'])
+
+        # TAB 2: Rolling 50 trades
+        with tab2:
+            if portfolio_live_rolling:
+                st.caption("Most recent 50 completed trades")
+
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric(
+                        "Trades",
+                        "50",
+                        help="Rolling window of last 50 trades"
+                    )
+
+                with col2:
+                    sharpe_delta_rolling = portfolio_live_rolling.sharpe - portfolio_bl.sharpe
+                    st.metric(
+                        "Sharpe Ratio",
+                        f"{portfolio_live_rolling.sharpe:.2f}",
+                        delta=f"{sharpe_delta_rolling:+.2f}",
+                        help=f"Expected: {portfolio_bl.sharpe:.2f}"
+                    )
+
+                with col3:
+                    wr_delta_rolling = portfolio_live_rolling.win_rate - portfolio_bl.win_rate
+                    st.metric(
+                        "Win Rate",
+                        f"{portfolio_live_rolling.win_rate:.1f}%",
+                        delta=f"{wr_delta_rolling:+.1f}%",
+                        help=f"Expected: {portfolio_bl.win_rate:.1f}%"
+                    )
+
+                with col4:
+                    st.metric("Sample Size", "✅ Sufficient", help="50 trades meets power requirements")
+
+                # Detailed test results for rolling
+                with st.expander("📊 Detailed Statistical Tests (Rolling 50)"):
+                    for test in portfolio_tests_rolling:
+                        # Color code
+                        if test.status == "green":
+                            color = "#d4edda"
+                            border = "#c3e6cb"
+                        elif test.status == "yellow":
+                            color = "#fff3cd"
+                            border = "#ffeaa7"
+                        else:
+                            color = "#f8d7da"
+                            border = "#f5c6cb"
+
+                        # Format values
+                        if test.metric_name == "Average Return":
+                            obs_str = f"${test.observed:.2f}"
+                            exp_str = f"${test.expected:.2f}"
+                            ci_str = f"[${test.ci_lower:.2f}, ${test.ci_upper:.2f}]"
+                        else:
+                            obs_str = f"{test.observed:.2f}"
+                            exp_str = f"{test.expected:.2f}"
+                            ci_str = f"[{test.ci_lower:.2f}, {test.ci_upper:.2f}]"
+
+                        st.markdown(
+                            f"""
+                            <div style='background-color: {color}; padding: 10px; border-radius: 5px;
+                                        border: 1px solid {border}; margin-bottom: 10px;'>
+                                <b>{test.metric_name}</b><br>
+                                Observed: {obs_str} | Expected: {exp_str}<br>
+                                Z-score: {test.z_score:.2f} | P-value: {test.p_value:.4f}<br>
+                                95% CI: {ci_str}<br>
+                                <b>Status: {test.status.upper()}</b>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                # SPRT for rolling 50
+                with st.expander("🔬 Sequential Testing (SPRT - Rolling 50)"):
+                    sprt_result_rolling = monitor.run_sprt(portfolio_bl, portfolio_live_rolling, alpha=0.05, beta=0.20)
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        st.write(f"**Log-Likelihood Ratio:** {sprt_result_rolling['log_likelihood_ratio']:.2f}")
+
+                    with col2:
+                        st.write(f"**Upper Threshold (H0):** {sprt_result_rolling['threshold_upper']:.2f}")
+                        st.write(f"**Lower Threshold (H1):** {sprt_result_rolling['threshold_lower']:.2f}")
+
+                    with col3:
+                        decision = sprt_result_rolling['decision']
+                        if decision == "accept_H0":
+                            st.success("✅ PASS - Performance OK")
+                        elif decision == "accept_H1":
+                            st.error("❌ FAIL - Performance degraded")
+                        else:
+                            st.info("⏳ CONTINUE - Keep monitoring")
+
+                    st.caption(sprt_result_rolling['message'])
+            else:
+                st.info(f"Need 50 completed trades to activate rolling window analysis. Currently have {len(all_trade_pnls)} trades.")
 
         st.divider()
 
