@@ -1,4 +1,10 @@
-# Configuration B - Monitoring Guide
+# Rooney Capital - Monitoring Guide
+
+**⚠️ NOTE:** This guide is maintained for quick reference. For the complete system guide, see **[SYSTEM_GUIDE.md](SYSTEM_GUIDE.md)**
+
+**Current Configuration:** 9 instruments, 2 max positions, $2,500 daily stop loss
+
+---
 
 ## Quick Status Check
 
@@ -7,11 +13,11 @@
 sudo systemctl status pine-runner
 ```
 
-### Verify All 16 Instruments Are Active
+### Verify All 9 Instruments Are Active
 ```bash
 sudo journalctl -u pine-runner -n 100 | grep "Model loaded" | wc -l
 ```
-Should return **16**
+Should return **9**
 
 ### View Live Logs (All Activity)
 ```bash
@@ -55,24 +61,29 @@ sqlite3 /opt/pine/runtime/trades.db "SELECT symbol, COUNT(*) as trades, SUM(pnl)
 
 ## Configuration Verification
 
-### Verify 16 Instruments in Config
+### Verify 9 Instruments in Config
 ```bash
-grep "symbols:" -A 20 /opt/pine/rooney-capital-v1/config.yml
+grep "symbols:" -A 12 /opt/pine/rooney-capital-v1/config.yml
 ```
+
+Should list: 6A, 6B, 6C, 6M, 6N, 6S, CL, HG, SI
 
 ### Check Portfolio Settings
 ```bash
-grep -E "(max_positions|daily_stop_loss)" /opt/pine/rooney-capital-v1/config.yml
+grep -A 3 "portfolio:" /opt/pine/rooney-capital-v1/config.yml
 ```
 Should show:
-- `max_positions: 2`
-- `daily_stop_loss: 2500`
+```yaml
+portfolio:
+  max_positions: 2
+  daily_stop_loss: 2500
+```
 
 ### Verify Active Instruments in Logs
 ```bash
-sudo journalctl -u pine-runner -n 500 | grep "Trading symbols:"
+sudo journalctl -u pine-runner -n 200 | grep "Model loaded"
 ```
-Should list all 16: 6A, 6B, 6C, 6E, 6M, 6N, 6S, CL, ES, GC, HG, NG, NQ, PL, RTY, YM
+Should show 9 instruments: 6A, 6B, 6C, 6M, 6N, 6S, CL, HG, SI
 
 ## Performance Monitoring
 
@@ -115,16 +126,20 @@ sudo systemctl list-units | grep -i rooney
 ```
 Should show **only** `pine-runner.service` (NOT rooney-trading.service)
 
-## Configuration B Targets
+## Current Configuration Targets
 
-Based on out-of-sample test results (2022-2024):
+Based on train/test optimization (2023 train, 2024 test):
 
-- **Test Sharpe Ratio**: 7.88
-- **Test CAGR**: 67.4%
-- **Instruments**: 16 (7 currencies, 4 equities, 5 commodities)
+- **Train Sharpe Ratio**: 11.56 | **Test Sharpe Ratio**: 10.48
+- **Test CAGR**: 90.74%
+- **Test Max Drawdown**: $6,296
+- **Generalization**: 90.7%
+- **Instruments**: 9 (6 currencies, 1 energy, 2 metals)
+  - Currencies: 6A, 6B, 6C, 6M, 6N, 6S
+  - Energy: CL
+  - Metals: HG, SI
 - **Max Concurrent Positions**: 2
 - **Daily Stop Loss**: $2,500
-- **Risk per Trade**: ~$200-500 per instrument
 
 ## Key Files
 
@@ -138,11 +153,12 @@ Based on out-of-sample test results (2022-2024):
 ## Daily Checklist
 
 1. ✅ Verify service is running: `sudo systemctl status pine-runner`
-2. ✅ Check all 16 instruments loaded: `sudo journalctl -u pine-runner -n 100 | grep "Model loaded" | wc -l`
-3. ✅ Monitor for errors: `sudo journalctl -u pine-runner -n 200 | grep -i error`
-4. ✅ Check position count: Max should be 2 concurrent
-5. ✅ Review dashboard for daily P&L
-6. ✅ Verify no duplicate processes: `ps aux | grep python | grep runner`
+2. ✅ Check all 9 instruments loaded: `sudo journalctl -u pine-runner -n 100 | grep "Model loaded" | wc -l` (should be 9)
+3. ✅ Verify portfolio config: `sudo journalctl -u pine-runner -n 100 | grep "Portfolio config loaded from config.yml"` (should show max_positions=2)
+4. ✅ Monitor for errors: `sudo journalctl -u pine-runner -n 200 | grep -i error`
+5. ✅ Check position count: Max should be 2 concurrent
+6. ✅ Review dashboard for daily P&L
+7. ✅ Verify no duplicate processes: `ps aux | grep python | grep runner` (should be 1)
 
 ## Important Notes
 

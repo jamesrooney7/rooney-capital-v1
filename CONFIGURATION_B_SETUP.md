@@ -1,38 +1,50 @@
-# Configuration B Setup Guide
+# Current Portfolio Configuration
+
+**⚠️ NOTE:** This guide is deprecated. For the complete and up-to-date system guide, see **[SYSTEM_GUIDE.md](SYSTEM_GUIDE.md)**
+
+---
 
 ## Overview
 
-Configuration B is the optimized portfolio configuration validated on out-of-sample data (2022-2024).
+Current optimized portfolio configuration validated with train/test split (2023 train, 2024 test).
 
 ## Configuration Details
 
-**Instruments (16 total):**
-- **Currencies (7):** 6A, 6B, 6C, 6E, 6M, 6N, 6S
-- **Equities (4):** ES, NQ, RTY, YM
-- **Commodities (5):** CL, GC, HG, NG, PL
+**Instruments (9 total):**
+- **Currencies (6):** 6A (AUD), 6B (GBP), 6C (CAD), 6M (MXN), 6N (NZD), 6S (CHF)
+- **Energy (1):** CL (Crude Oil)
+- **Metals (2):** HG (Copper), SI (Silver)
+
+**Removed from previous:** ES, NQ, RTY, YM, GC, NG, PL, 6E
 
 **Portfolio Constraints:**
-- Max positions: 2 (conservative risk management)
+- Max positions: 2
 - Daily stop loss: $2,500
 
-**Performance (Out-of-Sample 2022-2024):**
-- Sharpe Ratio: 7.88
-- CAGR: 67.4%
-- Max Drawdown: -0.61%
+**Performance (Train/Test Split):**
+- Train Sharpe (2023): 11.56 | Test Sharpe (2024): 10.48
+- Test CAGR: 90.74%
+- Test Max Drawdown: $6,296
+- Generalization: 90.7%
 
 ## File Structure (Single Source of Truth)
 
+**IMPORTANT:** Configuration has been unified into `config.yml` only!
+
 ```
 /opt/pine/rooney-capital-v1/
-├── config.yml                          # Runtime config (16 instruments)
-├── .env                                # Environment variables
-├── config/
-│   └── portfolio_optimization.json     # Portfolio optimization results
+├── config.yml                          # 🔴 PRIMARY CONFIG - All settings here!
+│                                       #    (symbols, portfolio, credentials)
+├── .env                                # Environment variables (API keys)
+├── Data/
+│   └── Databento_contract_map.yml     # Contract specifications
 └── scripts/
     ├── launch_worker.py                # Worker launcher (used by systemd)
-    ├── reset_dashboard.py              # Dashboard reset tool
-    └── cleanup_server.sh               # Server cleanup script
+    ├── clean_for_new_optimizer.sh      # Cleanup script before deployment
+    └── reset_dashboard.py              # Dashboard reset tool
 ```
+
+**Note:** `config/portfolio_optimization.json` has been **REMOVED**. All configuration is now in `config.yml`.
 
 ## Systemd Service
 
@@ -65,9 +77,17 @@ sudo journalctl -u pine-runner -f
 ### Verify Configuration
 ```bash
 # Check which instruments are configured
-cat /opt/pine/rooney-capital-v1/config.yml | grep -A 20 "symbols"
+cat /opt/pine/rooney-capital-v1/config.yml | grep -A 12 "symbols:"
 
-# Should show all 16: 6A, 6B, 6C, 6E, 6M, 6N, 6S, CL, ES, GC, HG, NG, NQ, PL, RTY, YM
+# Should show 9 instruments: 6A, 6B, 6C, 6M, 6N, 6S, CL, HG, SI
+
+# Check portfolio settings
+cat /opt/pine/rooney-capital-v1/config.yml | grep -A 3 "portfolio:"
+
+# Should show:
+# portfolio:
+#   max_positions: 2
+#   daily_stop_loss: 2500
 ```
 
 ### Dashboard Management

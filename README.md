@@ -3,6 +3,23 @@
 Automated futures trading system using the Internal Bar Strength (IBS) edge with
 machine-learning veto models and live order routing through TradersPost.
 
+---
+
+## 📖 **Complete System Guide**
+
+**👉 For operations, deployment, monitoring, and troubleshooting, see [SYSTEM_GUIDE.md](SYSTEM_GUIDE.md)**
+
+This unified guide contains:
+- Current configuration (9 instruments, 2 max positions)
+- Configuration management (unified in config.yml)
+- Portfolio optimization workflow
+- Deployment procedures
+- Operations & monitoring
+- Troubleshooting
+- Quick command reference
+
+---
+
 ## Table of Contents
 - [System Overview](#system-overview)
   - [End-to-end Flow](#end-to-end-flow)
