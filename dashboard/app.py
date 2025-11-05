@@ -28,7 +28,11 @@ from utils import (
 )
 
 # Import statistical monitor
-from statistical_monitor import StatisticalMonitor, get_portfolio_baseline
+from statistical_monitor import (
+    StatisticalMonitor,
+    get_portfolio_baseline,
+    load_portfolio_baseline_detailed,
+)
 
 # Import database and metrics - use absolute path to avoid conflict with local utils.py
 dashboard_path = Path(__file__).resolve().parent
@@ -552,131 +556,127 @@ if DB_AVAILABLE and db_trades:
     # Initialize monitor
     monitor = StatisticalMonitor(results_dir="results")
 
-    # Load portfolio baseline
-    portfolio_baseline = get_portfolio_baseline(results_dir="results")
+    # Load detailed portfolio baseline
+    portfolio_baseline_detailed = load_portfolio_baseline_detailed(results_dir="results")
 
-    if portfolio_baseline:
-        with st.expander("📈 Portfolio Baseline (Test Period 2024)"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write(f"**Expected Sharpe:** {portfolio_baseline.get('sharpe', 0):.2f}")
-            with col2:
-                st.write(f"**Expected Max DD:** ${portfolio_baseline.get('max_dd', 0):.0f}")
-            with col3:
-                st.write(f"**Expected CAGR:** {portfolio_baseline.get('cagr', 0)*100:.1f}%")
+    # --- PORTFOLIO-LEVEL MONITORING (PRIMARY) ---
+    if portfolio_baseline_detailed and portfolio_metrics and portfolio_metrics.get('total_trades', 0) >= 5:
+        st.subheader("📈 Portfolio-Level Quality Control")
 
-    # Group trades by symbol
-    trades_by_symbol = {}
-    for trade in db_trades:
-        if not trade.get('exit_time'):
-            continue  # Skip open positions
-        symbol = trade.get('symbol', 'UNKNOWN')
-        if symbol not in trades_by_symbol:
-            trades_by_symbol[symbol] = []
-        trades_by_symbol[symbol].append(trade)
+        # Create pseudo-objects for portfolio comparison
+        from statistical_monitor import BacktestBaseline, LivePerformance
 
-    # Get instruments from portfolio baseline
-    instruments = portfolio_baseline.get('instruments', [])
+        # Convert portfolio baseline to BacktestBaseline format
+        portfolio_bl = BacktestBaseline(
+            symbol="PORTFOLIO",
+            sharpe=portfolio_baseline_detailed.sharpe,
+            profit_factor=0.0,  # Not available in portfolio baseline
+            trades=portfolio_baseline_detailed.trades,
+            total_pnl=portfolio_baseline_detailed.total_pnl,
+            max_drawdown=portfolio_baseline_detailed.max_drawdown,
+            win_rate=portfolio_baseline_detailed.win_rate,
+            avg_return=portfolio_baseline_detailed.avg_return,
+            std_return=portfolio_baseline_detailed.std_return,
+            threshold=0.65,
+        )
 
-    if not instruments:
-        # Fallback to all symbols with trades
-        instruments = list(trades_by_symbol.keys())
+        # Get all trade PnLs for returns calculation
+        all_trade_pnls = [t["pnl"] for t in db_trades if t.get("pnl") != 0 and t.get("exit_time")]
 
-    # Statistical monitoring per instrument
-    st.subheader("🎯 Per-Instrument Quality Control")
-
-    # Summary row
-    status_counts = {"green": 0, "yellow": 0, "red": 0}
-
-    for symbol in sorted(instruments):
-        symbol_trades = trades_by_symbol.get(symbol, [])
-
-        # Load baseline
-        baseline = monitor.load_backtest_baseline(symbol)
-
-        if not baseline:
-            st.info(f"**{symbol}**: No baseline data found")
-            continue
-
-        # Calculate live performance
-        live = monitor.calculate_live_performance(symbol, symbol_trades)
-
-        if not live or live.n_trades < 5:
-            st.info(
-                f"**{symbol}**: Insufficient live data "
-                f"({live.n_trades if live else 0} trades, need ≥5 for statistical tests)"
-            )
-            continue
+        # Convert portfolio metrics to LivePerformance format
+        portfolio_live = LivePerformance(
+            symbol="PORTFOLIO",
+            n_trades=portfolio_metrics.get('total_trades', 0),
+            sharpe=portfolio_metrics.get('sharpe_ratio', 0.0),
+            profit_factor=portfolio_metrics.get('profit_factor', 0.0),
+            win_rate=portfolio_metrics.get('win_rate', 0.0),
+            total_pnl=portfolio_metrics.get('total_pnl', 0.0),
+            max_drawdown=portfolio_metrics.get('max_drawdown', 0.0),
+            avg_return=portfolio_metrics.get('expectancy', 0.0),
+            std_return=float(np.std(all_trade_pnls)) if all_trade_pnls else 0.0,
+            returns=all_trade_pnls,
+        )
 
         # Run statistical tests
-        tests = monitor.run_statistical_tests(baseline, live, confidence=0.95)
+        portfolio_tests = monitor.run_statistical_tests(portfolio_bl, portfolio_live, confidence=0.95)
 
-        # Determine overall status (worst of all metrics)
-        overall_status = "green"
-        for test in tests:
+        # Determine overall portfolio status
+        portfolio_status = "green"
+        for test in portfolio_tests:
             if test.status == "red":
-                overall_status = "red"
+                portfolio_status = "red"
                 break
-            elif test.status == "yellow" and overall_status != "red":
-                overall_status = "yellow"
+            elif test.status == "yellow" and portfolio_status != "red":
+                portfolio_status = "yellow"
 
-        status_counts[overall_status] += 1
-
-        # Status emoji
-        if overall_status == "green":
-            status_emoji = "🟢"
-        elif overall_status == "yellow":
-            status_emoji = "🟡"
+        # Display overall status banner
+        if portfolio_status == "green":
+            st.success("🟢 **Portfolio Status: HEALTHY** - Performance matches backtest expectations")
+        elif portfolio_status == "yellow":
+            st.warning("🟡 **Portfolio Status: CAUTION** - Some metrics deviating from baseline")
         else:
-            status_emoji = "🔴"
+            st.error("🔴 **Portfolio Status: ALERT** - Significant deviation detected")
 
-        # Expandable section per instrument
-        with st.expander(
-            f"{status_emoji} {symbol} | {live.n_trades} trades | Status: {overall_status.upper()}"
-        ):
+        # Show key metrics comparison
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric(
+                "Live Trades",
+                f"{portfolio_live.n_trades}",
+                help=f"Baseline: {portfolio_bl.trades} trades in test period"
+            )
+
+        with col2:
+            sharpe_delta = portfolio_live.sharpe - portfolio_bl.sharpe
+            st.metric(
+                "Sharpe Ratio",
+                f"{portfolio_live.sharpe:.2f}",
+                delta=f"{sharpe_delta:+.2f}",
+                help=f"Expected: {portfolio_bl.sharpe:.2f}"
+            )
+
+        with col3:
+            wr_delta = portfolio_live.win_rate - portfolio_bl.win_rate
+            st.metric(
+                "Win Rate",
+                f"{portfolio_live.win_rate:.1f}%",
+                delta=f"{wr_delta:+.1f}%",
+                help=f"Expected: {portfolio_bl.win_rate:.1f}%"
+            )
+
+        with col4:
             # Sample size recommendation
-            rec_n = monitor.get_sample_size_recommendation(baseline, power=0.80, alpha=0.05)
+            rec_n = monitor.get_sample_size_recommendation(portfolio_bl, power=0.80, alpha=0.05)
+            if portfolio_live.n_trades >= rec_n:
+                st.metric("Sample Size", "✅ Sufficient", help=f"Have {portfolio_live.n_trades} ≥ {rec_n} needed")
+            else:
+                st.metric("Sample Size", f"⚠️ {portfolio_live.n_trades}/{rec_n}", help="Need more trades for full power")
 
-            col1, col2 = st.columns([2, 1])
-
-            with col1:
-                st.write(f"**Live Trades:** {live.n_trades}")
-                st.write(f"**Baseline Trades (Holdout):** {baseline.trades}")
-
-            with col2:
-                if live.n_trades < rec_n:
-                    st.warning(f"⚠️ Need {rec_n} trades for 80% power")
-                else:
-                    st.success(f"✅ Sufficient data ({rec_n} recommended)")
-
-            st.divider()
-
-            # --- Phase 1: Control Charts ---
-            st.write("**Phase 1: Control Charts (±2σ bands)**")
-
-            for test in tests:
-                # Color code by status
+        # Detailed test results in expander
+        with st.expander("📊 Detailed Statistical Tests"):
+            for test in portfolio_tests:
+                # Color code
                 if test.status == "green":
-                    color = "#d4edda"  # Light green
+                    color = "#d4edda"
                     border = "#c3e6cb"
                 elif test.status == "yellow":
-                    color = "#fff3cd"  # Light yellow
+                    color = "#fff3cd"
                     border = "#ffeaa7"
                 else:
-                    color = "#f8d7da"  # Light red
+                    color = "#f8d7da"
                     border = "#f5c6cb"
 
                 # Format values
                 if test.metric_name == "Average Return":
-                    obs_str = f"${test.observed:.4f}"
-                    exp_str = f"${test.expected:.4f}"
-                    ci_str = f"[${test.ci_lower:.4f}, ${test.ci_upper:.4f}]"
+                    obs_str = f"${test.observed:.2f}"
+                    exp_str = f"${test.expected:.2f}"
+                    ci_str = f"[${test.ci_lower:.2f}, ${test.ci_upper:.2f}]"
                 else:
                     obs_str = f"{test.observed:.2f}"
                     exp_str = f"{test.expected:.2f}"
                     ci_str = f"[{test.ci_lower:.2f}, {test.ci_upper:.2f}]"
 
-                # Display metric card
                 st.markdown(
                     f"""
                     <div style='background-color: {color}; padding: 10px; border-radius: 5px;
@@ -691,49 +691,212 @@ if DB_AVAILABLE and db_trades:
                     unsafe_allow_html=True,
                 )
 
-            st.divider()
+        # SPRT for portfolio
+        with st.expander("🔬 Sequential Testing (SPRT)"):
+            sprt_result = monitor.run_sprt(portfolio_bl, portfolio_live, alpha=0.05, beta=0.20)
 
-            # --- Phase 3: SPRT ---
-            st.write("**Phase 3: Sequential Probability Ratio Test (SPRT)**")
-
-            sprt_result = monitor.run_sprt(baseline, live, alpha=0.05, beta=0.20)
-
-            # Visualize SPRT
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.write(f"**LLR:** {sprt_result['log_likelihood_ratio']:.2f}")
+                st.write(f"**Log-Likelihood Ratio:** {sprt_result['log_likelihood_ratio']:.2f}")
 
             with col2:
-                st.write(f"**Upper Threshold:** {sprt_result['threshold_upper']:.2f}")
-                st.write(f"**Lower Threshold:** {sprt_result['threshold_lower']:.2f}")
+                st.write(f"**Upper Threshold (H0):** {sprt_result['threshold_upper']:.2f}")
+                st.write(f"**Lower Threshold (H1):** {sprt_result['threshold_lower']:.2f}")
 
             with col3:
                 decision = sprt_result['decision']
                 if decision == "accept_H0":
-                    st.success("✅ PASS")
+                    st.success("✅ PASS - Performance OK")
                 elif decision == "accept_H1":
-                    st.error("❌ FAIL")
+                    st.error("❌ FAIL - Performance degraded")
                 else:
-                    st.info("⏳ CONTINUE")
+                    st.info("⏳ CONTINUE - Keep monitoring")
 
-            st.write(sprt_result['message'])
+            st.caption(sprt_result['message'])
 
-    # Summary box
-    st.divider()
-    col1, col2, col3, col4 = st.columns(4)
+        st.divider()
 
-    with col1:
-        st.metric("Instruments Monitored", len(instruments))
+    elif DB_AVAILABLE and portfolio_metrics and portfolio_metrics.get('total_trades', 0) < 5:
+        st.info(
+            f"**Portfolio-level monitoring:** Need at least 5 completed trades "
+            f"(currently {portfolio_metrics.get('total_trades', 0)}) for statistical tests"
+        )
+        st.divider()
 
-    with col2:
-        st.metric("🟢 Green", status_counts.get("green", 0))
+    # Load basic portfolio baseline for instrument list
+    portfolio_baseline = get_portfolio_baseline(results_dir="results")
 
-    with col3:
-        st.metric("🟡 Yellow", status_counts.get("yellow", 0))
+    # --- PER-INSTRUMENT MONITORING (SECONDARY, FOR DRILL-DOWN) ---
+    with st.expander("🎯 Per-Instrument Quality Control (Drill-Down)", expanded=False):
+        st.caption("Detailed statistical monitoring for each instrument (slower convergence)")
 
-    with col4:
-        st.metric("🔴 Red", status_counts.get("red", 0))
+        # Group trades by symbol
+        trades_by_symbol = {}
+        for trade in db_trades:
+            if not trade.get('exit_time'):
+                continue  # Skip open positions
+            symbol = trade.get('symbol', 'UNKNOWN')
+            if symbol not in trades_by_symbol:
+                trades_by_symbol[symbol] = []
+            trades_by_symbol[symbol].append(trade)
+
+        # Get instruments from portfolio baseline
+        instruments = portfolio_baseline.get('instruments', [])
+
+        if not instruments:
+            # Fallback to all symbols with trades
+            instruments = list(trades_by_symbol.keys())
+
+        # Summary row
+        status_counts = {"green": 0, "yellow": 0, "red": 0}
+
+        for symbol in sorted(instruments):
+            symbol_trades = trades_by_symbol.get(symbol, [])
+
+            # Load baseline
+            baseline = monitor.load_backtest_baseline(symbol)
+
+            if not baseline:
+                st.info(f"**{symbol}**: No baseline data found")
+                continue
+
+            # Calculate live performance
+            live = monitor.calculate_live_performance(symbol, symbol_trades)
+
+            if not live or live.n_trades < 5:
+                st.info(
+                    f"**{symbol}**: Insufficient live data "
+                    f"({live.n_trades if live else 0} trades, need ≥5 for statistical tests)"
+                )
+                continue
+
+            # Run statistical tests
+            tests = monitor.run_statistical_tests(baseline, live, confidence=0.95)
+
+            # Determine overall status (worst of all metrics)
+            overall_status = "green"
+            for test in tests:
+                if test.status == "red":
+                    overall_status = "red"
+                    break
+                elif test.status == "yellow" and overall_status != "red":
+                    overall_status = "yellow"
+
+            status_counts[overall_status] += 1
+
+            # Status emoji
+            if overall_status == "green":
+                status_emoji = "🟢"
+            elif overall_status == "yellow":
+                status_emoji = "🟡"
+            else:
+                status_emoji = "🔴"
+
+            # Expandable section per instrument
+            with st.expander(
+                f"{status_emoji} {symbol} | {live.n_trades} trades | Status: {overall_status.upper()}"
+            ):
+                # Sample size recommendation
+                rec_n = monitor.get_sample_size_recommendation(baseline, power=0.80, alpha=0.05)
+
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    st.write(f"**Live Trades:** {live.n_trades}")
+                    st.write(f"**Baseline Trades (Holdout):** {baseline.trades}")
+
+                with col2:
+                    if live.n_trades < rec_n:
+                        st.warning(f"⚠️ Need {rec_n} trades for 80% power")
+                    else:
+                        st.success(f"✅ Sufficient data ({rec_n} recommended)")
+
+                st.divider()
+
+                # --- Phase 1: Control Charts ---
+                st.write("**Phase 1: Control Charts (±2σ bands)**")
+
+                for test in tests:
+                    # Color code by status
+                    if test.status == "green":
+                        color = "#d4edda"  # Light green
+                        border = "#c3e6cb"
+                    elif test.status == "yellow":
+                        color = "#fff3cd"  # Light yellow
+                        border = "#ffeaa7"
+                    else:
+                        color = "#f8d7da"  # Light red
+                        border = "#f5c6cb"
+
+                    # Format values
+                    if test.metric_name == "Average Return":
+                        obs_str = f"${test.observed:.4f}"
+                        exp_str = f"${test.expected:.4f}"
+                        ci_str = f"[${test.ci_lower:.4f}, ${test.ci_upper:.4f}]"
+                    else:
+                        obs_str = f"{test.observed:.2f}"
+                        exp_str = f"{test.expected:.2f}"
+                        ci_str = f"[{test.ci_lower:.2f}, {test.ci_upper:.2f}]"
+
+                    # Display metric card
+                    st.markdown(
+                        f"""
+                        <div style='background-color: {color}; padding: 10px; border-radius: 5px;
+                                    border: 1px solid {border}; margin-bottom: 10px;'>
+                            <b>{test.metric_name}</b><br>
+                            Observed: {obs_str} | Expected: {exp_str}<br>
+                            Z-score: {test.z_score:.2f} | P-value: {test.p_value:.4f}<br>
+                            95% CI: {ci_str}<br>
+                            <b>Status: {test.status.upper()}</b>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+                st.divider()
+
+                # --- Phase 3: SPRT ---
+                st.write("**Phase 3: Sequential Probability Ratio Test (SPRT)**")
+
+                sprt_result = monitor.run_sprt(baseline, live, alpha=0.05, beta=0.20)
+
+                # Visualize SPRT
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    st.write(f"**LLR:** {sprt_result['log_likelihood_ratio']:.2f}")
+
+                with col2:
+                    st.write(f"**Upper Threshold:** {sprt_result['threshold_upper']:.2f}")
+                    st.write(f"**Lower Threshold:** {sprt_result['threshold_lower']:.2f}")
+
+                with col3:
+                    decision = sprt_result['decision']
+                    if decision == "accept_H0":
+                        st.success("✅ PASS")
+                    elif decision == "accept_H1":
+                        st.error("❌ FAIL")
+                    else:
+                        st.info("⏳ CONTINUE")
+
+                st.write(sprt_result['message'])
+
+        # Summary box
+        st.divider()
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("Instruments Monitored", len(instruments))
+
+        with col2:
+            st.metric("🟢 Green", status_counts.get("green", 0))
+
+        with col3:
+            st.metric("🟡 Yellow", status_counts.get("yellow", 0))
+
+        with col4:
+            st.metric("🔴 Red", status_counts.get("red", 0))
 
 
 # ============================================================================

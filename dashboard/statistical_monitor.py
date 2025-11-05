@@ -42,6 +42,20 @@ class BacktestBaseline:
 
 
 @dataclass
+class PortfolioBaseline:
+    """Expected portfolio-level performance from backtest test period."""
+
+    sharpe: float
+    max_drawdown: float
+    cagr: float
+    total_pnl: float  # Calculated from test period
+    win_rate: float  # Calculated from aggregated trades
+    avg_return: float  # Average per-trade return
+    std_return: float  # Std dev of returns
+    trades: int  # Total trades in test period
+
+
+@dataclass
 class LivePerformance:
     """Live trading performance metrics."""
 
@@ -562,3 +576,75 @@ def get_portfolio_baseline(results_dir: str | Path = "results") -> dict[str, Any
         "instruments": data.get("optimal_config", {}).get("instruments", []),
         "max_positions": data.get("optimal_config", {}).get("max_positions", 2),
     }
+
+
+def load_portfolio_baseline_detailed(results_dir: str | Path = "results") -> Optional[PortfolioBaseline]:
+    """Load detailed portfolio baseline including trade-level statistics.
+
+    Aggregates all instrument CSVs to calculate portfolio-level metrics.
+
+    Args:
+        results_dir: Results directory
+
+    Returns:
+        PortfolioBaseline or None if data not available
+    """
+    results_path = Path(results_dir)
+
+    # Load greedy optimization for high-level metrics
+    greedy_files = sorted(results_path.glob("greedy_optimization_*.json"))
+    if not greedy_files:
+        return None
+
+    with open(greedy_files[-1]) as f:
+        data = json.load(f)
+
+    test_metrics = data.get("test_metrics", {})
+    instruments = data.get("optimal_config", {}).get("instruments", [])
+
+    if not instruments:
+        return None
+
+    # Aggregate all trades from individual instrument CSVs
+    all_returns = []
+
+    for symbol in instruments:
+        trades_csv = results_path / f"{symbol}_optimization" / f"{symbol}_trades.csv"
+
+        if not trades_csv.exists():
+            continue
+
+        df = pd.read_csv(trades_csv)
+        # Filter to non-zero returns (actual trades)
+        returns = df[df["Return"] != 0]["Return"].values
+        all_returns.extend(returns)
+
+    if len(all_returns) == 0:
+        return None
+
+    all_returns = np.array(all_returns)
+
+    # Calculate statistics
+    win_rate = float((all_returns > 0).sum() / len(all_returns) * 100)
+    avg_return = float(all_returns.mean())
+    std_return = float(all_returns.std())
+
+    # Estimate total P&L from test period (this is approximate)
+    # The greedy optimizer doesn't store total P&L, so we use CAGR to estimate
+    cagr = test_metrics.get("cagr", 0.0)
+    max_dd = test_metrics.get("max_dd", 0.0)
+
+    # Approximate total P&L assuming 1 year test period and $100k starting capital
+    # total_pnl ≈ starting_capital × CAGR
+    estimated_pnl = 100000 * cagr  # Rough estimate
+
+    return PortfolioBaseline(
+        sharpe=test_metrics.get("sharpe", 0.0),
+        max_drawdown=max_dd,
+        cagr=cagr,
+        total_pnl=estimated_pnl,
+        win_rate=win_rate,
+        avg_return=avg_return,
+        std_return=std_return,
+        trades=len(all_returns),
+    )
