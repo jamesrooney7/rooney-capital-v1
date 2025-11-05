@@ -7,7 +7,7 @@ simulates portfolio performance with:
 - Intraday overlapping position tracking
 - Max positions constraint (based on actual open positions)
 - Daily stop loss with immediate exit of all positions
-- Slippage correction: Deducts 1-tick round-trip slippage from all trades
+- Slippage correction: Deducts 4-tick round-trip slippage from all trades
   (backtests didn't include slippage in P&L calculations)
 - Proper P&L calculation with exit costs
 
@@ -34,27 +34,28 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Slippage per contract (1 tick round-trip: 0.5 tick per fill)
+# Slippage per contract (4 tick round-trip: 2 ticks per fill)
 # Based on CONTRACT_SPECS from src/strategy/contract_specs.py
+# Updated from 1-tick to 4-tick based on real execution experience
 SLIPPAGE_PER_CONTRACT = {
-    "ES": 12.50,    # 0.25 tick × $50/point
-    "NQ": 5.00,     # 0.25 tick × $20/point
-    "RTY": 5.00,    # 0.10 tick × $50/point
-    "YM": 5.00,     # 1.00 tick × $5/point
-    "GC": 10.00,    # 0.10 tick × $100/oz
-    "SI": 25.00,    # 0.005 tick × $5000/contract
-    "PL": 5.00,     # 0.10 tick × $50/oz
-    "HG": 12.50,    # 0.0005 tick × $25000/contract
-    "CL": 10.00,    # 0.01 tick × $1000/contract
-    "NG": 10.00,    # 0.001 tick × $10000/contract
-    "6A": 10.00,    # 0.0001 tick × $100000 AUD
-    "6B": 6.25,     # 0.0001 tick × $62500 GBP
-    "6C": 10.00,    # 0.0001 tick × $100000 CAD
-    "6E": 6.25,     # 0.00005 tick × $125000 EUR
-    "6J": 6.25,     # 0.0000005 tick
-    "6M": 25.00,    # 0.00005 tick × $500000 MXN
-    "6N": 10.00,    # 0.0001 tick × $100000 NZD
-    "6S": 12.50,    # 0.0001 tick × $125000 CHF
+    "ES": 50.00,    # 1.00 tick × $50/point
+    "NQ": 20.00,    # 1.00 tick × $20/point
+    "RTY": 20.00,   # 0.40 tick × $50/point
+    "YM": 20.00,    # 4.00 tick × $5/point
+    "GC": 40.00,    # 0.40 tick × $100/oz
+    "SI": 100.00,   # 0.020 tick × $5000/contract
+    "PL": 20.00,    # 0.40 tick × $50/oz
+    "HG": 50.00,    # 0.0020 tick × $25000/contract
+    "CL": 40.00,    # 0.04 tick × $1000/contract
+    "NG": 40.00,    # 0.004 tick × $10000/contract
+    "6A": 40.00,    # 0.0004 tick × $100000 AUD
+    "6B": 25.00,    # 0.0004 tick × $62500 GBP
+    "6C": 40.00,    # 0.0004 tick × $100000 CAD
+    "6E": 25.00,    # 0.00020 tick × $125000 EUR
+    "6J": 25.00,    # 0.0000020 tick
+    "6M": 100.00,   # 0.00020 tick × $500000 MXN
+    "6N": 40.00,    # 0.0004 tick × $100000 NZD
+    "6S": 50.00,    # 0.0004 tick × $125000 CHF
 }
 
 
@@ -117,8 +118,8 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
         slippage = trades_df['slippage_usd']
         total_slippage = slippage.sum()
     else:
-        # Apply standard 1-tick round-trip slippage
-        slippage_per_trade = SLIPPAGE_PER_CONTRACT.get(symbol, 10.0)  # Default $10 if unknown
+        # Apply standard 4-tick round-trip slippage
+        slippage_per_trade = SLIPPAGE_PER_CONTRACT.get(symbol, 40.0)  # Default $40 if unknown
         slippage = slippage_per_trade
         total_slippage = slippage_per_trade * len(trades_df)
 

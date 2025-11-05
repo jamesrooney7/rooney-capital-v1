@@ -581,6 +581,12 @@ def main():
             for f in models_dir.glob('*_best.json')
             if (models_dir / f.name.replace('_best.json', '_rf_model.pkl')).exists()
         ]
+
+        # Exclude PL (Platinum) due to excessive real-world slippage
+        if 'PL' in symbols:
+            symbols.remove('PL')
+            logger.info("Excluded PL (Platinum) from optimization due to slippage")
+
         logger.info(f"Auto-discovered {len(symbols)} symbols: {', '.join(sorted(symbols))}")
 
     if not symbols:
