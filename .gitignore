@@ -66,4 +66,5 @@ requests_local/
 !tests/**/*.py
 !scripts/*.py
 !research/**/*.py
+!dashboard/**/*.py
 results/

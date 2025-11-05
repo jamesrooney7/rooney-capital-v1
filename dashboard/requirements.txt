@@ -6,6 +6,7 @@ streamlit>=1.28.0
 # Data handling and numerical computing
 pandas>=2.0.0
 numpy>=1.24.0
+scipy>=1.10.0  # For statistical tests (t-test, binomial, SPRT)
 
 # Date/time utilities (already in stdlib but listed for reference)
 # python-dateutil>=2.8.0  # Not needed - using stdlib datetime
