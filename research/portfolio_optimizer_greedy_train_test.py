@@ -22,6 +22,8 @@ Usage:
 
 import argparse
 import json
+import yaml
+import shutil
 from pathlib import Path
 from typing import Dict, List, Tuple, Set
 import pandas as pd
@@ -275,6 +277,55 @@ def print_comparison_summary(
     logger.info("")
 
 
+def update_config_yml(
+    config_path: Path,
+    symbols: List[str],
+    max_positions: int,
+    daily_stop_loss: float
+) -> bool:
+    """
+    Update config.yml with optimal portfolio settings.
+    Creates backup before updating.
+
+    Returns True if successful, False otherwise.
+    """
+    try:
+        # Create backup
+        backup_path = config_path.parent / f"{config_path.stem}_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.yml"
+        shutil.copy2(config_path, backup_path)
+        logger.info(f"📋 Created backup: {backup_path}")
+
+        # Load current config
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        # Update symbols list
+        config['symbols'] = sorted(symbols)
+
+        # Update or create portfolio section
+        if 'portfolio' not in config:
+            config['portfolio'] = {}
+
+        config['portfolio']['max_positions'] = max_positions
+        config['portfolio']['daily_stop_loss'] = daily_stop_loss
+
+        # Write updated config
+        with open(config_path, 'w') as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+        logger.info(f"✅ Successfully updated {config_path}")
+        logger.info(f"   - Symbols: {symbols}")
+        logger.info(f"   - Max positions: {max_positions}")
+        logger.info(f"   - Daily stop loss: ${daily_stop_loss:,.0f}")
+
+        return True
+
+    except Exception as exc:
+        logger.error(f"❌ Failed to update config.yml: {exc}")
+        logger.exception(exc)
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Greedy portfolio optimizer with train/test split'
@@ -295,6 +346,10 @@ def main():
     parser.add_argument('--initial-capital', type=float, default=250000.0)
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
     parser.add_argument('--output-dir', type=str, default='results')
+    parser.add_argument('--update-config', action='store_true',
+                       help='Automatically update config.yml with optimal settings')
+    parser.add_argument('--config-path', type=str, default='config.yml',
+                       help='Path to config.yml file to update (default: config.yml)')
 
     args = parser.parse_args()
 
@@ -487,6 +542,31 @@ def main():
         json.dump(summary, f, indent=2)
 
     logger.info(f"💾 Summary saved to: {summary_file}\n")
+
+    # Update config.yml if requested
+    if args.update_config:
+        logger.info("=" * 100)
+        logger.info("UPDATING CONFIG.YML")
+        logger.info("=" * 100)
+
+        config_path = Path(args.config_path)
+        if not config_path.exists():
+            logger.error(f"❌ Config file not found: {config_path}")
+            logger.info("   Skipping config update. Run optimizer again with correct --config-path")
+        else:
+            success = update_config_yml(
+                config_path=config_path,
+                symbols=best_train['symbols'],
+                max_positions=best_train['max_positions'],
+                daily_stop_loss=args.daily_stop_loss
+            )
+            if success:
+                logger.info("\n🎉 Config updated! You can now deploy with:")
+                logger.info("   git add config.yml && git commit -m 'Update portfolio config'")
+                logger.info("   git push && sudo systemctl restart pine-runner.service")
+            else:
+                logger.error("\n⚠️  Config update failed. Please update manually.")
+        logger.info("")
 
     logger.info(f"{'='*100}")
     logger.info(f"✅ OPTIMIZATION COMPLETE")
