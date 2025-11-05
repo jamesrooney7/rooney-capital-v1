@@ -553,11 +553,11 @@ if DB_AVAILABLE and db_trades:
     st.header("📊 Statistical Quality Control")
     st.caption("Compare live performance to backtest expectations with statistical rigor")
 
-    # Initialize monitor
-    monitor = StatisticalMonitor(results_dir="results")
+    # Initialize monitor (results dir is in parent directory)
+    monitor = StatisticalMonitor(results_dir="../results")
 
     # Load detailed portfolio baseline
-    portfolio_baseline_detailed = load_portfolio_baseline_detailed(results_dir="results")
+    portfolio_baseline_detailed = load_portfolio_baseline_detailed(results_dir="../results")
 
     # --- PORTFOLIO-LEVEL MONITORING (PRIMARY) ---
     if portfolio_baseline_detailed and portfolio_metrics and portfolio_metrics.get('total_trades', 0) >= 5:
@@ -725,7 +725,7 @@ if DB_AVAILABLE and db_trades:
         st.divider()
 
     # Load basic portfolio baseline for instrument list
-    portfolio_baseline = get_portfolio_baseline(results_dir="results")
+    portfolio_baseline = get_portfolio_baseline(results_dir="../results")
 
     # --- PER-INSTRUMENT MONITORING (SECONDARY, FOR DRILL-DOWN) ---
     with st.expander("🎯 Per-Instrument Quality Control (Drill-Down)", expanded=False):
