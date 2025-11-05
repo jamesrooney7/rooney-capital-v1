@@ -200,6 +200,11 @@ def greedy_optimize(
     else:
         # Return last tested config even if doesn't meet constraint
         logger.warning(f"  ⚠️  Could not meet DD constraint with any combination")
+        # If no symbols at all, return empty metrics
+        if len(current_symbols) == 0:
+            return set(), {'sharpe_ratio': 0, 'cagr': 0, 'total_return_dollars': 0,
+                          'max_drawdown_dollars': 0, 'profit_factor': 0,
+                          'daily_stops_hit': 0, 'avg_positions': 0}
         return current_symbols, metrics
 
 
@@ -339,6 +344,19 @@ def main():
             train_symbol_trades[symbol] = filtered
 
     logger.info(f"Train period: {len(train_symbol_trades)} symbols with trades\n")
+
+    if len(train_symbol_trades) == 0:
+        logger.error(f"❌ NO TRADES FOUND IN TRAIN PERIOD: {args.train_start} to {args.train_end}")
+        logger.info("\nYour trade data date range:")
+        for symbol in list(all_symbol_trades.keys())[:3]:  # Sample 3 symbols
+            trades = all_symbol_trades[symbol]
+            first_date = trades['entry_time'].min()
+            last_date = trades['entry_time'].max()
+            logger.info(f"  {symbol}: {first_date} to {last_date}")
+        logger.info("\n💡 Your data likely only covers 2023-2024.")
+        logger.info("   Try: --train-start 2023-01-01 --train-end 2023-12-31")
+        logger.info("        --test-start 2024-01-01 --test-end 2024-12-31")
+        return 1
 
     # Run greedy optimization for each max_positions
     train_results = []
