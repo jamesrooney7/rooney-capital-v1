@@ -234,6 +234,8 @@ def main():
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
     parser.add_argument('--ranking-method', type=str, default='sharpe',
                        choices=['sharpe', 'profit_factor'])
+    parser.add_argument('--max-dd-constraint', type=float, default=None,
+                       help='Maximum drawdown constraint in dollars (e.g., 5000)')
     parser.add_argument('--output-dir', type=str, default='results')
 
     args = parser.parse_args()
@@ -313,11 +315,39 @@ def main():
         ranking_method=args.ranking_method
     )
 
-    # Get optimal configuration
-    optimal_max_positions = int(train_results_df.iloc[0]['max_positions'])
-    train_optimal_sharpe = train_results_df.iloc[0]['sharpe_ratio']
+    # Get optimal configuration (with optional constraint)
+    if args.max_dd_constraint:
+        logger.info(f"\n🎯 APPLYING CONSTRAINT: Max Drawdown < ${args.max_dd_constraint:,.0f}")
 
-    logger.info(f"\n✅ TRAIN PERIOD: Optimal max_positions = {optimal_max_positions} (Sharpe: {train_optimal_sharpe:.3f})\n")
+        # Filter to only configs that meet constraint
+        valid_configs = train_results_df[
+            abs(train_results_df['max_drawdown_dollars']) < args.max_dd_constraint
+        ]
+
+        if len(valid_configs) == 0:
+            logger.error(f"❌ No configurations meet drawdown constraint < ${args.max_dd_constraint:,.0f}")
+            logger.info("\nAll tested configurations:")
+            for _, row in train_results_df.iterrows():
+                logger.info(f"  max_positions={int(row['max_positions'])}: "
+                          f"Sharpe={row['sharpe_ratio']:.3f}, "
+                          f"DD=${abs(row['max_drawdown_dollars']):,.0f}")
+            logger.info("\n💡 Try relaxing the constraint or using fewer max_positions")
+            return 1
+
+        # Get best Sharpe among valid configs
+        optimal_row = valid_configs.iloc[0]
+        optimal_max_positions = int(optimal_row['max_positions'])
+        train_optimal_sharpe = optimal_row['sharpe_ratio']
+
+        logger.info(f"✅ Found {len(valid_configs)} configurations meeting constraint")
+        logger.info(f"🏆 Best valid config: max_positions={optimal_max_positions}, "
+                   f"Sharpe={train_optimal_sharpe:.3f}, "
+                   f"DD=${abs(optimal_row['max_drawdown_dollars']):,.0f}\n")
+    else:
+        # No constraint - just pick best Sharpe
+        optimal_max_positions = int(train_results_df.iloc[0]['max_positions'])
+        train_optimal_sharpe = train_results_df.iloc[0]['sharpe_ratio']
+        logger.info(f"\n✅ TRAIN PERIOD: Optimal max_positions = {optimal_max_positions} (Sharpe: {train_optimal_sharpe:.3f})\n")
 
     # ======== FILTER TEST PERIOD ========
     logger.info(f"{'#'*100}")
