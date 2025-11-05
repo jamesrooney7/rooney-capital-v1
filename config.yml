@@ -15,6 +15,7 @@ symbols:  # All symbols to load (for complete ML feature calculation)
   - 6B
   - 6C
   - 6E
+  - 6J
   - 6M
   - 6N
   - 6S
@@ -93,6 +94,8 @@ contracts:
   6C:
     size: 1
   6E:
+    size: 1
+  6J:
     size: 1
   6M:
     size: 1
