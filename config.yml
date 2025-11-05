@@ -10,17 +10,25 @@
 contract_map: Data/Databento_contract_map.yml
 models_path: src/models
 
-symbols:  # All symbols to load (for feature calculation)
+symbols:  # All symbols to load (for complete ML feature calculation)
   - 6A
   - 6B
   - 6C
+  - 6E
   - 6M
   - 6N
   - 6S
   - CL
+  - ES
+  - GC
   - HG
-  - PL  # Reference only - needed for ML features
+  - NG
+  - NQ
+  - PL
+  - RTY
   - SI
+  - TLT
+  - YM
 
 databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
@@ -84,6 +92,8 @@ contracts:
     size: 1
   6C:
     size: 1
+  6E:
+    size: 1
   6M:
     size: 1
   6N:
@@ -92,9 +102,23 @@ contracts:
     size: 1
   CL:
     size: 1
+  ES:
+    size: 1
+  GC:
+    size: 1
   HG:
+    size: 1
+  NG:
+    size: 1
+  NQ:
     size: 1
   PL:
     size: 1
+  RTY:
+    size: 1
   SI:
+    size: 1
+  TLT:
+    size: 1
+  YM:
     size: 1
