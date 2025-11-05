@@ -65,6 +65,7 @@ class PortfolioCoordinator:
 
         # Position tracking
         self.open_positions: Dict[str, PositionInfo] = {}
+        self.pending_positions: Dict[str, datetime] = {}  # Reserved but not yet filled
 
         # Daily P&L tracking
         self.daily_pnl: float = 0.0
@@ -96,39 +97,52 @@ class PortfolioCoordinator:
             logger.info(f"Daily state reset for {trading_day}")
 
     def can_open_position(self, symbol: str) -> tuple[bool, str]:
-        """Check if a symbol can open a new position.
+        """Check if a symbol can open a new position and reserve slot atomically.
 
         Args:
             symbol: Symbol requesting to open position
 
         Returns:
             (allowed, reason) tuple:
-                - allowed: True if position can be opened
+                - allowed: True if position can be opened (slot reserved)
                 - reason: Explanation string
         """
         with self._lock:
             self.total_entries_requested += 1
 
-            # Check if already have position in this symbol
+            # Check if already have position or pending order in this symbol
             if symbol in self.open_positions:
                 return (False, f"{symbol} already has open position")
+
+            if symbol in self.pending_positions:
+                return (False, f"{symbol} already has pending order")
 
             # Check if stopped out for the day
             if self.stopped_out:
                 self.total_entries_blocked += 1
                 return (False, "Portfolio stopped out for the day")
 
-            # Check max positions
-            if len(self.open_positions) >= self.max_positions:
+            # Check max positions (count both open and pending)
+            total_positions = len(self.open_positions) + len(self.pending_positions)
+            if total_positions >= self.max_positions:
                 self.total_entries_blocked += 1
                 open_symbols = ', '.join(self.open_positions.keys())
+                pending_symbols = ', '.join(self.pending_positions.keys())
+                symbols_str = f"Open: {open_symbols}" if open_symbols else ""
+                if pending_symbols:
+                    symbols_str += f" | Pending: {pending_symbols}" if symbols_str else f"Pending: {pending_symbols}"
                 return (
                     False,
-                    f"Max positions ({self.max_positions}) reached. Open: {open_symbols}"
+                    f"Max positions ({self.max_positions}) reached. {symbols_str}"
                 )
 
-            # All checks passed
+            # All checks passed - RESERVE the slot immediately
+            self.pending_positions[symbol] = datetime.now()
             self.total_entries_allowed += 1
+            logger.debug(
+                f"Position slot reserved: {symbol} | "
+                f"Total: {len(self.open_positions)} open + {len(self.pending_positions)} pending = {total_positions + 1}/{self.max_positions}"
+            )
             return (True, "Entry allowed")
 
     def register_position_opened(
@@ -138,7 +152,7 @@ class PortfolioCoordinator:
         entry_price: Optional[float] = None,
         entry_time: Optional[datetime] = None
     ) -> None:
-        """Register that a position has been opened.
+        """Register that a position has been opened (convert pending to open).
 
         Args:
             symbol: Symbol of opened position
@@ -147,6 +161,9 @@ class PortfolioCoordinator:
             entry_time: Entry timestamp (defaults to now)
         """
         with self._lock:
+            # Remove from pending (if it was reserved)
+            self.pending_positions.pop(symbol, None)
+
             if entry_time is None:
                 entry_time = datetime.now()
 
@@ -202,6 +219,17 @@ class PortfolioCoordinator:
             # Check for daily stop loss
             if self.daily_pnl <= -self.daily_stop_loss:
                 self._trigger_stop_loss(exit_time)
+
+    def release_pending_position(self, symbol: str) -> None:
+        """Release a pending position slot if order fails or is canceled.
+
+        Args:
+            symbol: Symbol to release from pending
+        """
+        with self._lock:
+            if symbol in self.pending_positions:
+                del self.pending_positions[symbol]
+                logger.debug(f"Released pending position slot for {symbol}")
 
     def _trigger_stop_loss(self, trigger_time: datetime) -> None:
         """Trigger portfolio-wide stop loss (called with lock held).

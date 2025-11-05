@@ -6083,7 +6083,10 @@ class IbsStrategy(bt.Strategy):
                         ),
                     }
             else:
+                # Order canceled or rejected - release pending position slot
                 logger.info(f"ℹ️ {self.p.symbol} ORDER {order.getstatusname()}")
+                if self.p.portfolio_coordinator and order.isbuy():
+                    self.p.portfolio_coordinator.release_pending_position(self.p.symbol)
             self.order = None
 
     def notify_trade(self, trade):
