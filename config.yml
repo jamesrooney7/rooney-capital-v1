@@ -10,7 +10,7 @@
 contract_map: Data/Databento_contract_map.yml
 models_path: src/models
 
-symbols:
+symbols:  # All symbols to load (for feature calculation)
   - 6A
   - 6B
   - 6C
@@ -19,6 +19,7 @@ symbols:
   - 6S
   - CL
   - HG
+  - PL  # Reference only - needed for ML features
   - SI
 
 databento_api_key: ${DATABENTO_API_KEY}
@@ -33,6 +34,16 @@ killswitch: ${POLICY_KILLSWITCH}
 portfolio:
   max_positions: 2
   daily_stop_loss: 2500
+  instruments:  # Only these will be traded (PL excluded due to slippage)
+    - 6A
+    - 6B
+    - 6C
+    - 6M
+    - 6N
+    - 6S
+    - CL
+    - HG
+    - SI
 
 # ---------------------------------------------------------------------------
 # Cash management and runtime behaviour
@@ -82,6 +93,8 @@ contracts:
   CL:
     size: 1
   HG:
+    size: 1
+  PL:
     size: 1
   SI:
     size: 1

@@ -299,8 +299,8 @@ def update_config_yml(
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
 
-        # Update symbols list
-        config['symbols'] = sorted(symbols)
+        # Don't modify symbols list (it should contain ALL symbols for feature calculation)
+        # Instead, set portfolio.instruments to specify which ones to trade
 
         # Update or create portfolio section
         if 'portfolio' not in config:
@@ -308,15 +308,17 @@ def update_config_yml(
 
         config['portfolio']['max_positions'] = max_positions
         config['portfolio']['daily_stop_loss'] = daily_stop_loss
+        config['portfolio']['instruments'] = sorted(symbols)  # Only trade these
 
         # Write updated config
         with open(config_path, 'w') as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
 
         logger.info(f"✅ Successfully updated {config_path}")
-        logger.info(f"   - Symbols: {symbols}")
+        logger.info(f"   - Traded instruments: {symbols}")
         logger.info(f"   - Max positions: {max_positions}")
         logger.info(f"   - Daily stop loss: ${daily_stop_loss:,.0f}")
+        logger.info(f"   Note: symbols list unchanged (includes all for feature calculation)")
 
         return True
 

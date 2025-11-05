@@ -247,6 +247,7 @@ class RuntimeConfig:
     killswitch: bool = False
     portfolio_max_positions: Optional[int] = None
     portfolio_daily_stop_loss: Optional[float] = None
+    portfolio_instruments: Optional[tuple[str, ...]] = None  # Instruments to actually trade
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
         cfg = self.instruments.get(symbol)
@@ -588,6 +589,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     portfolio_payload = payload.get("portfolio") or {}
     portfolio_max_positions = None
     portfolio_daily_stop_loss = None
+    portfolio_instruments = None
 
     if portfolio_payload:
         max_pos_raw = portfolio_payload.get("max_positions")
@@ -603,6 +605,11 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
                 portfolio_daily_stop_loss = float(stop_loss_raw)
             except (TypeError, ValueError):
                 logger.warning("Invalid portfolio daily_stop_loss value %r; ignoring", stop_loss_raw)
+
+        # Read instruments to actually trade (vs all symbols loaded for features)
+        instruments_raw = portfolio_payload.get("instruments")
+        if instruments_raw:
+            portfolio_instruments = tuple(str(sym).strip().upper() for sym in instruments_raw if sym)
 
     return RuntimeConfig(
         databento_api_key=payload.get("databento_api_key") or os.environ.get("DATABENTO_API_KEY"),
@@ -632,6 +639,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         killswitch=killswitch,
         portfolio_max_positions=portfolio_max_positions,
         portfolio_daily_stop_loss=portfolio_daily_stop_loss,
+        portfolio_instruments=portfolio_instruments,
     )
 
 
@@ -797,6 +805,21 @@ class LiveWorker:
         if config.portfolio_max_positions is not None and config.portfolio_daily_stop_loss is not None:
             max_positions = config.portfolio_max_positions
             daily_stop_loss = config.portfolio_daily_stop_loss
+
+            # Filter to only traded instruments if specified
+            if config.portfolio_instruments:
+                original_count = len(self.symbols)
+                filtered_symbols = tuple(s for s in self.symbols if s in config.portfolio_instruments)
+                if len(filtered_symbols) < original_count:
+                    logger.info(
+                        "📊 Filtered symbols: %d loaded for features → %d for trading",
+                        original_count, len(filtered_symbols)
+                    )
+                    logger.info("   Loaded (all): %s", ', '.join(sorted(self.symbols)))
+                    logger.info("   Trading (filtered): %s", ', '.join(sorted(filtered_symbols)))
+                    self.symbols = filtered_symbols
+                else:
+                    logger.info("All %d loaded symbols will be traded", len(self.symbols))
 
             logger.info(
                 "Portfolio config loaded from config.yml: max_positions=%d, daily_stop_loss=$%.0f",
