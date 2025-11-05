@@ -208,6 +208,8 @@ class DiscordNotifier:
         worst_trade: float,
         symbols_traded: list[str],
         date: Optional[datetime] = None,
+        profit_factor: Optional[float] = None,
+        avg_pnl: Optional[float] = None,
     ) -> bool:
         """Send daily performance summary.
 
@@ -219,6 +221,8 @@ class DiscordNotifier:
             worst_trade: Worst trade P&L
             symbols_traded: List of symbols traded
             date: Date for summary (defaults to today)
+            profit_factor: Gross profit / gross loss ratio (optional)
+            avg_pnl: Average P&L per trade (optional)
 
         Returns:
             True if sent successfully
@@ -230,17 +234,36 @@ class DiscordNotifier:
 
         symbols_str = ", ".join(symbols_traded) if symbols_traded else "None"
 
+        # Calculate average if not provided
+        if avg_pnl is None and num_trades > 0:
+            avg_pnl = total_pnl / num_trades
+
+        fields = [
+            {"name": "Total P&L", "value": f"**${total_pnl:.2f}**", "inline": True},
+            {"name": "Trades", "value": str(num_trades), "inline": True},
+            {"name": "Win Rate", "value": f"{win_rate:.1f}%", "inline": True},
+        ]
+
+        # Add profit factor if available
+        if profit_factor is not None:
+            pf_display = f"{profit_factor:.2f}x" if profit_factor != float('inf') else "∞"
+            pf_emoji = "🟢" if profit_factor > 1.5 else "🟡" if profit_factor > 1.0 else "🔴"
+            fields.append({"name": "Profit Factor", "value": f"{pf_emoji} {pf_display}", "inline": True})
+
+        # Add average P&L if available
+        if avg_pnl is not None:
+            fields.append({"name": "Avg P&L", "value": f"${avg_pnl:.2f}", "inline": True})
+
+        fields.extend([
+            {"name": "Best Trade", "value": f"${best_trade:.2f}", "inline": True},
+            {"name": "Worst Trade", "value": f"${worst_trade:.2f}", "inline": True},
+            {"name": "Symbols", "value": symbols_str, "inline": False},
+        ])
+
         embed = {
             "title": f"📊 Daily Summary - {date.strftime('%Y-%m-%d')}",
             "color": color,
-            "fields": [
-                {"name": "Total P&L", "value": f"**${total_pnl:.2f}**", "inline": True},
-                {"name": "Trades", "value": str(num_trades), "inline": True},
-                {"name": "Win Rate", "value": f"{win_rate:.1f}%", "inline": True},
-                {"name": "Best Trade", "value": f"${best_trade:.2f}", "inline": True},
-                {"name": "Worst Trade", "value": f"${worst_trade:.2f}", "inline": True},
-                {"name": "Symbols", "value": symbols_str, "inline": False},
-            ],
+            "fields": fields,
             "timestamp": datetime.now().isoformat(),
         }
 

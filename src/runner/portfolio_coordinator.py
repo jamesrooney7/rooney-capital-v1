@@ -46,7 +46,8 @@ class PortfolioCoordinator:
         self,
         max_positions: int,
         daily_stop_loss: float = 2500.0,
-        emergency_exit_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None
+        emergency_exit_callback: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+        daily_summary_callback: Optional[Callable[[], None]] = None
     ):
         """Initialize portfolio coordinator.
 
@@ -55,10 +56,13 @@ class PortfolioCoordinator:
             daily_stop_loss: Daily loss limit in dollars (e.g., 2500.0)
             emergency_exit_callback: Optional callback when stop loss hit.
                 Signature: callback(reason: str, context: dict)
+            daily_summary_callback: Optional callback when day rolls over.
+                Called before resetting daily state for new day.
         """
         self.max_positions = max_positions
         self.daily_stop_loss = abs(daily_stop_loss)  # Ensure positive
         self.emergency_exit_callback = emergency_exit_callback
+        self.daily_summary_callback = daily_summary_callback
 
         # Thread-safe state
         self._lock = threading.RLock()
@@ -200,7 +204,17 @@ class PortfolioCoordinator:
 
             # Check if new trading day
             today = exit_time.date()
-            if self.current_day is None or today != self.current_day:
+            if self.current_day is not None and today != self.current_day:
+                # New day detected - trigger daily summary for previous day
+                logger.info(f"Day rollover detected: {self.current_day} → {today}")
+                if self.daily_summary_callback:
+                    try:
+                        self.daily_summary_callback()
+                    except Exception:
+                        logger.exception("Daily summary callback failed")
+                self.reset_daily_state(today)
+            elif self.current_day is None:
+                # First day - just initialize
                 self.reset_daily_state(today)
 
             # Remove from open positions

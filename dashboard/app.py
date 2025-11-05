@@ -97,8 +97,14 @@ heartbeat = read_heartbeat()
 service_status = get_service_status()
 log_data = parse_recent_logs(lines=log_lines, since_minutes=log_window)
 ml_stats = calculate_ml_stats(log_data)
-recent_trades = get_recent_trades(log_data, limit=10)
-open_positions = get_open_positions(log_data)
+
+# Initialize recent_trades and open_positions from logs as fallback
+recent_trades_from_logs = get_recent_trades(log_data, limit=10)
+open_positions_from_logs = get_open_positions(log_data)
+
+# Will override with database if available
+recent_trades = recent_trades_from_logs
+open_positions = open_positions_from_logs
 
 # Fetch database metrics if available
 db_trades = []
@@ -109,6 +115,41 @@ if DB_AVAILABLE:
         db = TradesDB()
         db_trades = db.get_all_trades()
         daily_pnl = db.get_daily_pnl()
+
+        # Get open positions from database (trades without exit_time)
+        db_open_positions = [
+            {
+                'symbol': trade['symbol'],
+                'size': 1.0,  # Default size
+                'entry_price': trade['entry_price'],
+                'entry_time': datetime.fromisoformat(trade['entry_time']) if trade.get('entry_time') else None
+            }
+            for trade in db_trades
+            if not trade.get('exit_time')
+        ]
+
+        # Get recent completed trades (last 20)
+        db_recent_trades = []
+        completed_trades = [t for t in db_trades if t.get('exit_time')][:20]
+        for trade in completed_trades:
+            # Add as exit notification
+            db_recent_trades.append({
+                'type': 'exit',
+                'symbol': trade['symbol'],
+                'action': 'sell',
+                'price': trade['exit_price'],
+                'size': 1.0,
+                'timestamp': datetime.fromisoformat(trade['exit_time']) if trade.get('exit_time') else None,
+                'ibs': None,
+                'ml_score': None,
+                'reason': 'Trade closed'
+            })
+
+        # Override with database data if available
+        if db_open_positions:
+            open_positions = db_open_positions
+        if db_recent_trades:
+            recent_trades = db_recent_trades
 
         # Calculate portfolio metrics
         portfolio_metrics = calculate_portfolio_metrics(

@@ -827,7 +827,8 @@ class LiveWorker:
                 self.portfolio_coordinator = PortfolioCoordinator(
                     max_positions=max_positions,
                     daily_stop_loss=daily_stop_loss,
-                    emergency_exit_callback=emergency_exit_callback
+                    emergency_exit_callback=emergency_exit_callback,
+                    daily_summary_callback=self.send_daily_summary
                 )
                 logger.info("Portfolio coordinator initialized successfully")
 
@@ -2154,10 +2155,21 @@ class LiveWorker:
             # Calculate summary stats
             total_pnl = sum(t["pnl"] for t in trades)
             winning_trades = [t for t in trades if t["pnl"] > 0]
+            losing_trades = [t for t in trades if t["pnl"] < 0]
             win_rate = (len(winning_trades) / len(trades)) * 100 if trades else 0.0
             best_trade = max((t["pnl"] for t in trades), default=0.0)
             worst_trade = min((t["pnl"] for t in trades), default=0.0)
             symbols = list(set(t["symbol"] for t in trades))
+
+            # Calculate profit factor
+            gross_profit = sum(t["pnl"] for t in winning_trades) if winning_trades else 0.0
+            gross_loss = abs(sum(t["pnl"] for t in losing_trades)) if losing_trades else 0.0
+            profit_factor = gross_profit / gross_loss if gross_loss > 0 else float('inf') if gross_profit > 0 else 0.0
+
+            logger.info(
+                f"Daily summary: {len(trades)} trades, ${total_pnl:.2f} P&L, "
+                f"{win_rate:.1f}% win rate, {profit_factor:.2f}x PF"
+            )
 
             return self.discord_notifier.send_daily_summary(
                 total_pnl=total_pnl,
@@ -2167,6 +2179,7 @@ class LiveWorker:
                 worst_trade=worst_trade,
                 symbols_traded=symbols,
                 date=datetime.now(),
+                profit_factor=profit_factor,
             )
         except Exception:
             logger.exception("Failed to send daily summary")
