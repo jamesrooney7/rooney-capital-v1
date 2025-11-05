@@ -247,19 +247,12 @@ def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[st
         )
     )
 
-    # Calculate expiration time (1 hour from now)
-    from datetime import datetime, timedelta, timezone
-    expiration_time = datetime.now(timezone.utc) + timedelta(hours=1)
-
     payload = {
         "ticker": _extract_symbol(strategy, getattr(order, "data", None)),
         "action": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
         "quantity": size,
         "price": price,
-        "timeInForce": {
-            "type": "gtd",  # Good Till Date
-            "duration": expiration_time.isoformat()
-        },
+        "timeInForce": "day",  # Active until market close, then auto-cancels
         "thresholds": thresholds,
         "metadata": metadata,
     }
