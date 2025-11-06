@@ -135,14 +135,32 @@ if DB_AVAILABLE:
                 'entry_time': datetime.fromisoformat(trade['entry_time']) if trade.get('entry_time') else None
             }
             for trade in db_trades
-            if not trade.get('exit_time')
+            if not trade.get('exit_time') and trade.get('entry_time')  # Has entry but no exit
         ]
 
-        # Get recent completed trades (last 20)
+        # Debug: Show how many open vs closed trades
+        if db_trades:
+            open_count = sum(1 for t in db_trades if not t.get('exit_time'))
+            closed_count = sum(1 for t in db_trades if t.get('exit_time'))
+            st.sidebar.info(f"Debug: {open_count} open, {closed_count} closed trades in DB")
+
+        # Get recent trades (show both entries and exits, last 20 events)
         db_recent_trades = []
         completed_trades = [t for t in db_trades if t.get('exit_time')][:20]
         for trade in completed_trades:
-            # Add as exit notification
+            # Add entry notification
+            db_recent_trades.append({
+                'type': 'entry',
+                'symbol': trade['symbol'],
+                'action': 'buy',  # Assuming long positions
+                'price': trade['entry_price'],
+                'size': 1.0,
+                'timestamp': datetime.fromisoformat(trade['entry_time']) if trade.get('entry_time') else None,
+                'ibs': trade.get('ibs_entry'),
+                'ml_score': trade.get('ml_score'),
+                'reason': None
+            })
+            # Add exit notification
             db_recent_trades.append({
                 'type': 'exit',
                 'symbol': trade['symbol'],
@@ -150,10 +168,13 @@ if DB_AVAILABLE:
                 'price': trade['exit_price'],
                 'size': 1.0,
                 'timestamp': datetime.fromisoformat(trade['exit_time']) if trade.get('exit_time') else None,
-                'ibs': None,
+                'ibs': trade.get('ibs_exit'),
                 'ml_score': None,
-                'reason': 'Trade closed'
+                'reason': trade.get('exit_reason', 'Trade closed')
             })
+
+        # Sort by timestamp descending (most recent first)
+        db_recent_trades.sort(key=lambda x: x['timestamp'] if x['timestamp'] else datetime.min, reverse=True)
 
         # Override with database data if available
         if db_open_positions:

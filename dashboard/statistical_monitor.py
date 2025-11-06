@@ -233,10 +233,16 @@ class StatisticalMonitor:
         expected_win_rate = baseline.win_rate / 100  # Convert to proportion
         observed_wins = int(live.n_trades * live.win_rate / 100)
 
-        # Binomial test
-        binom_pvalue = stats.binom_test(
-            observed_wins, live.n_trades, expected_win_rate, alternative="two-sided"
-        )
+        # Binomial test (use binomtest for scipy 1.10+, falls back to binom_test for older versions)
+        try:
+            # New API (scipy >= 1.7)
+            binom_result = stats.binomtest(observed_wins, live.n_trades, expected_win_rate, alternative="two-sided")
+            binom_pvalue = binom_result.pvalue
+        except AttributeError:
+            # Old API (scipy < 1.7)
+            binom_pvalue = stats.binom_test(
+                observed_wins, live.n_trades, expected_win_rate, alternative="two-sided"
+            )
 
         # Standard error and confidence interval for proportion
         se_win_rate = math.sqrt(expected_win_rate * (1 - expected_win_rate) / live.n_trades)
