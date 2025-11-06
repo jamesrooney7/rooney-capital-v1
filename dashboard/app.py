@@ -552,15 +552,31 @@ if DB_AVAILABLE and portfolio_metrics:
 # Statistical Quality Control
 # ============================================================================
 
-if DB_AVAILABLE and db_trades:
+# Debug information
+if not DB_AVAILABLE:
+    st.header("📊 Statistical Quality Control")
+    st.error("❌ Database not available. Check sidebar for error message.")
+elif not db_trades:
+    st.header("📊 Statistical Quality Control")
+    st.info("ℹ️ No trades in database yet. Statistical monitoring will activate once trades are recorded.")
+elif DB_AVAILABLE and db_trades:
     st.header("📊 Statistical Quality Control")
     st.caption("Compare live performance to backtest expectations with statistical rigor")
 
-    # Initialize monitor (results dir is in parent directory)
-    monitor = StatisticalMonitor(results_dir="../results")
+    try:
+        # Initialize monitor (results dir is in parent directory)
+        monitor = StatisticalMonitor(results_dir="../results")
 
-    # Load detailed portfolio baseline
-    portfolio_baseline_detailed = load_portfolio_baseline_detailed(results_dir="../results")
+        # Load detailed portfolio baseline
+        portfolio_baseline_detailed = load_portfolio_baseline_detailed(results_dir="../results")
+
+        if not portfolio_baseline_detailed:
+            st.warning("⚠️ Could not load portfolio baseline from results directory. Check that results/ directory exists with greedy_optimization_*.json file.")
+    except Exception as e:
+        st.error(f"❌ Error initializing statistical monitor: {e}")
+        import traceback
+        st.code(traceback.format_exc())
+        portfolio_baseline_detailed = None
 
     # --- PORTFOLIO-LEVEL MONITORING (PRIMARY) ---
     if portfolio_baseline_detailed and portfolio_metrics and portfolio_metrics.get('total_trades', 0) >= 5:
@@ -1192,7 +1208,14 @@ if DB_AVAILABLE and db_trades:
 # Per-Instrument Performance
 # ============================================================================
 
-if DB_AVAILABLE and instrument_metrics:
+# Debug information
+if not DB_AVAILABLE:
+    st.header("🎯 Per-Instrument Performance")
+    st.error("❌ Database not available. Check sidebar for error message.")
+elif not instrument_metrics:
+    st.header("🎯 Per-Instrument Performance")
+    st.info("ℹ️ No completed trades yet. Per-instrument metrics will show after first trade closes.")
+elif DB_AVAILABLE and instrument_metrics:
     st.header("🎯 Per-Instrument Performance")
 
     # Sort instruments by total P&L
