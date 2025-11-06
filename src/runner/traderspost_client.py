@@ -160,9 +160,17 @@ def _safe_upper_symbol(symbol: Optional[str]) -> Optional[str]:
 
 
 def _extract_symbol(strategy: Any, data: Any) -> str:
+    # First, try to get the actual contract symbol from the data feed (e.g., "ESZ4")
+    contract_symbol = getattr(data, "_current_contract_symbol", None)
+    if contract_symbol and isinstance(contract_symbol, str):
+        return contract_symbol.strip().upper()
+
+    # Fallback: extract from data feed name
     data_name = getattr(data, "_name", None)
     if isinstance(data_name, str) and data_name:
         return data_name.split("_")[0].upper()
+
+    # Last resort: get from strategy parameters
     strat_symbol = _safe_upper_symbol(getattr(getattr(strategy, "p", None), "symbol", None))
     if strat_symbol:
         return strat_symbol
@@ -250,7 +258,7 @@ def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[st
     payload = {
         "ticker": _extract_symbol(strategy, getattr(order, "data", None)),
         "action": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
-        "quantity": size,
+        "quantity": abs(size),  # TradersPost expects positive quantity, action determines direction
         "price": price,
         "timeInForce": "day",  # Active until market close, then auto-cancels
         "thresholds": thresholds,

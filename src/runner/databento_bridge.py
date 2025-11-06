@@ -645,6 +645,7 @@ class DatabentoLiveData(bt.feeds.DataBase):
         self._latest_dt: Optional[dt.datetime] = None
         self._stopped = False
         self._warmup_bars: "collections.deque[Bar]" = collections.deque()
+        self._current_contract_symbol: Optional[str] = None  # Actual contract (e.g., "ESZ4")
 
     def start(self) -> None:
         super().start()
@@ -712,6 +713,9 @@ class DatabentoLiveData(bt.feeds.DataBase):
         self.lines.volume[0] = payload.volume
 
         self._latest_dt = payload.timestamp
+        # Track the actual contract symbol from Databento (e.g., "ESZ4")
+        if payload.symbol:
+            self._current_contract_symbol = payload.symbol
         return True
 
     # ------------------------------------------------------------------
