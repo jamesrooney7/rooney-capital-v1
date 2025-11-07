@@ -76,6 +76,7 @@ class Bar:
     low: float
     close: float
     volume: float
+    contract_symbol: Optional[str] = None  # Actual contract (e.g., "HGX2025")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -208,6 +209,10 @@ class QueueFanout:
         return self._product_to_root.get(symbol) or "".join(
             ch for ch in symbol if not ch.isdigit()
         )
+
+    def resolve_contract_symbol(self, instrument_id: int) -> Optional[str]:
+        """Resolve instrument_id to the actual contract symbol (e.g., 'HGX2025')."""
+        return self._instrument_to_product.get(instrument_id)
 
     def known_symbols(self) -> Sequence[str]:
         with self._lock:
@@ -498,6 +503,7 @@ class DatabentoSubscriber:
                     "close": price,
                     "volume": size,
                     "last_ts": ts,
+                    "instrument_id": trade.instrument_id,  # Track for contract symbol resolution
                 }
                 self._current_bars[root] = bar
             else:
@@ -526,6 +532,12 @@ class DatabentoSubscriber:
     # Utility helpers
     # ------------------------------------------------------------------
     def _emit_bar(self, root: str, payload: MutableMapping[str, object]) -> Optional[Bar]:
+        # Resolve actual contract symbol (e.g., "HGX2025") from instrument_id
+        contract_symbol = None
+        instrument_id = payload.get("instrument_id")
+        if instrument_id is not None:
+            contract_symbol = self.queue_manager.resolve_contract_symbol(instrument_id)
+
         bar = Bar(
             symbol=root,
             timestamp=payload["minute"],
@@ -534,8 +546,9 @@ class DatabentoSubscriber:
             low=float(payload["low"]),
             close=float(payload["close"]),
             volume=float(payload["volume"]),
+            contract_symbol=contract_symbol,  # Include actual contract symbol
         )
-        logger.debug("Emitting bar %s %s", root, payload["minute"])
+        logger.debug("Emitting bar %s (%s) %s", root, contract_symbol or "unknown", payload["minute"])
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
@@ -713,9 +726,9 @@ class DatabentoLiveData(bt.feeds.DataBase):
         self.lines.volume[0] = payload.volume
 
         self._latest_dt = payload.timestamp
-        # Track the actual contract symbol from Databento (e.g., "ESZ4")
-        if payload.symbol:
-            self._current_contract_symbol = payload.symbol
+        # Track the actual contract symbol from Databento (e.g., "ESZ4", "HGX2025")
+        if payload.contract_symbol:
+            self._current_contract_symbol = payload.contract_symbol
         return True
 
     # ------------------------------------------------------------------
