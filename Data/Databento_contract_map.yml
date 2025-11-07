@@ -2,170 +2,170 @@
   "contracts": [
     {
       "symbol": "ES",
-      "tradovate_symbol": "MES",
+      "tradovate_symbol": "ES",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MES.FUT"
+        "product_id": "ES.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Micro E-mini S&P 500 (CME)",
+      "tradovate_description": "E-mini S&P 500 (CME)",
       "optimized": true
     },
     {
       "symbol": "NQ",
-      "tradovate_symbol": "MNQ",
+      "tradovate_symbol": "NQ",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MNQ.FUT"
+        "product_id": "NQ.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Micro E-mini Nasdaq-100 (CME)",
+      "tradovate_description": "E-mini Nasdaq-100 (CME)",
       "optimized": true
     },
     {
       "symbol": "RTY",
-      "tradovate_symbol": "M2K",
+      "tradovate_symbol": "RTY",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "M2K.FUT"
+        "product_id": "RTY.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Micro E-mini Russell 2000 (CME)",
+      "tradovate_description": "E-mini Russell 2000 (CME)",
       "optimized": true
     },
     {
       "symbol": "YM",
-      "tradovate_symbol": "MYM",
+      "tradovate_symbol": "YM",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MYM.FUT"
+        "product_id": "YM.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Micro E-mini Dow $0.50 (CME)",
+      "tradovate_description": "E-mini Dow (CME)",
       "optimized": true
     },
     {
       "symbol": "GC",
-      "tradovate_symbol": "MGC",
+      "tradovate_symbol": "GC",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MGC.FUT"
+        "product_id": "GC.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Micro Gold (COMEX)",
+      "tradovate_description": "Gold (COMEX)",
       "optimized": true
     },
     {
       "symbol": "SI",
-      "tradovate_symbol": "SIL",
+      "tradovate_symbol": "SI",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "SIL.FUT"
+        "product_id": "SI.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Mini Silver (COMEX)",
+      "tradovate_description": "Silver (COMEX)",
       "optimized": true
     },
     {
       "symbol": "HG",
-      "tradovate_symbol": "QC",
+      "tradovate_symbol": "HG",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MHG.FUT"
+        "product_id": "HG.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Mini Copper (COMEX)",
+      "tradovate_description": "Copper (COMEX)",
       "optimized": true
     },
     {
       "symbol": "CL",
-      "tradovate_symbol": "MCL",
+      "tradovate_symbol": "CL",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MCL.FUT"
+        "product_id": "CL.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "Micro Crude Oil (NYMEX)",
+      "tradovate_description": "Crude Oil (NYMEX)",
       "optimized": true
     },
     {
       "symbol": "NG",
-      "tradovate_symbol": "QG",
+      "tradovate_symbol": "NG",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "MNG.FUT"
+        "product_id": "NG.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Mini Natural Gas (NYMEX)",
+      "tradovate_description": "Natural Gas (NYMEX)",
       "optimized": true
     },
     {
       "symbol": "6A",
-      "tradovate_symbol": "M6A",
+      "tradovate_symbol": "6A",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "M6A.FUT"
+        "product_id": "6A.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Micro Australian Dollar (CME)",
+      "tradovate_description": "Australian Dollar (CME)",
       "optimized": true
     },
     {
       "symbol": "6B",
-      "tradovate_symbol": "M6B",
+      "tradovate_symbol": "6B",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "M6B.FUT"
+        "product_id": "6B.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Micro British Pound (CME)",
+      "tradovate_description": "British Pound (CME)",
       "optimized": true
     },
     {
       "symbol": "6E",
-      "tradovate_symbol": "M6E",
+      "tradovate_symbol": "6E",
       "databento": {
         "dataset": "GLBX.MDP3",
         "feed_symbol": null,
-        "product_id": "M6E.FUT"
+        "product_id": "6E.FUT"
       },
       "roll": {
         "stype_in": "parent"
       },
-      "tradovate_description": "E-Micro Euro (CME)",
+      "tradovate_description": "Euro (CME)",
       "optimized": true
     },
     {
