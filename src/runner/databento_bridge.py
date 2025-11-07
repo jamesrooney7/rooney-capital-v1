@@ -464,9 +464,18 @@ class DatabentoSubscriber:
             )
             raw_symbol = getattr(record, "raw_symbol", None)
 
-            # Log ALL available fields to see what Databento is actually sending
-            all_fields = {attr: getattr(record, attr, None) for attr in dir(record) if not attr.startswith('_')}
-            logger.info("SymbolMappingMsg ALL FIELDS: %s", all_fields)
+            # Try to extract contract symbol from Databento client's internal mappings
+            if self._client and hasattr(self._client, '_session'):
+                try:
+                    # The Databento client maintains symbology mappings internally
+                    # Try to resolve the instrument_id to its contract symbol
+                    client_symbol = self._client.symbology_map.get(instrument_id)
+                    if client_symbol and not raw_symbol:
+                        raw_symbol = client_symbol
+                        logger.info("Extracted contract symbol %s from Databento client mapping for instrument %s",
+                                   raw_symbol, instrument_id)
+                except Exception as e:
+                    logger.debug("Could not access Databento client symbology: %s", e)
 
             previous_root = self._instrument_roots.get(instrument_id)
             self.queue_manager.update_mapping(instrument_id, symbol)
@@ -520,11 +529,18 @@ class DatabentoSubscriber:
                     "Skipping trade for unknown instrument %s", record.instrument_id
                 )
                 return
-            # Check if TradeMsg contains raw_symbol
-            raw_symbol = getattr(record, "raw_symbol", None)
-            if raw_symbol:
-                self.queue_manager.update_raw_symbol(record.instrument_id, raw_symbol)
-                logger.info("Extracted raw_symbol %s from TradeMsg for instrument %s", raw_symbol, record.instrument_id)
+
+            # Try to get contract symbol from Databento client's internal symbology
+            if self._client:
+                try:
+                    client_symbol = self._client.symbology_map.get(record.instrument_id)
+                    if client_symbol:
+                        self.queue_manager.update_raw_symbol(record.instrument_id, client_symbol)
+                        logger.info("Extracted contract symbol %s from client for instrument %s (root: %s)",
+                                   client_symbol, record.instrument_id, root)
+                except Exception as e:
+                    logger.debug("Could not access client symbology for trade: %s", e)
+
             self._apply_trade(root, record, record.instrument_id)
             return
 
