@@ -159,6 +159,34 @@ def _safe_upper_symbol(symbol: Optional[str]) -> Optional[str]:
     return sym.upper() if sym else None
 
 
+def _convert_contract_to_full_year(contract_symbol: str) -> str:
+    """Convert Databento contract format (CLZ5) to TradersPost format (CLZ2025).
+
+    Args:
+        contract_symbol: Contract symbol from Databento like "CLZ5", "6NZ5", "ESH6"
+
+    Returns:
+        Contract symbol with full year like "CLZ2025", "6NZ2025", "ESH2026"
+    """
+    if not contract_symbol or len(contract_symbol) < 2:
+        return contract_symbol
+
+    # Extract the last character (year digit)
+    year_digit = contract_symbol[-1]
+
+    # Check if it's actually a year digit (0-9)
+    if not year_digit.isdigit():
+        return contract_symbol
+
+    # Convert single digit to full year (assuming 2020s decade)
+    # 0-9 maps to 2020-2029
+    full_year = f"202{year_digit}"
+
+    # Replace the single year digit with full year
+    # e.g., "CLZ5" -> "CLZ2025", "ESH6" -> "ESH2026"
+    return contract_symbol[:-1] + full_year
+
+
 def _extract_symbol(strategy: Any, data: Any, queue_manager: Optional[Any] = None) -> str:
     """Extract the symbol from strategy/data, preferring contract-specific symbols.
 
@@ -180,17 +208,18 @@ def _extract_symbol(strategy: Any, data: Any, queue_manager: Optional[Any] = Non
     if not root_symbol:
         return ""
 
-    # TEMPORARY: Send root symbols instead of specific contracts to test TradersPost compatibility
     # Try to get the contract-specific symbol from queue_manager
-    # if queue_manager is not None and hasattr(queue_manager, "get_current_contract_symbol"):
-    #     contract_symbol = queue_manager.get_current_contract_symbol(root_symbol)
-    #     logger.info("_extract_symbol: root=%s contract_symbol=%s", root_symbol, contract_symbol)
-    #     if contract_symbol:
-    #         return contract_symbol.upper()
-    # else:
-    #     logger.info("_extract_symbol: root=%s queue_manager=%s", root_symbol, queue_manager)
+    if queue_manager is not None and hasattr(queue_manager, "get_current_contract_symbol"):
+        contract_symbol = queue_manager.get_current_contract_symbol(root_symbol)
+        if contract_symbol:
+            # Convert from Databento format (CLZ5) to TradersPost format (CLZ2025)
+            full_year_contract = _convert_contract_to_full_year(contract_symbol.upper())
+            logger.info("_extract_symbol: root=%s contract=%s full_year=%s",
+                       root_symbol, contract_symbol, full_year_contract)
+            return full_year_contract
 
-    logger.info("_extract_symbol: sending root symbol=%s (contract symbols disabled for testing)", root_symbol)
+    # Fallback to root symbol if contract lookup fails
+    logger.info("_extract_symbol: using root symbol=%s (no contract found)", root_symbol)
     return root_symbol
 
 
