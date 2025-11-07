@@ -159,22 +159,34 @@ def _safe_upper_symbol(symbol: Optional[str]) -> Optional[str]:
     return sym.upper() if sym else None
 
 
-def _extract_symbol(strategy: Any, data: Any) -> str:
-    # First, try to get the actual contract symbol from the data feed (e.g., "ESZ4")
-    contract_symbol = getattr(data, "_current_contract_symbol", None)
-    if contract_symbol and isinstance(contract_symbol, str):
-        return contract_symbol.strip().upper()
+def _extract_symbol(strategy: Any, data: Any, queue_manager: Optional[Any] = None) -> str:
+    """Extract the symbol from strategy/data, preferring contract-specific symbols.
 
-    # Fallback: extract from data feed name
+    Args:
+        strategy: The trading strategy
+        data: The data feed
+        queue_manager: Optional QueueFanout instance to look up contract symbols
+
+    Returns:
+        The symbol, preferring contract-specific symbols like "6NZ2025" over roots like "6N"
+    """
     data_name = getattr(data, "_name", None)
+    root_symbol = None
     if isinstance(data_name, str) and data_name:
-        return data_name.split("_")[0].upper()
+        root_symbol = data_name.split("_")[0].upper()
+    else:
+        root_symbol = _safe_upper_symbol(getattr(getattr(strategy, "p", None), "symbol", None))
 
-    # Last resort: get from strategy parameters
-    strat_symbol = _safe_upper_symbol(getattr(getattr(strategy, "p", None), "symbol", None))
-    if strat_symbol:
-        return strat_symbol
-    return ""
+    if not root_symbol:
+        return ""
+
+    # Try to get the contract-specific symbol from queue_manager
+    if queue_manager is not None and hasattr(queue_manager, "get_current_contract_symbol"):
+        contract_symbol = queue_manager.get_current_contract_symbol(root_symbol)
+        if contract_symbol:
+            return contract_symbol.upper()
+
+    return root_symbol
 
 
 def _ensure_ml_snapshot(snapshot: Mapping[str, Any] | None, strategy: Any) -> dict[str, Any]:
@@ -227,9 +239,19 @@ def _format_dt(value: Any) -> Optional[str]:
     return None
 
 
-def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[str, Any]]:
-    """Translate an ``IbsStrategy.notify_order`` callback into a payload."""
+def order_notification_to_message(
+    strategy: Any, order: Any, queue_manager: Optional[Any] = None
+) -> Optional[dict[str, Any]]:
+    """Translate an ``IbsStrategy.notify_order`` callback into a payload.
 
+    Args:
+        strategy: The trading strategy
+        order: The order object
+        queue_manager: Optional QueueFanout instance to look up contract symbols
+
+    Returns:
+        A dictionary payload for TradersPost, or None if the order is not ready
+    """
     if getattr(order, "status", None) != bt.Order.Completed:
         return None
 
@@ -256,7 +278,7 @@ def order_notification_to_message(strategy: Any, order: Any) -> Optional[dict[st
     )
 
     payload = {
-        "ticker": _extract_symbol(strategy, getattr(order, "data", None)),
+        "ticker": _extract_symbol(strategy, getattr(order, "data", None), queue_manager),
         "action": "buy" if getattr(order, "isbuy", lambda: False)() else "sell",
         "quantity": abs(size),  # TradersPost expects positive quantity, action determines direction
         "price": price,
@@ -272,9 +294,19 @@ def trade_notification_to_message(
     strategy: Any,
     trade: Any,
     exit_snapshot: Optional[Mapping[str, Any]] = None,
+    queue_manager: Optional[Any] = None,
 ) -> Optional[dict[str, Any]]:
-    """Translate an ``IbsStrategy.notify_trade`` callback into a payload."""
+    """Translate an ``IbsStrategy.notify_trade`` callback into a payload.
 
+    Args:
+        strategy: The trading strategy
+        trade: The trade object
+        exit_snapshot: Optional snapshot of exit conditions
+        queue_manager: Optional QueueFanout instance to look up contract symbols
+
+    Returns:
+        A dictionary payload for TradersPost, or None if the trade is not ready
+    """
     if not getattr(trade, "isclosed", False):
         return None
 
@@ -316,7 +348,7 @@ def trade_notification_to_message(
     )
 
     payload = {
-        "ticker": _extract_symbol(strategy, getattr(trade, "data", None)),
+        "ticker": _extract_symbol(strategy, getattr(trade, "data", None), queue_manager),
         "action": "exit",  # Trade close uses "exit" action per TradersPost API
         "quantity": abs(size_hint) if size_hint else None,
         "price": snapshot.get("price", getattr(trade, "price", None)),

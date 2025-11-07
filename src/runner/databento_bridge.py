@@ -76,7 +76,8 @@ class Bar:
     low: float
     close: float
     volume: float
-    contract_symbol: Optional[str] = None  # Actual contract (e.g., "HGX2025")
+    instrument_id: Optional[int] = None
+    contract_symbol: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -106,6 +107,8 @@ class QueueFanout:
     def __init__(self, product_to_root: Mapping[str, str], maxsize: int = 2048) -> None:
         self._product_to_root: Dict[str, str] = dict(product_to_root)
         self._instrument_to_product: Dict[int, str] = {}
+        self._instrument_to_raw_symbol: Dict[int, str] = {}
+        self._root_to_contract_symbol: Dict[str, str] = {}
         self._queues: Dict[str, "queue.Queue[Bar | QueueSignal]"] = {}
         self._maxsize = maxsize
         self._lock = threading.Lock()
@@ -134,6 +137,12 @@ class QueueFanout:
         """Push a completed bar into the per-symbol queue."""
 
         q = self._ensure_queue(bar.symbol)
+
+        # Track the latest contract_symbol for this root
+        if bar.contract_symbol:
+            with self._lock:
+                self._root_to_contract_symbol[bar.symbol] = bar.contract_symbol
+
         try:
             q.put_nowait(bar)
         except queue.Full:
@@ -210,9 +219,35 @@ class QueueFanout:
             ch for ch in symbol if not ch.isdigit()
         )
 
+    def update_raw_symbol(self, instrument_id: int, raw_symbol: Optional[str]) -> None:
+        """Record the raw_symbol (contract-specific symbol) for an instrument_id.
+
+        The raw_symbol contains the actual contract code like "6NZ2025" instead of
+        the generic "6N.FUT" that comes from SymbolMappingMsg.
+        """
+        if raw_symbol:
+            with self._lock:
+                self._instrument_to_raw_symbol[instrument_id] = raw_symbol
+                logger.debug(
+                    "Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id
+                )
+
     def resolve_contract_symbol(self, instrument_id: int) -> Optional[str]:
-        """Resolve instrument_id to the actual contract symbol (e.g., 'HGX2025')."""
-        return self._instrument_to_product.get(instrument_id)
+        """Resolve the specific contract symbol for an instrument_id.
+
+        Returns the raw_symbol (e.g., "6NZ2025") if available, otherwise None.
+        """
+        with self._lock:
+            return self._instrument_to_raw_symbol.get(instrument_id)
+
+    def get_current_contract_symbol(self, root: str) -> Optional[str]:
+        """Get the latest contract symbol for a root symbol.
+
+        Returns the most recent contract symbol (e.g., "6NZ2025") for the given
+        root (e.g., "6N"), or None if not available.
+        """
+        with self._lock:
+            return self._root_to_contract_symbol.get(root.upper())
 
     def known_symbols(self) -> Sequence[str]:
         with self._lock:
@@ -358,9 +393,12 @@ class DatabentoSubscriber:
                 symbol = getattr(mapping, "symbol", None) or getattr(
                     mapping, "stype_in_symbol", None
                 )
+                raw_symbol = getattr(mapping, "raw_symbol", None)
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                if raw_symbol:
+                    self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
@@ -370,9 +408,12 @@ class DatabentoSubscriber:
                 symbol = getattr(entry, "symbol", None) or getattr(
                     entry, "stype_in_symbol", None
                 )
+                raw_symbol = getattr(entry, "raw_symbol", None)
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                if raw_symbol:
+                    self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
@@ -465,14 +506,14 @@ class DatabentoSubscriber:
                     "Skipping trade for unknown instrument %s", record.instrument_id
                 )
                 return
-            self._apply_trade(root, record)
+            self._apply_trade(root, record, record.instrument_id)
             return
 
         # Other message types (e.g., heartbeats) are ignored but logged at
         # debug so we can inspect when necessary.
         logger.debug("Ignoring Databento record type %s", getattr(record, "rtype", "?"))
 
-    def _apply_trade(self, root: str, trade: TradeMsg) -> None:
+    def _apply_trade(self, root: str, trade: TradeMsg, instrument_id: int) -> None:
         price_raw = trade.pretty_price
         size = float(trade.size or 0)
         if price_raw is None:
@@ -503,7 +544,7 @@ class DatabentoSubscriber:
                     "close": price,
                     "volume": size,
                     "last_ts": ts,
-                    "instrument_id": trade.instrument_id,  # Track for contract symbol resolution
+                    "instrument_id": instrument_id,
                 }
                 self._current_bars[root] = bar
             else:
@@ -512,6 +553,7 @@ class DatabentoSubscriber:
                 bar["close"] = price
                 bar["volume"] = float(bar["volume"]) + size
                 bar["last_ts"] = ts
+                bar["instrument_id"] = instrument_id
 
     def flush(self) -> None:
         """Force emission of the current bars.
@@ -532,10 +574,9 @@ class DatabentoSubscriber:
     # Utility helpers
     # ------------------------------------------------------------------
     def _emit_bar(self, root: str, payload: MutableMapping[str, object]) -> Optional[Bar]:
-        # Resolve actual contract symbol (e.g., "HGX2025") from instrument_id
-        contract_symbol = None
         instrument_id = payload.get("instrument_id")
-        if instrument_id is not None:
+        contract_symbol = None
+        if isinstance(instrument_id, int):
             contract_symbol = self.queue_manager.resolve_contract_symbol(instrument_id)
 
         bar = Bar(
@@ -546,9 +587,10 @@ class DatabentoSubscriber:
             low=float(payload["low"]),
             close=float(payload["close"]),
             volume=float(payload["volume"]),
-            contract_symbol=contract_symbol,  # Include actual contract symbol
+            instrument_id=instrument_id if isinstance(instrument_id, int) else None,
+            contract_symbol=contract_symbol,
         )
-        logger.debug("Emitting bar %s (%s) %s", root, contract_symbol or "unknown", payload["minute"])
+        logger.debug("Emitting bar %s %s (contract: %s)", root, payload["minute"], contract_symbol or "unknown")
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
