@@ -640,9 +640,9 @@ def load_portfolio_baseline_detailed(results_dir: str | Path = "results") -> Opt
     cagr = test_metrics.get("cagr", 0.0)
     max_dd = test_metrics.get("max_dd", 0.0)
 
-    # Approximate total P&L assuming 1 year test period and $100k starting capital
+    # Approximate total P&L assuming 1 year test period and $150k starting capital
     # total_pnl ≈ starting_capital × CAGR
-    estimated_pnl = 100000 * cagr  # Rough estimate
+    estimated_pnl = 150000 * cagr  # Rough estimate (matches live account size)
 
     return PortfolioBaseline(
         sharpe=test_metrics.get("sharpe", 0.0),

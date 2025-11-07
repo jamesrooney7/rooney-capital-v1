@@ -71,7 +71,7 @@ def evaluate_portfolio(
     symbol_metadata: Dict[str, dict],
     symbols_to_include: Set[str],
     max_positions: int,
-    initial_capital: float = 250000.0,
+    initial_capital: float = 150000.0,
     daily_stop_loss: float = 2500.0
 ) -> Dict:
     """Run portfolio simulation for a specific symbol set."""
@@ -345,7 +345,8 @@ def main():
     parser.add_argument('--max-positions', type=int, default=10)
     parser.add_argument('--max-dd-limit', type=float, default=5000.0,
                        help='Maximum drawdown limit in dollars')
-    parser.add_argument('--initial-capital', type=float, default=250000.0)
+    parser.add_argument('--initial-capital', type=float, default=150000.0,
+                       help='Initial capital (default $150k to match live account)')
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
     parser.add_argument('--output-dir', type=str, default='results')
     parser.add_argument('--update-config', action='store_true',

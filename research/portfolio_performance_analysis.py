@@ -52,13 +52,13 @@ logger = logging.getLogger(__name__)
 class PortfolioPerformanceAnalyzer:
     """Comprehensive performance analysis for portfolio strategies."""
 
-    def __init__(self, equity_df: pd.DataFrame, initial_capital: float = 100000):
+    def __init__(self, equity_df: pd.DataFrame, initial_capital: float = 150000):
         """
         Initialize analyzer with equity curve.
 
         Args:
             equity_df: DataFrame with columns ['time', 'equity', 'n_positions', 'daily_pnl', 'stopped_out']
-            initial_capital: Starting capital
+            initial_capital: Starting capital (default $150k to match live account)
         """
         self.equity_df = equity_df.copy()
         self.initial_capital = initial_capital
@@ -605,7 +605,7 @@ def main():
         symbol_metadata,
         max_positions=args.max_positions,
         daily_stop_loss=args.daily_stop_loss,
-        initial_capital=100000
+        initial_capital=150000
     )
 
     if equity_df.empty:
@@ -614,7 +614,7 @@ def main():
 
     # Run comprehensive analysis
     logger.info("\nCalculating comprehensive performance metrics...")
-    analyzer = PortfolioPerformanceAnalyzer(equity_df, initial_capital=100000)
+    analyzer = PortfolioPerformanceAnalyzer(equity_df, initial_capital=150000)
     metrics = analyzer.calculate_all_metrics()
 
     # Generate report

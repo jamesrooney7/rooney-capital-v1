@@ -158,7 +158,7 @@ def simulate_portfolio_intraday(
     symbol_trades: Dict[str, pd.DataFrame],
     symbol_metadata: Dict[str, dict],
     max_positions: int,
-    initial_capital: float = 250000.0,
+    initial_capital: float = 150000.0,
     daily_stop_loss: float = 2500.0,
     exit_slippage: float = 0.0002,
     ranking_method: str = 'sharpe'
@@ -170,7 +170,7 @@ def simulate_portfolio_intraday(
         symbol_trades: {symbol: trades_df with entry/exit times}
         symbol_metadata: {symbol: metadata_dict}
         max_positions: Maximum positions open simultaneously
-        initial_capital: Starting capital
+        initial_capital: Starting capital (default $150k to match live account)
         daily_stop_loss: Daily loss limit in dollars
         exit_slippage: Additional slippage when forced to exit (0.02%)
         ranking_method: How to rank symbols when limiting positions
@@ -595,7 +595,8 @@ def main():
                        help='Directory with optimization results')
     parser.add_argument('--min-positions', type=int, default=1)
     parser.add_argument('--max-positions', type=int, default=None)
-    parser.add_argument('--initial-cash', type=float, default=250000.0)
+    parser.add_argument('--initial-cash', type=float, default=150000.0,
+                       help='Initial capital (default: $150k to match live account)')
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
     parser.add_argument('--exit-slippage', type=float, default=0.0002,
                        help='Slippage when forced to exit (default: 0.02%%)')

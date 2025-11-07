@@ -186,7 +186,7 @@ if DB_AVAILABLE:
         portfolio_metrics = calculate_portfolio_metrics(
             trades=db_trades,
             daily_pnl=daily_pnl,
-            starting_capital=100000.0,  # Adjust based on your account size
+            starting_capital=150000.0,  # Actual account size for accurate Sharpe calculation
             risk_free_rate=0.04,  # 4% annual risk-free rate
         )
 
