@@ -183,8 +183,11 @@ def _extract_symbol(strategy: Any, data: Any, queue_manager: Optional[Any] = Non
     # Try to get the contract-specific symbol from queue_manager
     if queue_manager is not None and hasattr(queue_manager, "get_current_contract_symbol"):
         contract_symbol = queue_manager.get_current_contract_symbol(root_symbol)
+        logger.info("_extract_symbol: root=%s contract_symbol=%s", root_symbol, contract_symbol)
         if contract_symbol:
             return contract_symbol.upper()
+    else:
+        logger.info("_extract_symbol: root=%s queue_manager=%s", root_symbol, queue_manager)
 
     return root_symbol
 

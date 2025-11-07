@@ -397,8 +397,10 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                logger.info("Metadata mapping: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
                 if raw_symbol:
                     self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
+                    logger.info("Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
@@ -412,8 +414,10 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
+                logger.info("Metadata symbol: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
                 if raw_symbol:
                     self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
+                    logger.info("Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
@@ -578,6 +582,7 @@ class DatabentoSubscriber:
         contract_symbol = None
         if isinstance(instrument_id, int):
             contract_symbol = self.queue_manager.resolve_contract_symbol(instrument_id)
+            logger.info("Resolving contract for root=%s instrument_id=%s -> contract_symbol=%s", root, instrument_id, contract_symbol)
 
         bar = Bar(
             symbol=root,
@@ -590,7 +595,7 @@ class DatabentoSubscriber:
             instrument_id=instrument_id if isinstance(instrument_id, int) else None,
             contract_symbol=contract_symbol,
         )
-        logger.debug("Emitting bar %s %s (contract: %s)", root, payload["minute"], contract_symbol or "unknown")
+        logger.info("Emitting bar %s %s (contract: %s)", root, payload["minute"], contract_symbol or "unknown")
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
