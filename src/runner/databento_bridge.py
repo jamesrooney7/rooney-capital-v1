@@ -462,8 +462,13 @@ class DatabentoSubscriber:
             symbol = getattr(record, "stype_in_symbol", None) or getattr(
                 record, "stype_out_symbol", None
             )
+            raw_symbol = getattr(record, "raw_symbol", None)
             previous_root = self._instrument_roots.get(instrument_id)
             self.queue_manager.update_mapping(instrument_id, symbol)
+            logger.info("SymbolMappingMsg: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
+            if raw_symbol:
+                self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
+                logger.info("Recorded raw_symbol %s for instrument %s from SymbolMappingMsg", raw_symbol, instrument_id)
             root = self.queue_manager.resolve_root(instrument_id)
             if not root:
                 self._instrument_roots.pop(instrument_id, None)
@@ -510,6 +515,11 @@ class DatabentoSubscriber:
                     "Skipping trade for unknown instrument %s", record.instrument_id
                 )
                 return
+            # Check if TradeMsg contains raw_symbol
+            raw_symbol = getattr(record, "raw_symbol", None)
+            if raw_symbol:
+                self.queue_manager.update_raw_symbol(record.instrument_id, raw_symbol)
+                logger.info("Extracted raw_symbol %s from TradeMsg for instrument %s", raw_symbol, record.instrument_id)
             self._apply_trade(root, record, record.instrument_id)
             return
 
