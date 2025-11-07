@@ -463,6 +463,11 @@ class DatabentoSubscriber:
                 record, "stype_out_symbol", None
             )
             raw_symbol = getattr(record, "raw_symbol", None)
+
+            # Log ALL available fields to see what Databento is actually sending
+            all_fields = {attr: getattr(record, attr, None) for attr in dir(record) if not attr.startswith('_')}
+            logger.info("SymbolMappingMsg ALL FIELDS: %s", all_fields)
+
             previous_root = self._instrument_roots.get(instrument_id)
             self.queue_manager.update_mapping(instrument_id, symbol)
             logger.info("SymbolMappingMsg: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
