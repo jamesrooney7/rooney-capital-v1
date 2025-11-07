@@ -1938,7 +1938,7 @@ class LiveWorker:
     def _traderspost_order_callback(self, strategy: NotifyingIbsStrategy, order: Any) -> None:
         if not self.traderspost_client:
             return
-        payload = order_notification_to_message(strategy, order)
+        payload = order_notification_to_message(strategy, order, self.queue_manager)
         if not payload:
             status = getattr(order, "status", None)
             if status != bt.Order.Completed:
@@ -2011,7 +2011,7 @@ class LiveWorker:
     ) -> None:
         if not self.traderspost_client:
             return
-        payload = trade_notification_to_message(strategy, trade, exit_snapshot)
+        payload = trade_notification_to_message(strategy, trade, exit_snapshot, self.queue_manager)
         if not payload:
             if not getattr(trade, "isclosed", False):
                 logger.debug(
