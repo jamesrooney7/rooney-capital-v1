@@ -1,0 +1,57 @@
+{
+  "strategy": "ibs_b",
+  "optimization_date": "2025-11-08",
+  "optimization_method": "greedy_search_train_test_split",
+  "data_source": "results/greedy_optimization_ibs_b_20251108_223447.json",
+
+  "portfolio_constraints": {
+    "max_positions": 3,
+    "daily_stop_loss": 2500.0,
+    "initial_capital": 150000.0,
+    "candidate_symbols": [
+      "NQ", "YM", "6B", "6J", "6N", "6S", "NG", "SI"
+    ],
+    "optimal_symbols": [
+      "6B", "6N", "6S", "SI", "YM"
+    ],
+    "n_symbols": 5
+  },
+
+  "train_performance": {
+    "period": "2023-01-01 to 2023-12-31",
+    "sharpe_ratio": 11.32,
+    "cagr": 0.890,
+    "max_drawdown_dollars": 4026.75
+  },
+
+  "test_performance": {
+    "period": "2024-01-01 to 2024-12-31",
+    "sharpe_ratio": 12.09,
+    "cagr": 0.913,
+    "max_drawdown_dollars": 4829.0
+  },
+
+  "generalization": {
+    "test_vs_train_sharpe": 1.067,
+    "assessment": "Excellent - Test Sharpe HIGHER than train (107%) indicates robust strategy"
+  },
+
+  "ml_models": {
+    "models_path": "src/models/",
+    "models_available": [
+      "6B_best.json + 6B_rf_model.pkl",
+      "6N_best.json + 6N_rf_model.pkl",
+      "6S_best.json + 6S_rf_model.pkl",
+      "SI_best.json + SI_rf_model.pkl",
+      "YM_best.json + YM_rf_model.pkl"
+    ]
+  },
+
+  "notes": [
+    "Currency-heavy portfolio (6B, 6N, 6S) + commodity (SI) + equity (YM)",
+    "Strong performer: Test Sharpe 12.09, CAGR 91.3%",
+    "Test performance EXCEEDED train (generalization 107%)",
+    "Max positions increased to 3 for optimal balance",
+    "Significantly outperformed IBS A"
+  ]
+}

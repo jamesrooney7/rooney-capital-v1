@@ -1,0 +1,57 @@
+{
+  "strategy": "ibs_a",
+  "optimization_date": "2025-11-08",
+  "optimization_method": "greedy_search_train_test_split",
+  "data_source": "results/greedy_optimization_ibs_a_20251108_223012.json",
+
+  "portfolio_constraints": {
+    "max_positions": 2,
+    "daily_stop_loss": 2500.0,
+    "initial_capital": 150000.0,
+    "candidate_symbols": [
+      "ES", "RTY", "6A", "6C", "6E", "6M", "CL", "GC", "HG"
+    ],
+    "optimal_symbols": [
+      "6A", "6C", "6M", "CL", "GC", "HG"
+    ],
+    "n_symbols": 6
+  },
+
+  "train_performance": {
+    "period": "2023-01-01 to 2023-12-31",
+    "sharpe_ratio": 8.53,
+    "cagr": 0.678,
+    "max_drawdown_dollars": 4862.29
+  },
+
+  "test_performance": {
+    "period": "2024-01-01 to 2024-12-31",
+    "sharpe_ratio": 7.19,
+    "cagr": 0.605,
+    "max_drawdown_dollars": 6628.87
+  },
+
+  "generalization": {
+    "test_vs_train_sharpe": 0.844,
+    "assessment": "Good - Test Sharpe 84% of train indicates reasonable generalization"
+  },
+
+  "ml_models": {
+    "models_path": "src/models/",
+    "models_available": [
+      "6A_best.json + 6A_rf_model.pkl",
+      "6C_best.json + 6C_rf_model.pkl",
+      "6M_best.json + 6M_rf_model.pkl",
+      "CL_best.json + CL_rf_model.pkl",
+      "GC_best.json + GC_rf_model.pkl",
+      "HG_best.json + HG_rf_model.pkl"
+    ]
+  },
+
+  "notes": [
+    "Currency-heavy portfolio (6A, 6C, 6M) + commodities (CL, GC, HG)",
+    "Conservative: max_positions=2, lower Sharpe than IBS B",
+    "Equities (ES, RTY) not selected by optimizer",
+    "Max DD stayed under $7k constraint"
+  ]
+}

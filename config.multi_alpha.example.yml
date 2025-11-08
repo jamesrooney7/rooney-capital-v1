@@ -177,29 +177,28 @@ instruments:
 # Strategy Configurations (independent strategy workers)
 # ============================================================================
 strategies:
-  # IBS (Internal Bar Strength) Strategy
-  ibs:
+  # IBS A - Currency & Commodity Focus
+  # Optimization: 2025-11-08, Test Sharpe: 7.19, CAGR: 60.5%
+  ibs_a:
     enabled: true
-    broker_account: ${TRADERSPOST_IBS_WEBHOOK}
-    starting_cash: 250000  # From production config.yml
-    models_path: src/models/  # Fixed: All models in src/models/, not subdirectory
-    max_positions: 2  # From greedy optimization (config.yml)
+    broker_account: ${TRADERSPOST_IBS_A_WEBHOOK}
+    starting_cash: 150000
+    models_path: src/models/
+    max_positions: 2  # Optimized via greedy search
     daily_stop_loss: 2500
     max_bars_in_trade: 100
 
-    # PRODUCTION-OPTIMIZED: 9 instruments from greedy search
-    # See: config/portfolio_optimization_ibs.json for details
-    # Source: config.yml (production configuration)
+    # OPTIMIZED: 6 instruments from greedy search (2025-11-08)
+    # See: config/portfolio_optimization_ibs_a.json
+    # Candidate pool: ES, RTY, 6A, 6C, 6E, 6M, CL, GC, HG (9 symbols)
+    # Selected: 6A, 6C, 6M, CL, GC, HG (currencies + commodities)
     instruments:
-      - 6A  # ✓ Has ML model
-      - 6B  # ✓ Has ML model
-      - 6C  # ✓ Has ML model
-      - 6M  # ✓ Has ML model
-      - 6N  # ✓ Has ML model
-      - 6S  # ✓ Has ML model
-      - CL  # ✓ Has ML model
-      - HG  # ✓ Has ML model
-      - SI  # ✓ Has ML model
+      - 6A  # AUD - Selected
+      - 6C  # CAD - Selected
+      - 6M  # MXN - Selected
+      - CL  # Crude Oil - Selected
+      - GC  # Gold - Selected
+      - HG  # Copper - Selected
 
     # IBS-specific parameters (generic - same for all instruments)
     strategy_params:
@@ -213,7 +212,44 @@ strategies:
 
       # ML filtering
       # NOTE: ml_threshold is loaded PER-INSTRUMENT from {SYMBOL}_best.json
-      # This generic value is only a fallback if model loading fails
+      use_ml_filter: true
+      ml_threshold: 0.65  # Fallback only - actual thresholds per instrument
+
+  # IBS B - Multi-Asset Focus
+  # Optimization: 2025-11-08, Test Sharpe: 12.09, CAGR: 91.3%
+  ibs_b:
+    enabled: true
+    broker_account: ${TRADERSPOST_IBS_B_WEBHOOK}
+    starting_cash: 150000
+    models_path: src/models/
+    max_positions: 3  # Optimized via greedy search
+    daily_stop_loss: 2500
+    max_bars_in_trade: 100
+
+    # OPTIMIZED: 5 instruments from greedy search (2025-11-08)
+    # See: config/portfolio_optimization_ibs_b.json
+    # Candidate pool: NQ, YM, 6B, 6J, 6N, 6S, NG, SI (8 symbols, PL excluded)
+    # Selected: 6B, 6N, 6S, SI, YM (currencies + commodity + equity)
+    # Strong performer: Test Sharpe 12.09, generalization 107%
+    instruments:
+      - 6B  # GBP - Selected
+      - 6N  # NZD - Selected
+      - 6S  # CHF - Selected
+      - SI  # Silver - Selected
+      - YM  # Dow - Selected
+
+    # IBS-specific parameters (generic - same for all instruments)
+    strategy_params:
+      # Entry thresholds
+      ibs_entry_high: 0.7
+      ibs_entry_low: 0.3
+
+      # Exit thresholds
+      ibs_exit_high: 0.3
+      ibs_exit_low: 0.7
+
+      # ML filtering
+      # NOTE: ml_threshold is loaded PER-INSTRUMENT from {SYMBOL}_best.json
       use_ml_filter: true
       ml_threshold: 0.65  # Fallback only - actual thresholds per instrument
 
