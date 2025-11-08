@@ -20,63 +20,34 @@ Splitting the IBS strategy into two independent strategies (IBS A and IBS B) to:
 
 ---
 
-## Proposed Grouping Options
+## Selected Grouping: Balanced Mixed Split ✅
 
-### Option 1: Equities+Commodities vs Currencies (RECOMMENDED)
+Each strategy gets an equal mix of all asset classes:
+- 2 Equities each
+- 4 Currencies each
+- 3 Commodities each
 
-**IBS A - Equities & Commodities (10 symbols):**
+### **IBS A (9 symbols):**
 ```
-ES, NQ, RTY, YM, CL, NG, GC, SI, HG, PL
+ES, RTY, 6A, 6C, 6E, 6M, CL, GC, HG
 ```
+- **Equities:** ES (S&P 500), RTY (Russell 2000)
+- **Currencies:** 6A (AUD), 6C (CAD), 6E (EUR), 6M (MXN)
+- **Commodities:** CL (Crude Oil), GC (Gold), HG (Copper)
 
-**IBS B - Currencies (8 symbols):**
+### **IBS B (9 symbols):**
 ```
-6A, 6B, 6C, 6E, 6J, 6M, 6N, 6S
+NQ, YM, 6B, 6J, 6N, 6S, NG, SI, PL
 ```
+- **Equities:** NQ (Nasdaq), YM (Dow Jones)
+- **Currencies:** 6B (GBP), 6J (JPY), 6N (NZD), 6S (CHF)
+- **Commodities:** NG (Natural Gas), SI (Silver), PL (Platinum)
 
-**Rationale:**
-- Separates currency risk completely
-- IBS A has mix of equity and commodity exposure
-- IBS B pure currency play
-- Natural diversification between groups
-
----
-
-### Option 2: Equities+Currencies vs Commodities
-
-**IBS A - Equities & Currencies (12 symbols):**
-```
-ES, NQ, RTY, YM, 6A, 6B, 6C, 6E, 6J, 6M, 6N, 6S
-```
-
-**IBS B - Commodities (6 symbols):**
-```
-CL, NG, GC, SI, HG, PL
-```
-
-**Rationale:**
-- Separates commodity risk
-- IBS A more diversified (larger pool)
-- IBS B concentrated on commodities
-
----
-
-### Option 3: Balanced Mixed Split
-
-**IBS A - Mixed (9 symbols):**
-```
-ES, NQ, RTY, YM, CL, NG, GC, SI, HG
-```
-
-**IBS B - Mixed (9 symbols):**
-```
-6A, 6B, 6C, 6E, 6J, 6M, 6N, 6S, PL
-```
-
-**Rationale:**
-- Equal 9+9 split
-- Both have some commodity exposure
-- Balanced size
+### **Rationale:**
+- Equal 9+9 split for balanced capital allocation
+- Both strategies have same asset class distribution (2+4+3)
+- Similar risk profiles - both will behave as diversified portfolios
+- Neither strategy concentrated in single asset class
 
 ---
 
@@ -84,9 +55,7 @@ ES, NQ, RTY, YM, CL, NG, GC, SI, HG
 
 **Location:** `/opt/pine/rooney-capital-v1`
 
-### Option 1: Equities+Commodities vs Currencies
-
-#### IBS A - Equities & Commodities
+### IBS A - Balanced Mix (9 symbols)
 ```bash
 python research/portfolio_optimizer_greedy_train_test.py \
     --results-dir results \
@@ -96,14 +65,17 @@ python research/portfolio_optimizer_greedy_train_test.py \
     --max-dd-limit 5000 \
     --initial-capital 150000 \
     --daily-stop-loss 2500 \
-    --symbols ES NQ RTY YM CL NG GC SI HG PL \
+    --symbols ES RTY 6A 6C 6E 6M CL GC HG \
     --output-suffix ibs_a \
     --output-dir results
 ```
 
+**Symbols:** ES, RTY, 6A, 6C, 6E, 6M, CL, GC, HG
 **Output:** `results/greedy_optimization_ibs_a_TIMESTAMP.json`
 
-#### IBS B - Currencies
+---
+
+### IBS B - Balanced Mix (9 symbols)
 ```bash
 python research/portfolio_optimizer_greedy_train_test.py \
     --results-dir results \
@@ -113,80 +85,13 @@ python research/portfolio_optimizer_greedy_train_test.py \
     --max-dd-limit 5000 \
     --initial-capital 150000 \
     --daily-stop-loss 2500 \
-    --symbols 6A 6B 6C 6E 6J 6M 6N 6S \
+    --symbols NQ YM 6B 6J 6N 6S NG SI PL \
     --output-suffix ibs_b \
     --output-dir results
 ```
 
+**Symbols:** NQ, YM, 6B, 6J, 6N, 6S, NG, SI, PL
 **Output:** `results/greedy_optimization_ibs_b_TIMESTAMP.json`
-
----
-
-### Option 2: Equities+Currencies vs Commodities
-
-#### IBS A - Equities & Currencies
-```bash
-python research/portfolio_optimizer_greedy_train_test.py \
-    --results-dir results \
-    --train-start 2023-01-01 --train-end 2023-12-31 \
-    --test-start 2024-01-01 --test-end 2024-12-31 \
-    --min-positions 1 --max-positions 4 \
-    --max-dd-limit 5000 \
-    --initial-capital 150000 \
-    --daily-stop-loss 2500 \
-    --symbols ES NQ RTY YM 6A 6B 6C 6E 6J 6M 6N 6S \
-    --output-suffix ibs_a \
-    --output-dir results
-```
-
-#### IBS B - Commodities
-```bash
-python research/portfolio_optimizer_greedy_train_test.py \
-    --results-dir results \
-    --train-start 2023-01-01 --train-end 2023-12-31 \
-    --test-start 2024-01-01 --test-end 2024-12-31 \
-    --min-positions 1 --max-positions 4 \
-    --max-dd-limit 5000 \
-    --initial-capital 150000 \
-    --daily-stop-loss 2500 \
-    --symbols CL NG GC SI HG PL \
-    --output-suffix ibs_b \
-    --output-dir results
-```
-
----
-
-### Option 3: Balanced Mixed
-
-#### IBS A - Mixed
-```bash
-python research/portfolio_optimizer_greedy_train_test.py \
-    --results-dir results \
-    --train-start 2023-01-01 --train-end 2023-12-31 \
-    --test-start 2024-01-01 --test-end 2024-12-31 \
-    --min-positions 1 --max-positions 4 \
-    --max-dd-limit 5000 \
-    --initial-capital 150000 \
-    --daily-stop-loss 2500 \
-    --symbols ES NQ RTY YM CL NG GC SI HG \
-    --output-suffix ibs_a \
-    --output-dir results
-```
-
-#### IBS B - Mixed
-```bash
-python research/portfolio_optimizer_greedy_train_test.py \
-    --results-dir results \
-    --train-start 2023-01-01 --train-end 2023-12-31 \
-    --test-start 2024-01-01 --test-end 2024-12-31 \
-    --min-positions 1 --max-positions 4 \
-    --max-dd-limit 5000 \
-    --initial-capital 150000 \
-    --daily-stop-loss 2500 \
-    --symbols 6A 6B 6C 6E 6J 6M 6N 6S PL \
-    --output-suffix ibs_b \
-    --output-dir results
-```
 
 ---
 
@@ -227,13 +132,15 @@ Once both optimizers complete, we'll:
 
 ---
 
-## Questions to Answer
+## Configuration Decisions ✅
 
-Before running, please choose:
+All decisions finalized:
 
-1. **Which grouping option?** (1, 2, or 3)
-2. **Same train/test dates?** (2023 train, 2024 test)
-3. **Same constraints?** (max_dd_limit=5000, max_positions=1-4)
+1. **Grouping:** Balanced 9+9 split (each gets 2 equities, 4 currencies, 3 commodities)
+2. **Train/Test Dates:** 2023 train, 2024 test
+3. **Constraints:** max_dd_limit=5000, max_positions=1-4
+4. **Capital:** $150k each (independent)
+5. **Daily Stop Loss:** $2,500 each (independent)
 
 ---
 
