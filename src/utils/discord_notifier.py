@@ -12,11 +12,15 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from typing import Any, Optional
 from urllib import request
 from urllib.error import URLError
 
 logger = logging.getLogger(__name__)
+
+# Use US/Central for CME futures market times
+MARKET_TIMEZONE = ZoneInfo("America/Chicago")
 
 
 class DiscordNotifier:
@@ -101,13 +105,19 @@ class DiscordNotifier:
             size: Position size (contracts)
             ibs: IBS value at entry
             ml_score: ML filter score
-            timestamp: Entry time (defaults to now)
+            timestamp: Entry time (defaults to now in market timezone)
 
         Returns:
             True if sent successfully
         """
         if timestamp is None:
-            timestamp = datetime.now()
+            timestamp = datetime.now(tz=MARKET_TIMEZONE)
+        elif timestamp.tzinfo is not None:
+            # Convert to market timezone for display
+            timestamp = timestamp.astimezone(MARKET_TIMEZONE)
+        else:
+            # Assume UTC if naive datetime
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC")).astimezone(MARKET_TIMEZONE)
 
         embed = {
             "title": f"🟢 Trade Entry: {symbol}",
@@ -117,6 +127,7 @@ class DiscordNotifier:
                 {"name": "Side", "value": side.upper(), "inline": True},
                 {"name": "Size", "value": f"{size} contracts", "inline": True},
                 {"name": "Entry Price", "value": f"${price:.2f}", "inline": True},
+                {"name": "Time (CT)", "value": timestamp.strftime("%Y-%m-%d %H:%M:%S %Z"), "inline": True},
             ],
             "timestamp": timestamp.isoformat(),
         }
@@ -160,13 +171,19 @@ class DiscordNotifier:
             exit_reason: Reason for exit
             ibs: IBS value at exit
             duration_hours: Trade duration in hours
-            timestamp: Exit time (defaults to now)
+            timestamp: Exit time (defaults to now in market timezone)
 
         Returns:
             True if sent successfully
         """
         if timestamp is None:
-            timestamp = datetime.now()
+            timestamp = datetime.now(tz=MARKET_TIMEZONE)
+        elif timestamp.tzinfo is not None:
+            # Convert to market timezone for display
+            timestamp = timestamp.astimezone(MARKET_TIMEZONE)
+        else:
+            # Assume UTC if naive datetime
+            timestamp = timestamp.replace(tzinfo=ZoneInfo("UTC")).astimezone(MARKET_TIMEZONE)
 
         # Color based on profitability
         color = 3066993 if pnl > 0 else 15158332  # Green if profit, red if loss
@@ -182,6 +199,7 @@ class DiscordNotifier:
                 {"name": "Entry Price", "value": f"${entry_price:.2f}", "inline": True},
                 {"name": "Exit Price", "value": f"${exit_price:.2f}", "inline": True},
                 {"name": "P&L", "value": f"**${pnl:.2f}** ({pnl_percent:+.2f}%)", "inline": True},
+                {"name": "Time (CT)", "value": timestamp.strftime("%Y-%m-%d %H:%M:%S %Z"), "inline": True},
                 {"name": "Exit Reason", "value": exit_reason, "inline": True},
             ],
             "timestamp": timestamp.isoformat(),
