@@ -1,0 +1,257 @@
+# Multi-Alpha Trading System Configuration
+# This file defines all settings for running multiple strategies independently
+
+# ============================================================================
+# Databento Configuration (shared data source)
+# ============================================================================
+databento:
+  api_key: ${DATABENTO_API_KEY}  # Environment variable
+  dataset: GLBX.MDP3
+  schema: trades
+  stype_in: product_id
+
+# ============================================================================
+# Data Hub Configuration (central data distribution)
+# ============================================================================
+data_hub:
+  redis_host: localhost
+  redis_port: 6379
+  publish_channels:
+    - market
+  heartbeat_file: /var/run/pine/data_hub_heartbeat.json
+  heartbeat_interval: 30  # seconds
+
+# ============================================================================
+# Instrument Configurations (global across all strategies)
+# ============================================================================
+instruments:
+  # Equity Indices
+  ES:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 4000
+    databento_product_id: ES.FUT
+    tradovate_symbol: ES
+
+  NQ:
+    size: 1
+    commission: 4.0
+    multiplier: 20
+    margin: 4000
+    databento_product_id: NQ.FUT
+    tradovate_symbol: NQ
+
+  RTY:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 4000
+    databento_product_id: RTY.FUT
+    tradovate_symbol: RTY
+
+  YM:
+    size: 1
+    commission: 4.0
+    multiplier: 5
+    margin: 4000
+    databento_product_id: YM.FUT
+    tradovate_symbol: YM
+
+  # Commodities
+  CL:
+    size: 1
+    commission: 4.0
+    multiplier: 1000
+    margin: 5000
+    databento_product_id: CL.FUT
+    tradovate_symbol: CL
+
+  NG:
+    size: 1
+    commission: 4.0
+    multiplier: 10000
+    margin: 3000
+    databento_product_id: NG.FUT
+    tradovate_symbol: NG
+
+  GC:
+    size: 1
+    commission: 4.0
+    multiplier: 100
+    margin: 8000
+    databento_product_id: GC.FUT
+    tradovate_symbol: GC
+
+  SI:
+    size: 1
+    commission: 4.0
+    multiplier: 5000
+    margin: 6000
+    databento_product_id: SI.FUT
+    tradovate_symbol: SI
+
+  HG:
+    size: 1
+    commission: 4.0
+    multiplier: 25000
+    margin: 4000
+    databento_product_id: HG.FUT
+    tradovate_symbol: HG
+
+  # Currencies
+  6A:
+    size: 1
+    commission: 4.0
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6A.FUT
+    tradovate_symbol: 6A
+
+  6B:
+    size: 1
+    commission: 4.0
+    multiplier: 62500
+    margin: 2000
+    databento_product_id: 6B.FUT
+    tradovate_symbol: 6B
+
+  6C:
+    size: 1
+    commission: 4.0
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6C.FUT
+    tradovate_symbol: 6C
+
+  6M:
+    size: 1
+    commission: 4.0
+    multiplier: 500000
+    margin: 2000
+    databento_product_id: 6M.FUT
+    tradovate_symbol: 6M
+
+  6N:
+    size: 1
+    commission: 4.0
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6N.FUT
+    tradovate_symbol: 6N
+
+  6S:
+    size: 1
+    commission: 4.0
+    multiplier: 125000
+    margin: 2000
+    databento_product_id: 6S.FUT
+    tradovate_symbol: 6S
+
+  # Grains
+  ZC:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 2000
+    databento_product_id: ZC.FUT
+    tradovate_symbol: ZC
+
+  ZS:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 2000
+    databento_product_id: ZS.FUT
+    tradovate_symbol: ZS
+
+  ZW:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 2000
+    databento_product_id: ZW.FUT
+    tradovate_symbol: ZW
+
+# ============================================================================
+# Strategy Configurations (independent strategy workers)
+# ============================================================================
+strategies:
+  # IBS (Internal Bar Strength) Strategy
+  ibs:
+    enabled: true
+    broker_account: ${TRADERSPOST_IBS_WEBHOOK}
+    starting_cash: 150000
+    models_path: src/models/ibs/
+    max_positions: 2
+    daily_stop_loss: 2500
+    max_bars_in_trade: 100
+
+    # Instruments this strategy will trade
+    instruments:
+      - ES
+      - NQ
+      - RTY
+      - YM
+      - CL
+      - NG
+      - 6A
+      - 6B
+      - 6C
+      - 6M
+      - 6N
+      - 6S
+      - HG
+      - SI
+      - GC
+      - ZC
+      - ZS
+      - ZW
+
+    # IBS-specific parameters
+    strategy_params:
+      # Entry thresholds
+      ibs_entry_high: 0.7
+      ibs_entry_low: 0.3
+
+      # Exit thresholds
+      ibs_exit_high: 0.3
+      ibs_exit_low: 0.7
+
+      # ML filtering
+      use_ml_filter: true
+      ml_threshold: 0.65
+
+  # Breakout Strategy (example - to be implemented in Week 4)
+  breakout:
+    enabled: false  # Disabled until implemented
+    broker_account: ${TRADERSPOST_BREAKOUT_WEBHOOK}
+    starting_cash: 150000
+    models_path: src/models/breakout/
+    max_positions: 2
+    daily_stop_loss: 2500
+    max_bars_in_trade: 50
+
+    # Instruments this strategy will trade (subset selected after optimization)
+    instruments:
+      - ES
+      - NQ
+      - RTY
+      - YM
+      - CL
+
+    # Breakout-specific parameters
+    strategy_params:
+      breakout_lookback: 20
+      atr_multiplier: 2.0
+      use_ml_filter: true
+      ml_threshold: 0.60
+
+# ============================================================================
+# Dashboard Configuration
+# ============================================================================
+dashboard:
+  port: 5000
+  strategies:
+    - ibs
+    - breakout
