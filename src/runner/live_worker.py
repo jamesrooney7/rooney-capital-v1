@@ -120,10 +120,17 @@ class NotifyingIbsStrategy(IbsStrategy):
                 self._live_worker_ref = None
         self._external_order_callbacks = list(order_callbacks or [])
         self._external_trade_callbacks = list(trade_callbacks or [])
+        self._last_executed_price = None  # Store last order fill price for Discord notifications
         super().__init__(*args, **kwargs)
 
     def notify_order(self, order: Any) -> None:
         super().notify_order(order)
+        # Store executed price for use in trade notifications
+        if getattr(order, "status", None) == bt.Order.Completed:
+            executed = getattr(order, "executed", None)
+            if executed and hasattr(executed, "price"):
+                self._last_executed_price = float(executed.price)
+                logger.debug("Stored executed price for %s: %.2f", self.p.symbol, self._last_executed_price)
         if not self._external_order_callbacks:
             return
         for callback in list(self._external_order_callbacks):
@@ -2075,7 +2082,13 @@ class LiveWorker:
                 from strategy.contract_specs import point_value
 
                 # Get entry details
-                entry_price = float(trade.price) if hasattr(trade, "price") else 0.0
+                # Use stored executed price instead of trade.price for accuracy
+                entry_price = getattr(strategy, "_last_executed_price", None)
+                if entry_price is None:
+                    # Fallback to trade.price if stored price not available
+                    entry_price = float(trade.price) if hasattr(trade, "price") else 0.0
+                    logger.warning("Using trade.price fallback for %s: %.2f (stored price not available)",
+                                 symbol, entry_price)
                 size = abs(float(strategy.p.size)) if hasattr(strategy.p, "size") else 1.0
                 side = "long"  # IBS strategy is long-only
 
