@@ -35,19 +35,19 @@ ES, RTY, 6A, 6C, 6E, 6M, CL, GC, HG
 - **Currencies:** 6A (AUD), 6C (CAD), 6E (EUR), 6M (MXN)
 - **Commodities:** CL (Crude Oil), GC (Gold), HG (Copper)
 
-### **IBS B (9 symbols):**
+### **IBS B (8 symbols):**
 ```
-NQ, YM, 6B, 6J, 6N, 6S, NG, SI, PL
+NQ, YM, 6B, 6J, 6N, 6S, NG, SI
 ```
 - **Equities:** NQ (Nasdaq), YM (Dow Jones)
 - **Currencies:** 6B (GBP), 6J (JPY), 6N (NZD), 6S (CHF)
-- **Commodities:** NG (Natural Gas), SI (Silver), PL (Platinum)
+- **Commodities:** NG (Natural Gas), SI (Silver)
 
 ### **Rationale:**
-- Equal 9+9 split for balanced capital allocation
-- Both strategies have same asset class distribution (2+4+3)
-- Similar risk profiles - both will behave as diversified portfolios
-- Neither strategy concentrated in single asset class
+- 9+8 split for balanced capital allocation
+- IBS A has 2+4+3 distribution, IBS B has 2+4+2 distribution
+- Similar risk profiles - both well diversified portfolios
+- PL excluded due to lower liquidity/higher slippage
 
 ---
 
@@ -78,7 +78,7 @@ python research/portfolio_optimizer_greedy_train_test.py \
 
 ---
 
-### IBS B - Balanced Mix (9 symbols)
+### IBS B - Balanced Mix (8 symbols)
 ```bash
 python research/portfolio_optimizer_greedy_train_test.py \
     --results-dir results \
@@ -88,13 +88,13 @@ python research/portfolio_optimizer_greedy_train_test.py \
     --max-dd-limit 5000 \
     --initial-capital 150000 \
     --daily-stop-loss 2500 \
-    --symbols NQ YM 6B 6J 6N 6S NG SI PL \
+    --symbols NQ YM 6B 6J 6N 6S NG SI \
     --output-suffix ibs_b \
     --strategy-name ibs_b \
     --output-dir results
 ```
 
-**Symbols:** NQ, YM, 6B, 6J, 6N, 6S, NG, SI, PL
+**Symbols:** NQ, YM, 6B, 6J, 6N, 6S, NG, SI
 **Output:**
 - Individual: `results/greedy_optimization_ibs_b_TIMESTAMP.json`
 - Consolidated: `results/all_optimizations.json` (updated)
