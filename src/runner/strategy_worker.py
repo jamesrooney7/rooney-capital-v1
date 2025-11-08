@@ -281,7 +281,7 @@ class StrategyWorker:
     def _on_order(self, symbol: str, order):
         """Callback when order is placed/executed."""
         # Send to TradersPost
-        if self.traderspost_client and order.status == order.Completed:
+        if self.traderspost_client and order.status in [order.Completed]:
             try:
                 payload = {
                     'strategy': self.strategy_name,
@@ -393,14 +393,14 @@ class StrategyWorker:
 
         # Add portfolio coordinator stats
         if self.portfolio_coordinator:
-            with self.portfolio_coordinator._lock:
-                heartbeat_data['portfolio'] = {
-                    'open_positions': len(self.portfolio_coordinator.open_positions),
-                    'daily_pnl': self.portfolio_coordinator.daily_pnl,
-                    'stopped_out': self.portfolio_coordinator.stopped_out,
-                    'total_entries_allowed': self.portfolio_coordinator.total_entries_allowed,
-                    'total_entries_blocked': self.portfolio_coordinator.total_entries_blocked,
-                }
+            status = self.portfolio_coordinator.get_status()
+            heartbeat_data['portfolio'] = {
+                'open_positions': status['open_positions_count'],
+                'daily_pnl': status['daily_pnl'],
+                'stopped_out': status['stopped_out'],
+                'total_entries_allowed': status['stats']['total_entries_allowed'],
+                'total_entries_blocked': status['stats']['total_entries_blocked'],
+            }
 
         # Write to file
         heartbeat_path = Path(self.heartbeat_file)
@@ -448,13 +448,17 @@ def main():
     )
     args = parser.parse_args()
 
+    # Create log directory if it doesn't exist
+    log_dir = Path("/var/log/rooney")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
     # Setup logging
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format=f'%(asctime)s - [{args.strategy}] - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler(f"/var/log/rooney/{args.strategy}_worker.log")
+            logging.FileHandler(log_dir / f"{args.strategy}_worker.log")
         ]
     )
 

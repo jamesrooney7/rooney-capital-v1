@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
 import backtrader as bt
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -290,11 +291,28 @@ class BaseStrategy(bt.Strategy, ABC):
                 feature_values.append(features[feat_name])
 
             # Reshape for model prediction
-            import numpy as np
             X = np.array([feature_values])
 
-            # Get prediction probability
-            proba = self.ml_model.predict_proba(X)[0][1]  # P(win)
+            # Get prediction probability (with error handling)
+            if not hasattr(self.ml_model, 'predict_proba'):
+                logger.warning(
+                    "%s: ML model doesn't have predict_proba method, allowing trade",
+                    self.symbol
+                )
+                return False
+
+            proba_arr = self.ml_model.predict_proba(X)
+
+            # Verify shape is correct for binary classification
+            if proba_arr.shape[1] < 2:
+                logger.warning(
+                    "%s: ML model doesn't support binary classification (shape=%s), allowing trade",
+                    self.symbol,
+                    proba_arr.shape
+                )
+                return False
+
+            proba = proba_arr[0][1]  # P(win)
 
             # Check threshold
             if proba < self.ml_threshold:

@@ -73,6 +73,7 @@ class RedisLiveData(bt.feeds.DataBase):
         self._latest_dt: Optional[dt.datetime] = None
         self._stopped = False
         self._warmup_bars: collections.deque = collections.deque()
+        self._qcheck: Optional[float] = None  # Will be set based on warmup state
 
         logger.info(
             "Initialized RedisLiveData for %s (%s) on channel %s",
@@ -309,6 +310,11 @@ class RedisResampledData(bt.feeds.DataBase):
 
     This is a simplified version - for now, we'll just subscribe to the
     pre-aggregated hourly/daily channels published by the data hub.
+
+    NOTE: This class delegates to RedisLiveData internally, which is redundant
+    since RedisLiveData already supports all timeframes directly. Consider using
+    RedisLiveData(timeframe_str='hourly') instead of RedisResampledData.
+    This class may be deprecated in future versions.
     """
 
     params = (

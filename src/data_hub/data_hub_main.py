@@ -26,6 +26,7 @@ from typing import Dict, Optional, Any
 from databento import Live, SymbolMappingMsg, TradeMsg
 
 from .redis_client import RedisClient
+from src.config import load_config, RuntimeConfig
 
 logger = logging.getLogger(__name__)
 
@@ -484,8 +485,13 @@ class DataHub:
         if not instrument_id:
             return
 
+        # Check if symbol is valid before processing
+        if not symbol:
+            logger.warning(f"Symbol mapping message has no symbol for instrument {instrument_id}")
+            return
+
         # Extract root symbol
-        root = "".join(ch for ch in symbol if not ch.isdigit()) if symbol else None
+        root = "".join(ch for ch in symbol if not ch.isdigit()) or symbol
 
         if root:
             self._instrument_to_symbol[instrument_id] = root
@@ -608,22 +614,30 @@ def main():
 
     logger.info("Starting Data Hub...")
 
-    # TODO: Load config from YAML file
-    # For now, use environment variables
-    import os
-    databento_api_key = os.getenv('DATABENTO_API_KEY')
-    if not databento_api_key:
-        logger.error("DATABENTO_API_KEY environment variable not set")
+    # Load configuration from YAML file
+    try:
+        config = load_config(args.config)
+        logger.info(f"Loaded configuration from {args.config}")
+    except Exception as e:
+        logger.error(f"Failed to load configuration: {e}")
         sys.exit(1)
 
-    # Example configuration (will be loaded from YAML later)
+    # Extract product codes from instruments
+    product_codes = [
+        instr.databento_product_id
+        for instr in config.instruments.values()
+    ]
+
+    logger.info(f"Data hub will subscribe to {len(product_codes)} instruments")
+
+    # Create data hub from config
     data_hub = DataHub(
-        databento_api_key=databento_api_key,
-        databento_dataset='GLBX.MDP3',
-        product_codes=['ES.FUT', 'NQ.FUT', 'RTY.FUT', 'YM.FUT'],  # Start with a subset
-        redis_host='localhost',
-        redis_port=6379,
-        heartbeat_interval=30
+        databento_api_key=config.databento.api_key,
+        databento_dataset=config.databento.dataset,
+        product_codes=product_codes,
+        redis_host=config.data_hub.redis_host,
+        redis_port=config.data_hub.redis_port,
+        heartbeat_interval=config.data_hub.heartbeat_interval
     )
 
     # Handle shutdown signals

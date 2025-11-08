@@ -143,13 +143,17 @@ def _register_builtin_strategies():
         register_strategy("ibs", IbsStrategy)
     except ImportError as e:
         logger.warning(f"Could not import IbsStrategy: {e}")
+    except Exception as e:
+        logger.error(f"Error registering IbsStrategy: {e}", exc_info=True)
 
     # Add future strategies here
     # try:
     #     from .breakout_strategy import BreakoutStrategy
     #     register_strategy("breakout", BreakoutStrategy)
-    # except ImportError:
-    #     pass
+    # except ImportError as e:
+    #     logger.warning(f"Could not import BreakoutStrategy: {e}")
+    # except Exception as e:
+    #     logger.error(f"Error registering BreakoutStrategy: {e}", exc_info=True)
 
 
 # Register built-in strategies when module is imported
