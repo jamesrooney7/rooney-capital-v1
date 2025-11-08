@@ -7,7 +7,7 @@ strategy-specific logic to be pluggable.
 """
 
 import logging
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
@@ -17,7 +17,18 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-class BaseStrategy(bt.Strategy, ABC):
+# Combine Backtrader's MetaStrategy with ABCMeta to avoid metaclass conflict
+class CombinedMeta(type(bt.Strategy), ABCMeta):
+    """
+    Combined metaclass for BaseStrategy.
+
+    Backtrader's Strategy uses MetaStrategy, and we need ABCMeta for abstract methods.
+    This metaclass inherits from both to avoid conflicts.
+    """
+    pass
+
+
+class BaseStrategy(bt.Strategy, metaclass=CombinedMeta):
     """
     Abstract base class for all trading strategies.
 
