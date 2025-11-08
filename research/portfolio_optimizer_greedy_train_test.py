@@ -357,6 +357,8 @@ def main():
                        help='Filter to specific symbols only (e.g., --symbols ES NQ CL)')
     parser.add_argument('--output-suffix', type=str, default=None,
                        help='Add suffix to output filename (e.g., --output-suffix ibs_a)')
+    parser.add_argument('--strategy-name', type=str, default=None,
+                       help='Strategy name for consolidated results tracking (e.g., ibs_a, ibs_b, breakout)')
 
     args = parser.parse_args()
 
@@ -561,6 +563,51 @@ def main():
         json.dump(summary, f, indent=2)
 
     logger.info(f"💾 Summary saved to: {summary_file}\n")
+
+    # Append to consolidated results file
+    consolidated_file = output_dir / 'all_optimizations.json'
+
+    consolidated_entry = {
+        'strategy_name': args.strategy_name or args.output_suffix or 'unknown',
+        'timestamp': timestamp,
+        'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'train_period': f"{args.train_start} to {args.train_end}",
+        'test_period': f"{args.test_start} to {args.test_end}",
+        'candidate_symbols': args.symbols if args.symbols else 'all',
+        'optimal_symbols': best_train['symbols'],
+        'n_symbols': best_train['n_symbols'],
+        'max_positions': best_train['max_positions'],
+        'initial_capital': args.initial_capital,
+        'daily_stop_loss': args.daily_stop_loss,
+        'train_sharpe': float(best_train['sharpe']),
+        'train_cagr': float(best_train['cagr']),
+        'train_max_dd': float(best_train['max_dd']),
+        'test_sharpe': float(test_metrics['sharpe_ratio']),
+        'test_cagr': float(test_metrics['cagr']),
+        'test_max_dd': float(abs(test_metrics['max_drawdown_dollars'])),
+        'generalization': float(test_metrics['sharpe_ratio'] / best_train['sharpe']),
+        'result_file': str(summary_file.name)
+    }
+
+    # Load existing consolidated results or create new list
+    if consolidated_file.exists():
+        with open(consolidated_file, 'r') as f:
+            all_results = json.load(f)
+    else:
+        all_results = []
+
+    # Append new result
+    all_results.append(consolidated_entry)
+
+    # Sort by test sharpe (descending)
+    all_results.sort(key=lambda x: x['test_sharpe'], reverse=True)
+
+    # Save back
+    with open(consolidated_file, 'w') as f:
+        json.dump(all_results, f, indent=2)
+
+    logger.info(f"📊 Consolidated results updated: {consolidated_file}")
+    logger.info(f"   Total strategies tracked: {len(all_results)}\n")
 
     # Update config.yml if requested
     if args.update_config:

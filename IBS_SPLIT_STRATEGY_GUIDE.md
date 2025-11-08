@@ -67,11 +67,14 @@ python research/portfolio_optimizer_greedy_train_test.py \
     --daily-stop-loss 2500 \
     --symbols ES RTY 6A 6C 6E 6M CL GC HG \
     --output-suffix ibs_a \
+    --strategy-name ibs_a \
     --output-dir results
 ```
 
 **Symbols:** ES, RTY, 6A, 6C, 6E, 6M, CL, GC, HG
-**Output:** `results/greedy_optimization_ibs_a_TIMESTAMP.json`
+**Output:**
+- Individual: `results/greedy_optimization_ibs_a_TIMESTAMP.json`
+- Consolidated: `results/all_optimizations.json` (updated)
 
 ---
 
@@ -87,11 +90,14 @@ python research/portfolio_optimizer_greedy_train_test.py \
     --daily-stop-loss 2500 \
     --symbols NQ YM 6B 6J 6N 6S NG SI PL \
     --output-suffix ibs_b \
+    --strategy-name ibs_b \
     --output-dir results
 ```
 
 **Symbols:** NQ, YM, 6B, 6J, 6N, 6S, NG, SI, PL
-**Output:** `results/greedy_optimization_ibs_b_TIMESTAMP.json`
+**Output:**
+- Individual: `results/greedy_optimization_ibs_b_TIMESTAMP.json`
+- Consolidated: `results/all_optimizations.json` (updated)
 
 ---
 
@@ -99,16 +105,53 @@ python research/portfolio_optimizer_greedy_train_test.py \
 
 After running both optimizers, you'll have:
 
-1. **Optimization Results:**
+1. **Individual Optimization Results:**
    - `results/greedy_optimization_ibs_a_TIMESTAMP.json`
    - `results/greedy_optimization_ibs_b_TIMESTAMP.json`
 
-2. **Each file contains:**
-   - Optimal instruments list (subset of input symbols)
-   - Optimal max_positions (e.g., 2, 3, or 4)
-   - Train metrics (Sharpe, CAGR, Max DD)
-   - Test metrics (Sharpe, CAGR, Max DD)
-   - Generalization score
+2. **Consolidated Results (NEW!):**
+   - `results/all_optimizations.json` - All strategies in one file, ranked by test Sharpe
+
+### Consolidated Results Format
+
+The `all_optimizations.json` file contains all strategy optimizations, sorted by test Sharpe (best first):
+
+```json
+[
+  {
+    "strategy_name": "ibs_a",
+    "timestamp": "20251108_143022",
+    "date": "2025-11-08 14:30:22",
+    "train_period": "2023-01-01 to 2023-12-31",
+    "test_period": "2024-01-01 to 2024-12-31",
+    "candidate_symbols": ["ES", "RTY", "6A", "6C", "6E", "6M", "CL", "GC", "HG"],
+    "optimal_symbols": ["ES", "RTY", "6A", "CL", "GC"],
+    "n_symbols": 5,
+    "max_positions": 2,
+    "initial_capital": 150000.0,
+    "daily_stop_loss": 2500.0,
+    "train_sharpe": 12.45,
+    "train_cagr": 0.78,
+    "train_max_dd": 4850.0,
+    "test_sharpe": 11.23,
+    "test_cagr": 0.72,
+    "test_max_dd": 4200.0,
+    "generalization": 0.902,
+    "result_file": "greedy_optimization_ibs_a_20251108_143022.json"
+  },
+  {
+    "strategy_name": "ibs_b",
+    ...
+  }
+]
+```
+
+### Benefits
+
+- **Compare All Strategies:** See IBS A, IBS B, Breakout, etc. side-by-side
+- **Ranked by Performance:** Sorted by test Sharpe ratio (highest first)
+- **Track Over Time:** See how strategies evolve with re-optimization
+- **Quick Overview:** All key metrics in one place
 
 ---
 
@@ -150,5 +193,9 @@ The greedy optimizer now supports:
 
 - `--symbols ES NQ CL ...` - Filter to specific symbols only
 - `--output-suffix ibs_a` - Add suffix to output filename
+- `--strategy-name ibs_a` - Strategy name for consolidated results tracking
 
-These flags enable splitting strategies while using the same optimization script.
+These flags enable:
+1. Splitting strategies while using the same optimization script
+2. Tracking all strategy results in one consolidated file (`results/all_optimizations.json`)
+3. Easy comparison across IBS A, IBS B, and future strategies
