@@ -99,6 +99,15 @@ instruments:
     databento_product_id: HG.FUT
     tradovate_symbol: HG
 
+  # Fixed Income (Reference Feed)
+  ZB:
+    size: 1
+    commission: 4.0
+    multiplier: 1000
+    margin: 4000
+    databento_product_id: ZB.FUT
+    tradovate_symbol: ZB
+
   # Currencies
   6A:
     size: 1

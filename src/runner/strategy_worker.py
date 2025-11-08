@@ -245,6 +245,19 @@ class StrategyWorker:
 
             logger.info(f"Added Redis feeds for {symbol} (minute/hourly/daily)")
 
+        # Add reference feed: ZB (Treasury futures) as TLT_day
+        # The IBS strategy requires a TLT_day feed for market regime detection
+        if self.config.get_instrument("ZB"):
+            data_tlt = RedisResampledData(
+                symbol="ZB",
+                timeframe_str='daily',
+                redis_host=self.strategy_config.redis_host,
+                redis_port=self.strategy_config.redis_port,
+                name="TLT_day"
+            )
+            self.cerebro.adddata(data_tlt, name="TLT_day")
+            logger.info("Added reference feed: ZB as TLT_day")
+
     def _add_strategy(self):
         """Add strategy to Cerebro."""
         # Load strategy class from factory using strategy_type
