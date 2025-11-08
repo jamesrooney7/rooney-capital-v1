@@ -224,13 +224,25 @@ class QueueFanout:
 
         The raw_symbol contains the actual contract code like "6NZ2025" instead of
         the generic "6N.FUT" that comes from SymbolMappingMsg.
+
+        Only accepts simple contract symbols, rejecting spreads and complex symbols.
         """
-        if raw_symbol:
-            with self._lock:
-                self._instrument_to_raw_symbol[instrument_id] = raw_symbol
-                logger.debug(
-                    "Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id
-                )
+        if not raw_symbol:
+            return
+
+        # Filter out spread symbols and complex instruments
+        # Valid contract symbols: CLZ5, 6NZ5, ESH6 (root + month + year)
+        # Invalid: CL:C1 RB-CL Z5, CLZ5-CLH6, etc. (contain :, -, or spaces)
+        if any(char in raw_symbol for char in [':', '-', ' ', '(', ')']):
+            logger.debug("Rejecting complex symbol %s for instrument %s (likely a spread)",
+                        raw_symbol, instrument_id)
+            return
+
+        with self._lock:
+            self._instrument_to_raw_symbol[instrument_id] = raw_symbol
+            logger.debug(
+                "Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id
+            )
 
     def resolve_contract_symbol(self, instrument_id: int) -> Optional[str]:
         """Resolve the specific contract symbol for an instrument_id.
