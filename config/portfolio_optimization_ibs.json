@@ -1,0 +1,70 @@
+{
+  "strategy": "ibs",
+  "optimization_metadata": {
+    "source_file": "results/greedy_optimization_20251105_053115.json",
+    "configuration_date": "2024-11-05",
+    "applied_to_config": "config.yml",
+    "optimization_method": "greedy_search_train_test_split",
+    "note": "Configuration extracted from production config.yml"
+  },
+  "portfolio_constraints": {
+    "max_positions": 2,
+    "daily_stop_loss": 2500.0,
+    "symbols": [
+      "6A",
+      "6B",
+      "6C",
+      "6M",
+      "6N",
+      "6S",
+      "CL",
+      "HG",
+      "SI"
+    ],
+    "n_symbols": 9
+  },
+  "expected_performance": {
+    "note": "Metrics available in results/greedy_optimization_20251105_053115.json",
+    "sharpe_ratio": null,
+    "cagr": null,
+    "total_return_dollars": null,
+    "max_drawdown_dollars": null,
+    "breach_events": null,
+    "profit_factor": null,
+    "avg_positions": null,
+    "daily_stops_hit": null
+  },
+  "ml_models": {
+    "note": "All 9 portfolio symbols have ML models in src/models/",
+    "models_available": [
+      "6A_best.json + 6A_rf_model.pkl",
+      "6B_best.json + 6B_rf_model.pkl",
+      "6C_best.json + 6C_rf_model.pkl",
+      "6M_best.json + 6M_rf_model.pkl",
+      "6N_best.json + 6N_rf_model.pkl",
+      "6S_best.json + 6S_rf_model.pkl",
+      "CL_best.json + CL_rf_model.pkl",
+      "HG_best.json + HG_rf_model.pkl",
+      "SI_best.json + SI_rf_model.pkl"
+    ]
+  },
+  "excluded_symbols": {
+    "PL": "Excluded from portfolio due to excessive slippage (noted in config.yml)",
+    "ES": "Has ML model but not selected by greedy optimizer",
+    "NQ": "Has ML model but not selected by greedy optimizer",
+    "RTY": "Has ML model but not selected by greedy optimizer",
+    "YM": "Has ML model but not selected by greedy optimizer",
+    "GC": "Has ML model but not selected by greedy optimizer",
+    "NG": "Has ML model but not selected by greedy optimizer",
+    "6E": "Has ML model but not selected by greedy optimizer",
+    "6J": "Has ML model but not selected by greedy optimizer"
+  },
+  "notes": [
+    "This is the PRODUCTION configuration for IBS strategy",
+    "Greedy optimizer selected 9 of 18 available instruments",
+    "All 9 selected symbols have trained ML models",
+    "Max positions optimized to 2 (from testing 1-4)",
+    "Daily stop loss: $2,500 enforced at portfolio level",
+    "Configuration automatically updated by portfolio_optimizer_greedy_train_test.py --update-config"
+  ]
+}
