@@ -229,9 +229,9 @@ class StrategyWorker:
                 timeframe_str='hourly',
                 redis_host=self.strategy_config.redis_host,
                 redis_port=self.strategy_config.redis_port,
-                name=f"{symbol}_hourly"
+                name=f"{symbol}_hour"
             )
-            self.cerebro.adddata(data_hourly, name=f"{symbol}_hourly")
+            self.cerebro.adddata(data_hourly, name=f"{symbol}_hour")
 
             # Add daily resampled feed
             data_daily = RedisResampledData(
@@ -239,9 +239,9 @@ class StrategyWorker:
                 timeframe_str='daily',
                 redis_host=self.strategy_config.redis_host,
                 redis_port=self.strategy_config.redis_port,
-                name=f"{symbol}_daily"
+                name=f"{symbol}_day"
             )
-            self.cerebro.adddata(data_daily, name=f"{symbol}_daily")
+            self.cerebro.adddata(data_daily, name=f"{symbol}_day")
 
             logger.info(f"Added Redis feeds for {symbol} (minute/hourly/daily)")
 
