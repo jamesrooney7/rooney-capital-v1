@@ -327,15 +327,8 @@ class RedisResampledData(bt.feeds.DataBase):
     )
 
     def __init__(self, **kwargs):
-        # Extract params before passing to parent
-        symbol = kwargs.get("symbol")
+        # Set Backtrader timeframe before calling parent
         timeframe_str = kwargs.get("timeframe_str", "hourly")
-        redis_host = kwargs.get("redis_host", "localhost")
-        redis_port = kwargs.get("redis_port", 6379)
-        redis_db = kwargs.get("redis_db", 0)
-        qcheck = kwargs.get("qcheck", 0.5)
-
-        # Set Backtrader timeframe
         if timeframe_str == "hourly":
             kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
             kwargs.setdefault("compression", 60)
@@ -345,14 +338,15 @@ class RedisResampledData(bt.feeds.DataBase):
 
         super().__init__(**kwargs)
 
-        # Create underlying RedisLiveData feed with explicit params
+        # After super().__init__, params are available as self.p.*
+        # Create underlying RedisLiveData feed with params from self.p
         self._redis_feed = RedisLiveData(
-            symbol=symbol,
-            timeframe_str=timeframe_str,
-            redis_host=redis_host,
-            redis_port=redis_port,
-            redis_db=redis_db,
-            qcheck=qcheck
+            symbol=self.p.symbol,
+            timeframe_str=self.p.timeframe_str,
+            redis_host=self.p.redis_host,
+            redis_port=self.p.redis_port,
+            redis_db=self.p.redis_db,
+            qcheck=self.p.qcheck
         )
 
     def start(self):
