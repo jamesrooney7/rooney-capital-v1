@@ -1,22 +1,27 @@
 #!/bin/bash
-# Start the Data Hub process
-#
-# Usage: ./scripts/start_data_hub.sh [config_file]
+# Start Data Hub
 
 set -e
 
-CONFIG_FILE="${1:-config.multi_alpha.yml}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "Starting Data Hub..."
-echo "Config: $CONFIG_FILE"
+cd "$PROJECT_ROOT"
 
-# Ensure required environment variables are set
-if [ -z "$DATABENTO_API_KEY" ]; then
-    echo "ERROR: DATABENTO_API_KEY environment variable not set"
-    exit 1
+# Load environment variables
+if [ -f ".env" ]; then
+    export $(cat .env | grep -v '^#' | xargs)
 fi
 
+# Activate virtual environment if it exists
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
 # Start data hub
-python -m src.data_hub.data_hub_main \
-    --config "$CONFIG_FILE" \
-    --log-level INFO
+python3 -m src.data_hub.data_hub_main \
+    --config config.multi_alpha.yml \
+    2>&1 | tee -a logs/data_hub.log
