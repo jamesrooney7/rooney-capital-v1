@@ -1,0 +1,89 @@
+# Test Configuration for Multi-Alpha System Integration Testing
+# Minimal config for Week 2 validation
+
+# ============================================================================
+# Databento Configuration
+# ============================================================================
+databento:
+  api_key: ${DATABENTO_API_KEY}
+  dataset: GLBX.MDP3
+  schema: trades
+  stype_in: product_id
+
+# ============================================================================
+# Data Hub Configuration
+# ============================================================================
+data_hub:
+  redis_host: localhost
+  redis_port: 6379
+  publish_channels:
+    - market
+  heartbeat_file: /var/run/pine/data_hub_heartbeat.json
+  heartbeat_interval: 30
+
+# ============================================================================
+# Instrument Configurations (single instrument for testing)
+# ============================================================================
+instruments:
+  ES:
+    size: 1
+    commission: 4.0
+    multiplier: 50
+    margin: 4000
+    databento_product_id: ES.FUT
+    tradovate_symbol: ES
+
+# ============================================================================
+# Strategy Configurations (IBS only for testing)
+# ============================================================================
+strategies:
+  ibs:
+    enabled: true
+    broker_account: ""  # Empty = paper trading (no orders sent)
+    starting_cash: 150000
+    models_path: src/models/ibs/
+    max_positions: 1
+    daily_stop_loss: 2500
+    max_bars_in_trade: 100
+
+    # Single instrument for testing
+    instruments:
+      - ES
+
+    # Minimal IBS parameters (most will use defaults)
+    strategy_params:
+      # Entry thresholds
+      enable_ibs_entry: true
+      ibs_entry_high: 0.3
+      ibs_entry_low: 0.0
+
+      # Exit thresholds
+      enable_ibs_exit: true
+      ibs_exit_high: 0.7
+      ibs_exit_low: 0.3
+
+      # Stop loss/take profit
+      enable_stop: true
+      stop_type: "percent"
+      stop_perc: 2.0
+
+      enable_tp: true
+      tp_type: "percent"
+      tp_perc: 3.0
+
+      # ML filtering (disabled for initial testing)
+      ml_threshold: 0.65
+
+      # Session windows (24/7 for testing)
+      use_window1: true
+      start_time1: "0000"
+      end_time1: "2359"
+      use_window2: false
+
+# ============================================================================
+# Dashboard Configuration
+# ============================================================================
+dashboard:
+  port: 5000
+  strategies:
+    - ibs
