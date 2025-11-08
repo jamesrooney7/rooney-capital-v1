@@ -13,11 +13,16 @@ if [ -f ".env" ]; then
     export $(cat .env | grep -v '^#' | xargs)
 fi
 
+# Activate virtual environment if it exists
+if [ -d "venv" ]; then
+    source venv/bin/activate
+fi
+
 # Create logs directory if it doesn't exist
 mkdir -p logs
 
 # Start IBS A worker
-python -m src.runner.strategy_worker \
+python3 -m src.runner.strategy_worker \
     --strategy ibs_a \
     --config config.multi_alpha.yml \
     2>&1 | tee -a logs/ibs_a_worker.log
