@@ -298,6 +298,12 @@ def order_notification_to_message(
     if size is None:
         return None
 
+    # Log executed order details for debugging
+    symbol = getattr(strategy, "p", None) and strategy.p.symbol
+    logger.info("Order executed for %s: size=%.2f price=%.2f isbuy=%s",
+               symbol or "?", size or 0, price or 0,
+               getattr(order, "isbuy", lambda: False)())
+
     info = getattr(order, "info", {}) or {}
     snapshot = info.get("filter_snapshot")
     thresholds = _ensure_ml_snapshot(snapshot if isinstance(snapshot, Mapping) else None, strategy)

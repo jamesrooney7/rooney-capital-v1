@@ -572,6 +572,10 @@ class DatabentoSubscriber:
             logger.debug("Unparsable trade price %s for %s", price_raw, root)
             return
 
+        # Log price details for debugging
+        logger.debug("Trade price for %s: pretty_price=%s, price=%s, size=%s",
+                    root, price_raw, price, size)
+
         ts = self._normalize_timestamp(trade.ts_event)
         minute = ts.replace(second=0, microsecond=0)
 
@@ -638,7 +642,9 @@ class DatabentoSubscriber:
             instrument_id=instrument_id if isinstance(instrument_id, int) else None,
             contract_symbol=contract_symbol,
         )
-        logger.info("Emitting bar %s %s (contract: %s)", root, payload["minute"], contract_symbol or "unknown")
+        logger.info("Emitting bar %s %s (contract: %s) O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f",
+                   root, payload["minute"], contract_symbol or "unknown",
+                   bar.open, bar.high, bar.low, bar.close, bar.volume)
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
