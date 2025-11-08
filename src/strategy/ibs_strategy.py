@@ -6,7 +6,7 @@ import re
 import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Optional, Dict, Any
 
 try:  # pragma: no cover - optional dependency guard
     import pandas as pd  # type: ignore
@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - pandas is optional at runtime
     pd = None
 
 from config import COMMISSION_PER_SIDE, PAIR_MAP
+from .base_strategy import BaseStrategy
 from .filter_column import FilterColumn
 from .safe_div import monkey_patch_division, safe_div
 from .contract_specs import CONTRACT_SPECS, point_value
@@ -642,12 +643,17 @@ class PercentReturn(bt.Indicator):
             self.lines.pct[0] = change * 100.0
 
 
-class IbsStrategy(bt.Strategy):
+class IbsStrategy(BaseStrategy):
     """Intraday IBS reversal with daily trend filters.
 
     The optional ``ml_model``/``ml_features`` parameters enable callers to
     inject a binary classifier whose positive-class probability gates entries
     and is cached alongside each filter snapshot for downstream logging.
+
+    Multi-Alpha Migration: Phase 1 - Minimal Compatibility Layer
+    - Extends BaseStrategy instead of bt.Strategy
+    - Implements required abstract methods
+    - Keeps existing next() logic (overrides BaseStrategy.next())
     """
 
     params = dict(
@@ -4686,6 +4692,77 @@ class IbsStrategy(bt.Strategy):
         win2 = self.p.use_window2 and self.win2_start <= t < self.win2_end
         return win1 or win2
 
+    # =========================================================================
+    # BaseStrategy Abstract Method Implementations (Phase 1: Thin Wrappers)
+    # =========================================================================
+
+    def should_enter_long(self) -> bool:
+        """
+        Check if long entry conditions are met.
+
+        Phase 1: Thin wrapper around existing entry_allowed() logic.
+        The existing next() method handles order placement.
+
+        Note: This method is not called during Phase 1 since next() is overridden.
+        It satisfies BaseStrategy's ABC requirement and will be used in Phase 2+.
+        """
+        try:
+            dt = self.hourly.datetime.datetime()
+        except Exception:
+            return False
+
+        ibs_val = self.ibs()
+        if ibs_val is None:
+            return False
+
+        return self.entry_allowed(dt, ibs_val)
+
+    def should_enter_short(self) -> bool:
+        """
+        Check if short entry conditions are met.
+
+        IBS strategy is long-only, so always returns False.
+        """
+        return False
+
+    def should_exit(self) -> bool:
+        """
+        Check if exit conditions are met for current position.
+
+        Phase 1: Extracts exit logic from existing next() method.
+
+        Note: This method is not called during Phase 1 since next() is overridden.
+        It satisfies BaseStrategy's ABC requirement and will be used in Phase 2+.
+        """
+        if not self.getposition(self.hourly):
+            return False
+
+        # IBS exit condition
+        if self.p.enable_ibs_exit:
+            ibs_val = self.ibs()
+            if ibs_val is not None and self.p.ibs_exit_low <= ibs_val <= self.p.ibs_exit_high:
+                return True
+
+        # Stop loss, take profit, bar stop checked in existing next()
+        # For Phase 1, keep simple - full exit logic remains in next()
+        return False
+
+    def get_features_snapshot(self) -> Dict[str, Any]:
+        """
+        Get current feature snapshot for ML and logging.
+
+        Delegates to existing collect_filter_values() method.
+        """
+        try:
+            return self.collect_filter_values(intraday_ago=0)
+        except Exception as e:
+            logger.error(f"{self.p.symbol} failed to collect features: {e}")
+            return {}
+
+    # =========================================================================
+    # End of BaseStrategy Abstract Method Implementations
+    # =========================================================================
+
     def entry_allowed(self, dt: datetime, ibs_val: float) -> bool:
         """Return ``True`` if all configured entry filters pass."""
 
@@ -5648,6 +5725,15 @@ class IbsStrategy(bt.Strategy):
         return True
 
     def next(self):
+        """
+        Main strategy logic executed on each bar.
+
+        Phase 1 Migration Note:
+        - Overrides BaseStrategy.next() to preserve existing behavior
+        - Contains ML and portfolio coordinator checks (redundant with BaseStrategy)
+        - Will be refactored in Phase 2 to use BaseStrategy.next() and delegate
+          to should_enter_long()/should_exit() methods
+        """
         self.update_pivots()
         # Refresh daily ATR percentile only once per completed daily bar
         try:
