@@ -418,7 +418,7 @@ class DataHub:
             dataset=self.databento_dataset,
             schema="trades",
             symbols=self.product_codes,
-            stype_in="product_id"
+            stype_in="parent"
         )
 
         # Process metadata for symbol mappings
