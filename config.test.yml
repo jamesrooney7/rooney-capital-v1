@@ -1,5 +1,5 @@
 # Test Configuration for Multi-Alpha System Integration Testing
-# Minimal config for Week 2 validation
+# Week 3: IBS A & IBS B Testing
 
 # ============================================================================
 # Databento Configuration
@@ -22,63 +22,171 @@ data_hub:
   heartbeat_interval: 30
 
 # ============================================================================
-# Instrument Configurations (single instrument for testing)
+# Instrument Configurations (all instruments for IBS A & IBS B)
 # ============================================================================
 instruments:
-  ES:
+  # IBS A Instruments
+  6A:
     size: 1
     commission: 4.0
-    multiplier: 50
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6A.FUT
+    tradovate_symbol: 6A
+
+  6C:
+    size: 1
+    commission: 4.0
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6C.FUT
+    tradovate_symbol: 6C
+
+  6M:
+    size: 1
+    commission: 4.0
+    multiplier: 500000
+    margin: 2000
+    databento_product_id: 6M.FUT
+    tradovate_symbol: 6M
+
+  CL:
+    size: 1
+    commission: 4.0
+    multiplier: 1000
+    margin: 5000
+    databento_product_id: CL.FUT
+    tradovate_symbol: CL
+
+  GC:
+    size: 1
+    commission: 4.0
+    multiplier: 100
+    margin: 8000
+    databento_product_id: GC.FUT
+    tradovate_symbol: GC
+
+  HG:
+    size: 1
+    commission: 4.0
+    multiplier: 25000
     margin: 4000
-    databento_product_id: ES.FUT
-    tradovate_symbol: ES
+    databento_product_id: HG.FUT
+    tradovate_symbol: HG
+
+  # IBS B Instruments
+  6B:
+    size: 1
+    commission: 4.0
+    multiplier: 62500
+    margin: 2000
+    databento_product_id: 6B.FUT
+    tradovate_symbol: 6B
+
+  6N:
+    size: 1
+    commission: 4.0
+    multiplier: 100000
+    margin: 2000
+    databento_product_id: 6N.FUT
+    tradovate_symbol: 6N
+
+  6S:
+    size: 1
+    commission: 4.0
+    multiplier: 125000
+    margin: 2000
+    databento_product_id: 6S.FUT
+    tradovate_symbol: 6S
+
+  SI:
+    size: 1
+    commission: 4.0
+    multiplier: 5000
+    margin: 6000
+    databento_product_id: SI.FUT
+    tradovate_symbol: SI
+
+  YM:
+    size: 1
+    commission: 4.0
+    multiplier: 5
+    margin: 4000
+    databento_product_id: YM.FUT
+    tradovate_symbol: YM
 
 # ============================================================================
-# Strategy Configurations (IBS only for testing)
+# Strategy Configurations (IBS A & IBS B for Week 3 testing)
 # ============================================================================
 strategies:
-  ibs:
+  # IBS A - Currency & Commodity Focus
+  # Optimization: 2025-11-08, Test Sharpe: 7.19, CAGR: 60.5%
+  ibs_a:
     enabled: true
     broker_account: ""  # Empty = paper trading (no orders sent)
     starting_cash: 150000
-    models_path: src/models/ibs/
-    max_positions: 1
+    models_path: src/models/
+    max_positions: 2  # Optimized via greedy search
     daily_stop_loss: 2500
     max_bars_in_trade: 100
 
-    # Single instrument for testing
+    # OPTIMIZED: 6 instruments from greedy search (2025-11-08)
+    # See: config/portfolio_optimization_ibs_a.json
     instruments:
-      - ES
+      - 6A  # AUD - Selected
+      - 6C  # CAD - Selected
+      - 6M  # MXN - Selected
+      - CL  # Crude Oil - Selected
+      - GC  # Gold - Selected
+      - HG  # Copper - Selected
 
-    # Minimal IBS parameters (most will use defaults)
+    # IBS-specific parameters
     strategy_params:
       # Entry thresholds
-      enable_ibs_entry: true
-      ibs_entry_high: 0.3
-      ibs_entry_low: 0.0
+      ibs_entry_high: 0.7
+      ibs_entry_low: 0.3
 
       # Exit thresholds
-      enable_ibs_exit: true
-      ibs_exit_high: 0.7
-      ibs_exit_low: 0.3
+      ibs_exit_high: 0.3
+      ibs_exit_low: 0.7
 
-      # Stop loss/take profit
-      enable_stop: true
-      stop_type: "percent"
-      stop_perc: 2.0
+      # ML filtering
+      use_ml_filter: true
+      ml_threshold: 0.65  # Fallback only - actual thresholds per instrument
 
-      enable_tp: true
-      tp_type: "percent"
-      tp_perc: 3.0
+  # IBS B - Multi-Asset Focus
+  # Optimization: 2025-11-08, Test Sharpe: 12.09, CAGR: 91.3%
+  ibs_b:
+    enabled: true
+    broker_account: ""  # Empty = paper trading (no orders sent)
+    starting_cash: 150000
+    models_path: src/models/
+    max_positions: 3  # Optimized via greedy search
+    daily_stop_loss: 2500
+    max_bars_in_trade: 100
 
-      # ML filtering (disabled for initial testing)
-      ml_threshold: 0.65
+    # OPTIMIZED: 5 instruments from greedy search (2025-11-08)
+    # See: config/portfolio_optimization_ibs_b.json
+    instruments:
+      - 6B  # GBP - Selected
+      - 6N  # NZD - Selected
+      - 6S  # CHF - Selected
+      - SI  # Silver - Selected
+      - YM  # Dow - Selected
 
-      # Session windows (24/7 for testing)
-      use_window1: true
-      start_time1: "0000"
-      end_time1: "2359"
-      use_window2: false
+    # IBS-specific parameters
+    strategy_params:
+      # Entry thresholds
+      ibs_entry_high: 0.7
+      ibs_entry_low: 0.3
+
+      # Exit thresholds
+      ibs_exit_high: 0.3
+      ibs_exit_low: 0.7
+
+      # ML filtering
+      use_ml_filter: true
+      ml_threshold: 0.65  # Fallback only - actual thresholds per instrument
 
 # ============================================================================
 # Dashboard Configuration
@@ -86,4 +194,5 @@ strategies:
 dashboard:
   port: 5000
   strategies:
-    - ibs
+    - ibs_a
+    - ibs_b
