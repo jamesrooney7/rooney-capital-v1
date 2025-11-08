@@ -327,8 +327,13 @@ class RedisResampledData(bt.feeds.DataBase):
     )
 
     def __init__(self, **kwargs):
-        # Delegate to RedisLiveData with appropriate timeframe
+        # Extract params before passing to parent
+        symbol = kwargs.get("symbol")
         timeframe_str = kwargs.get("timeframe_str", "hourly")
+        redis_host = kwargs.get("redis_host", "localhost")
+        redis_port = kwargs.get("redis_port", 6379)
+        redis_db = kwargs.get("redis_db", 0)
+        qcheck = kwargs.get("qcheck", 0.5)
 
         # Set Backtrader timeframe
         if timeframe_str == "hourly":
@@ -340,8 +345,15 @@ class RedisResampledData(bt.feeds.DataBase):
 
         super().__init__(**kwargs)
 
-        # Create underlying RedisLiveData feed
-        self._redis_feed = RedisLiveData(**kwargs)
+        # Create underlying RedisLiveData feed with explicit params
+        self._redis_feed = RedisLiveData(
+            symbol=symbol,
+            timeframe_str=timeframe_str,
+            redis_host=redis_host,
+            redis_port=redis_port,
+            redis_db=redis_db,
+            qcheck=qcheck
+        )
 
     def start(self):
         """Start the resampled feed."""

@@ -178,7 +178,7 @@ class StrategyWorker:
 
         for symbol in self.strategy_config.instruments:
             try:
-                bundle = load_model_bundle(symbol, models_dir=str(models_path))
+                bundle = load_model_bundle(symbol, base_dir=str(models_path))
                 self.ml_models[symbol] = bundle
                 logger.info(
                     f"Loaded ML model for {symbol}: "
