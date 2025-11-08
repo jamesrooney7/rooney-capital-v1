@@ -21,7 +21,8 @@ class StrategyConfig:
     """
 
     # Strategy identification
-    name: str  # Strategy name (e.g., "ibs", "breakout")
+    name: str  # Strategy instance name (e.g., "ibs_a", "ibs_b")
+    strategy_type: str = "ibs"  # Strategy class type (e.g., "ibs", "breakout")
     enabled: bool = True  # Whether strategy is active
 
     # Broker/execution

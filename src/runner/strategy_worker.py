@@ -247,8 +247,9 @@ class StrategyWorker:
 
     def _add_strategy(self):
         """Add strategy to Cerebro."""
-        # Load strategy class from factory
-        strategy_class = load_strategy(self.strategy_name)
+        # Load strategy class from factory using strategy_type
+        strategy_type = getattr(self.strategy_config, 'strategy_type', self.strategy_name)
+        strategy_class = load_strategy(strategy_type)
 
         # Prepare strategy configuration
         # For now, we'll use the first instrument as the primary symbol
