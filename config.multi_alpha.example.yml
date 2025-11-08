@@ -181,6 +181,7 @@ strategies:
   # Optimization: 2025-11-08, Test Sharpe: 7.19, CAGR: 60.5%
   ibs_a:
     enabled: true
+    strategy_type: ibs  # Strategy class to use
     broker_account: ${TRADERSPOST_IBS_A_WEBHOOK}
     starting_cash: 150000
     models_path: src/models/
@@ -219,6 +220,7 @@ strategies:
   # Optimization: 2025-11-08, Test Sharpe: 12.09, CAGR: 91.3%
   ibs_b:
     enabled: true
+    strategy_type: ibs  # Strategy class to use
     broker_account: ${TRADERSPOST_IBS_B_WEBHOOK}
     starting_cash: 150000
     models_path: src/models/
