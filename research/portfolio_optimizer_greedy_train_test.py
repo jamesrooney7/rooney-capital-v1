@@ -353,6 +353,10 @@ def main():
                        help='Automatically update config.yml with optimal settings')
     parser.add_argument('--config-path', type=str, default='config.yml',
                        help='Path to config.yml file to update (default: config.yml)')
+    parser.add_argument('--symbols', type=str, nargs='+', default=None,
+                       help='Filter to specific symbols only (e.g., --symbols ES NQ CL)')
+    parser.add_argument('--output-suffix', type=str, default=None,
+                       help='Add suffix to output filename (e.g., --output-suffix ibs_a)')
 
     args = parser.parse_args()
 
@@ -370,9 +374,16 @@ def main():
     # Load symbols
     available_symbols = discover_available_symbols(results_dir)
 
-    if 'PL' in available_symbols:
-        available_symbols.remove('PL')
-        logger.info("✂️  Excluded PL (Platinum)")
+    # Filter to specific symbols if requested
+    if args.symbols:
+        filtered_symbols = [s for s in available_symbols if s in args.symbols]
+        logger.info(f"✂️  Filtered to {len(filtered_symbols)} symbols: {', '.join(sorted(filtered_symbols))}")
+        available_symbols = filtered_symbols
+    else:
+        # Default: exclude PL unless explicitly requested
+        if 'PL' in available_symbols:
+            available_symbols.remove('PL')
+            logger.info("✂️  Excluded PL (Platinum)")
 
     logger.info(f"📦 Loading {len(available_symbols)} symbols\n")
 
@@ -540,7 +551,12 @@ def main():
         'timestamp': timestamp
     }
 
-    summary_file = output_dir / f'greedy_optimization_{timestamp}.json'
+    # Build output filename with optional suffix
+    if args.output_suffix:
+        summary_file = output_dir / f'greedy_optimization_{args.output_suffix}_{timestamp}.json'
+    else:
+        summary_file = output_dir / f'greedy_optimization_{timestamp}.json'
+
     with open(summary_file, 'w') as f:
         json.dump(summary, f, indent=2)
 
