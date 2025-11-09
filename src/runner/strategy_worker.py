@@ -721,16 +721,16 @@ class StrategyWorker:
                                 end=end,
                                 stype_in=stype_in
                             )
-                            if data is not None and len(data) > 0:
-                                logger.info(f"  {symbol}: got data with schema {schema}, {len(data)} records")
+                            if data is not None:
+                                logger.info(f"  {symbol}: got data with schema {schema}")
                                 break
                             else:
-                                logger.info(f"  {symbol}: schema {schema} returned empty data")
+                                logger.info(f"  {symbol}: schema {schema} returned None")
                         except Exception as e:
                             logger.warning(f"  {symbol}: schema {schema} failed: {e}")
                             continue
 
-                    if data is not None and len(data) > 0:
+                    if data is not None:
                         # Convert Databento data to Bar objects
                         try:
                             bars = self._convert_databento_to_bars(symbol, data, compression="1d")
@@ -843,16 +843,16 @@ class StrategyWorker:
                                 end=end_hourly,
                                 stype_in=stype_in
                             )
-                            if data is not None and len(data) > 0:
-                                logger.info(f"  {symbol}: got hourly data with schema {schema}, {len(data)} records")
+                            if data is not None:
+                                logger.info(f"  {symbol}: got hourly data with schema {schema}")
                                 break
                             else:
-                                logger.info(f"  {symbol}: schema {schema} returned empty hourly data")
+                                logger.info(f"  {symbol}: schema {schema} returned None for hourly")
                         except Exception as e:
                             logger.warning(f"  {symbol}: hourly schema {schema} failed: {e}")
                             continue
 
-                    if data is not None and len(data) > 0:
+                    if data is not None:
                         # Convert Databento data to Bar objects
                         try:
                             bars = self._convert_databento_to_bars(symbol, data, compression="1h")
