@@ -685,27 +685,22 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading daily warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Resolve symbol to specific contract codes (matches legacy historical_loader.py)
+                    # Resolve symbol to specific contract codes
+                    # CRITICAL: For historical OHLCV, use raw_symbol not parent!
+                    # parent downloads ALL contracts (ESH25+ESM25+ESU25...) = 5GB+
+                    # raw_symbol downloads only the requested symbol = ~300MB
                     request_symbols: List[str] = []
-                    stype_in = "parent"  # Default
+                    stype_in = "raw_symbol"  # Default for historical data
 
                     if self.contract_map is not None:
-                        # Try to get subscription codes first (preferred)
                         subscription = self.contract_map.subscription_for(symbol)
                         if subscription and subscription.codes:
+                            # Use subscription codes (e.g., ["SI.FUT"])
                             request_symbols.extend(subscription.codes)
-                            stype_in = subscription.stype_in
-                        # Otherwise try to get active contract
-                        elif subscription and subscription.stype_in == "product_id":
-                            try:
-                                contract = self.contract_map.active_contract(symbol)
-                                if contract and contract.databento.product_id:
-                                    request_symbols.append(contract.databento.product_id)
-                                    stype_in = "product_id"
-                            except KeyError:
-                                pass  # Fall through to parent
+                            # For historical data, always use raw_symbol to avoid expanding parent symbols
+                            stype_in = "raw_symbol"
 
-                    # Fallback: use parent symbol if no contract map resolution
+                    # Fallback: use product_id from config
                     if not request_symbols:
                         instr_config = self.config.get_instrument(symbol)
                         if instr_config:
@@ -713,7 +708,7 @@ class StrategyWorker:
                         else:
                             product_id = f"{symbol}.FUT"
                         request_symbols = [product_id]
-                        stype_in = "parent"
+                        stype_in = "raw_symbol"
 
                     # Try schemas in order until one works
                     data = None
@@ -810,27 +805,22 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading hourly warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Resolve symbol to specific contract codes (matches legacy historical_loader.py)
+                    # Resolve symbol to specific contract codes
+                    # CRITICAL: For historical OHLCV, use raw_symbol not parent!
+                    # parent downloads ALL contracts (ESH25+ESM25+ESU25...) = 5GB+
+                    # raw_symbol downloads only the requested symbol = ~300MB
                     request_symbols: List[str] = []
-                    stype_in = "parent"  # Default
+                    stype_in = "raw_symbol"  # Default for historical data
 
                     if self.contract_map is not None:
-                        # Try to get subscription codes first (preferred)
                         subscription = self.contract_map.subscription_for(symbol)
                         if subscription and subscription.codes:
+                            # Use subscription codes (e.g., ["SI.FUT"])
                             request_symbols.extend(subscription.codes)
-                            stype_in = subscription.stype_in
-                        # Otherwise try to get active contract
-                        elif subscription and subscription.stype_in == "product_id":
-                            try:
-                                contract = self.contract_map.active_contract(symbol)
-                                if contract and contract.databento.product_id:
-                                    request_symbols.append(contract.databento.product_id)
-                                    stype_in = "product_id"
-                            except KeyError:
-                                pass  # Fall through to parent
+                            # For historical data, always use raw_symbol to avoid expanding parent symbols
+                            stype_in = "raw_symbol"
 
-                    # Fallback: use parent symbol if no contract map resolution
+                    # Fallback: use product_id from config
                     if not request_symbols:
                         instr_config = self.config.get_instrument(symbol)
                         if instr_config:
@@ -838,7 +828,7 @@ class StrategyWorker:
                         else:
                             product_id = f"{symbol}.FUT"
                         request_symbols = [product_id]
-                        stype_in = "parent"
+                        stype_in = "raw_symbol"
 
                     # Try schemas in order until one works
                     data = None
