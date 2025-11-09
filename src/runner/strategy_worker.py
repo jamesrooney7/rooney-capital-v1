@@ -40,7 +40,7 @@ from src.feeds import RedisLiveData, RedisResampledData
 from src.runner.databento_bridge import Bar
 
 # Import contract map for resolving active contracts
-from src.runner.contract_map import ContractMap
+from src.runner.contract_map import ContractMap, load_contract_map
 
 # Import strategy factory
 from src.strategy.strategy_factory import load_strategy, create_strategy_config
@@ -133,7 +133,7 @@ class StrategyWorker:
         self.contract_map: Optional[ContractMap] = None
         try:
             if Path(contract_map_path).exists():
-                self.contract_map = ContractMap.load(contract_map_path)
+                self.contract_map = load_contract_map(contract_map_path)
                 logger.info(f"Loaded contract map from {contract_map_path}")
             else:
                 logger.warning(f"Contract map not found at {contract_map_path}, will use parent symbols")
