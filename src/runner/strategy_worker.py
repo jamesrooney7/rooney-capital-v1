@@ -450,9 +450,25 @@ class StrategyWorker:
 
         # Resample to target compression if needed
         if compression != "1min":
-            aggregation = ohlcv.resample(compression).agg(
-                {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
-            )
+            # Use session-aware resampling to match legacy system and live data
+            # CME session runs from 23:00 UTC to 23:00 UTC next day
+            if compression == "1d":
+                # Resample with offset to align to 23:00 UTC (session end)
+                # This matches the legacy ResampledLiveData session_end_hour=23 logic
+                aggregation = ohlcv.resample("1D", offset="23H").agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                )
+            elif compression == "1h":
+                # Hourly resampling aligns to top of hour (standard)
+                aggregation = ohlcv.resample("1H").agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                )
+            else:
+                # Generic resampling for other compressions
+                aggregation = ohlcv.resample(compression).agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+                )
+
             if aggregation.empty:
                 return []
             ohlcv = aggregation

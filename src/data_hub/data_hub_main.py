@@ -116,12 +116,21 @@ class BarAggregator:
                 contract_symbol
             )
 
-            # Build daily bar (using UTC day)
-            day = timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+            # Build daily bar using SESSION boundaries (23:00 UTC session end)
+            # CME futures session runs from 23:00 to 23:00 next day
+            # This matches the legacy databento_bridge.py ResampledLiveData behavior
+            if timestamp.hour >= 23:
+                # After 23:00, belongs to today's session
+                session_day = timestamp.replace(hour=23, minute=0, second=0, microsecond=0)
+            else:
+                # Before 23:00, belongs to previous session (started yesterday 23:00)
+                from datetime import timedelta
+                session_day = (timestamp - timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
+
             self._update_bar(
                 self._daily_bars,
                 symbol,
-                day,
+                session_day,
                 price,
                 size,
                 'daily',
