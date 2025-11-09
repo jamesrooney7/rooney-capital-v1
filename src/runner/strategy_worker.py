@@ -15,6 +15,7 @@ Usage:
 """
 
 import argparse
+import gc
 import json
 import logging
 import os
@@ -663,7 +664,10 @@ class StrategyWorker:
 
             logger.info(f"Loading daily warmup data ({daily_lookback} days)...")
 
+            symbols_completed = 0
             for symbol in all_symbols:
+                symbols_completed += 1
+                logger.info(f"Loading daily warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
                     # Get instrument product ID
                     product_id = f"{symbol}.FUT"
@@ -696,7 +700,11 @@ class StrategyWorker:
                             bars = self._convert_databento_to_bars(symbol, data, compression="1d")
                         except Exception as e:
                             logger.warning(f"Failed to convert daily warmup data for {symbol}: {e}")
+                            del data  # Free memory even on error
                             continue
+
+                        # Free raw Databento data immediately after conversion
+                        del data
 
                         if not bars:
                             logger.debug(f"  {symbol}: no bars after conversion")
@@ -746,6 +754,9 @@ class StrategyWorker:
 
                 except Exception as e:
                     logger.warning(f"Failed to load daily warmup for {symbol}: {e}")
+                finally:
+                    # Force garbage collection after each symbol to free memory
+                    gc.collect()
 
             # Load hourly bars (15 calendar days)
             hourly_lookback = self.strategy_config.historical_hourly_lookback_days
@@ -754,7 +765,10 @@ class StrategyWorker:
 
             logger.info(f"Loading hourly warmup data ({hourly_lookback} days)...")
 
+            symbols_completed = 0
             for symbol in all_symbols:
+                symbols_completed += 1
+                logger.info(f"Loading hourly warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
                     # Get instrument product ID
                     product_id = f"{symbol}.FUT"
@@ -787,7 +801,11 @@ class StrategyWorker:
                             bars = self._convert_databento_to_bars(symbol, data, compression="1h")
                         except Exception as e:
                             logger.warning(f"Failed to convert hourly warmup data for {symbol}: {e}")
+                            del data  # Free memory even on error
                             continue
+
+                        # Free raw Databento data immediately after conversion
+                        del data
 
                         if not bars:
                             logger.debug(f"  {symbol}: no bars after conversion")
@@ -833,6 +851,9 @@ class StrategyWorker:
 
                 except Exception as e:
                     logger.warning(f"Failed to load hourly warmup for {symbol}: {e}")
+                finally:
+                    # Force garbage collection after each symbol to free memory
+                    gc.collect()
 
             logger.info("Historical warmup complete")
 
