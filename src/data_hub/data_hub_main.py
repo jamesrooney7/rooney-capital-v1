@@ -441,8 +441,9 @@ class DataHub:
             raw_symbol = getattr(mapping, "raw_symbol", None)
 
             if instrument_id and symbol:
-                # Extract root symbol (strip digits)
-                root = "".join(ch for ch in symbol if not ch.isdigit()) or symbol
+                # Extract root symbol (strip .FUT/.OPT suffix, then strip digits)
+                clean_symbol = symbol.replace('.FUT', '').replace('.OPT', '')
+                root = "".join(ch for ch in clean_symbol if not ch.isdigit()) or clean_symbol
                 self._instrument_to_symbol[instrument_id] = root
 
                 if raw_symbol:
@@ -474,8 +475,9 @@ class DataHub:
             logger.warning(f"Symbol mapping message has no symbol for instrument {instrument_id}")
             return
 
-        # Extract root symbol
-        root = "".join(ch for ch in symbol if not ch.isdigit()) or symbol
+        # Extract root symbol (strip .FUT/.OPT suffix, then strip digits)
+        clean_symbol = symbol.replace('.FUT', '').replace('.OPT', '')
+        root = "".join(ch for ch in clean_symbol if not ch.isdigit()) or clean_symbol
 
         if root:
             self._instrument_to_symbol[instrument_id] = root
