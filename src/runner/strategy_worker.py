@@ -742,8 +742,10 @@ class StrategyWorker:
                         del data
 
                         if not bars:
-                            logger.debug(f"  {symbol}: no bars after conversion")
+                            logger.info(f"  {symbol}: no bars after conversion (got empty list)")
                             continue
+
+                        logger.info(f"  {symbol}: converted {len(bars)} bars, looking for feed '{symbol}_day'")
 
                         # Find the daily feed for this symbol
                         feed_name = f"{symbol}_day"
@@ -783,9 +785,9 @@ class StrategyWorker:
 
                             logger.info(f"  {symbol}: loaded {total_appended} daily warmup bars")
                         else:
-                            logger.debug(f"  {symbol}: no daily feed found")
+                            logger.warning(f"  {symbol}: feed '{feed_name}' not found in self.data_feeds (have {list(self.data_feeds.keys())})")
                     else:
-                        logger.debug(f"  {symbol}: no daily data available")
+                        logger.info(f"  {symbol}: no daily data available from Databento")
 
                 except Exception as e:
                     logger.warning(f"Failed to load daily warmup for {symbol}: {e}")
@@ -862,8 +864,10 @@ class StrategyWorker:
                         del data
 
                         if not bars:
-                            logger.debug(f"  {symbol}: no bars after conversion")
+                            logger.info(f"  {symbol}: no hourly bars after conversion (got empty list)")
                             continue
+
+                        logger.info(f"  {symbol}: converted {len(bars)} hourly bars, looking for feed '{symbol}_hour'")
 
                         # Find the hourly feed for this symbol
                         feed_name = f"{symbol}_hour"
@@ -899,9 +903,9 @@ class StrategyWorker:
 
                             logger.info(f"  {symbol}: loaded {total_appended} hourly warmup bars")
                         else:
-                            logger.debug(f"  {symbol}: no hourly feed found")
+                            logger.warning(f"  {symbol}: feed '{feed_name}' not found in self.data_feeds")
                     else:
-                        logger.debug(f"  {symbol}: no hourly data available")
+                        logger.info(f"  {symbol}: no hourly data available from Databento")
 
                 except Exception as e:
                     logger.warning(f"Failed to load hourly warmup for {symbol}: {e}")
