@@ -61,6 +61,9 @@ from src.runner.traderspost_client import TradersPostClient
 # Import Discord notifier
 from src.utils.discord_notifier import DiscordNotifier
 
+# Import trade database
+from src.utils.trades_db import TradesDB
+
 # Import ML model loader
 try:
     from src.models.loader import load_model_bundle
@@ -116,6 +119,7 @@ class StrategyWorker:
         self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
         self.traderspost_client: Optional[TradersPostClient] = None
         self.discord_notifier: Optional[Any] = None  # Discord notifications
+        self.trades_db: Optional[TradesDB] = None  # Trade database
 
         # ML models per instrument
         self.ml_models: Dict[str, Any] = {}
@@ -226,6 +230,14 @@ class StrategyWorker:
         else:
             logger.info("Discord notifier disabled: no webhook URL configured")
             self.discord_notifier = None
+
+        # Initialize trade database for persistence
+        try:
+            self.trades_db = TradesDB()  # Uses default path /opt/pine/runtime/trades.db
+            logger.info(f"Trade database initialized at {self.trades_db.db_path}")
+        except Exception as e:
+            logger.error(f"Failed to initialize trade database: {e}")
+            self.trades_db = None
 
     def _load_ml_models(self):
         """Load ML models for each instrument."""
@@ -1040,6 +1052,39 @@ class StrategyWorker:
                 )
             except Exception as e:
                 logger.error(f"Failed to send Discord trade exit notification: {e}")
+
+        # Persist trade to database
+        if self.trades_db and trade.isclosed:
+            try:
+                side = 'long' if trade.long else 'short'
+                entry_price = trade.price
+                exit_price = entry_price + (trade.pnl / trade.size) if trade.size else entry_price
+
+                # Calculate entry and exit times from trade data
+                entry_time = datetime.fromtimestamp(trade.dtopen)
+                exit_time = datetime.fromtimestamp(trade.dtclose)
+
+                # Calculate P&L percentage
+                pnl_percent = None
+                if trade.value != 0:
+                    pnl_percent = (trade.pnl / abs(trade.value)) * 100
+
+                self.trades_db.insert_trade(
+                    symbol=symbol,
+                    side=side,
+                    entry_time=entry_time,
+                    entry_price=entry_price,
+                    entry_size=trade.size,
+                    exit_time=exit_time,
+                    exit_price=exit_price,
+                    exit_size=trade.size,
+                    pnl=trade.pnl,
+                    pnl_percent=pnl_percent,
+                    exit_reason=None,  # TODO: Could extract from strategy if available
+                )
+                logger.info(f"Trade persisted to database: {symbol} {side} P&L=${trade.pnl:.2f}")
+            except Exception as e:
+                logger.error(f"Failed to persist trade to database: {e}")
 
     def _on_emergency_exit(self, reason: str, context: Dict[str, Any]):
         """Callback when emergency exit triggered (e.g., daily stop loss hit)."""
