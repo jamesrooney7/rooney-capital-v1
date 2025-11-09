@@ -711,6 +711,7 @@ class StrategyWorker:
                         stype_in = "raw_symbol"
 
                     # Try schemas in order until one works
+                    logger.info(f"  {symbol}: requesting from Databento: symbols={request_symbols}, stype_in={stype_in}, dataset={dataset}")
                     data = None
                     for schema in schema_preferences:
                         try:
@@ -723,10 +724,12 @@ class StrategyWorker:
                                 stype_in=stype_in
                             )
                             if data is not None and len(data) > 0:
-                                logger.debug(f"  {symbol}: using schema {schema} for daily warmup")
+                                logger.info(f"  {symbol}: got data with schema {schema}, {len(data)} records")
                                 break
+                            else:
+                                logger.info(f"  {symbol}: schema {schema} returned empty data")
                         except Exception as e:
-                            logger.debug(f"  {symbol}: schema {schema} failed: {e}")
+                            logger.warning(f"  {symbol}: schema {schema} failed: {e}")
                             continue
 
                     if data is not None and len(data) > 0:
@@ -833,6 +836,7 @@ class StrategyWorker:
                         stype_in = "raw_symbol"
 
                     # Try schemas in order until one works
+                    logger.info(f"  {symbol}: requesting hourly from Databento: symbols={request_symbols}, stype_in={stype_in}")
                     data = None
                     for schema in schema_preferences:
                         try:
@@ -845,10 +849,12 @@ class StrategyWorker:
                                 stype_in=stype_in
                             )
                             if data is not None and len(data) > 0:
-                                logger.debug(f"  {symbol}: using schema {schema} for hourly warmup")
+                                logger.info(f"  {symbol}: got hourly data with schema {schema}, {len(data)} records")
                                 break
+                            else:
+                                logger.info(f"  {symbol}: schema {schema} returned empty hourly data")
                         except Exception as e:
-                            logger.debug(f"  {symbol}: schema {schema} failed: {e}")
+                            logger.warning(f"  {symbol}: hourly schema {schema} failed: {e}")
                             continue
 
                     if data is not None and len(data) > 0:
