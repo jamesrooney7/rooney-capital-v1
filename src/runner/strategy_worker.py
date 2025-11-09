@@ -498,12 +498,12 @@ class StrategyWorker:
             if compression == "1d":
                 # Resample with offset to align to 23:00 UTC (session end)
                 # This matches the legacy ResampledLiveData session_end_hour=23 logic
-                aggregation = ohlcv.resample("1D", offset="23H").agg(
+                aggregation = ohlcv.resample("1D", offset="23h").agg(
                     {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
                 )
             elif compression == "1h":
                 # Hourly resampling aligns to top of hour (standard)
-                aggregation = ohlcv.resample("1H").agg(
+                aggregation = ohlcv.resample("1h").agg(
                     {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
                 )
             else:
@@ -764,8 +764,8 @@ class StrategyWorker:
                             total_appended = 0
                             total_batches = max((len(bars) + batch_size - 1) // batch_size, 1)
 
-                            for batch_index, start in enumerate(range(0, len(bars), batch_size)):
-                                chunk = bars[start : start + batch_size]
+                            for batch_index, batch_start in enumerate(range(0, len(bars), batch_size)):
+                                chunk = bars[batch_start : batch_start + batch_size]
                                 if not chunk:
                                     continue
 
@@ -882,8 +882,8 @@ class StrategyWorker:
                             total_appended = 0
                             total_batches = max((len(bars) + batch_size - 1) // batch_size, 1)
 
-                            for batch_index, start in enumerate(range(0, len(bars), batch_size)):
-                                chunk = bars[start : start + batch_size]
+                            for batch_index, batch_start in enumerate(range(0, len(bars), batch_size)):
+                                chunk = bars[batch_start : batch_start + batch_size]
                                 if not chunk:
                                     continue
 
