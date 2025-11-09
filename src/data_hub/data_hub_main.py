@@ -16,6 +16,7 @@ import argparse
 import datetime as dt
 import json
 import logging
+import re
 import signal
 import sys
 import threading
@@ -441,9 +442,10 @@ class DataHub:
             raw_symbol = getattr(mapping, "raw_symbol", None)
 
             if instrument_id and symbol:
-                # Extract root symbol (strip .FUT/.OPT suffix, then strip digits)
+                # Extract root symbol (strip .FUT/.OPT suffix, then strip trailing contract codes)
                 clean_symbol = symbol.replace('.FUT', '').replace('.OPT', '')
-                root = "".join(ch for ch in clean_symbol if not ch.isdigit()) or clean_symbol
+                # Strip trailing contract month codes (e.g., Z4, H25) but keep leading digits (e.g., 6C, 6A)
+                root = re.sub(r'[FGHJKMNQUVXZ]\d{1,2}$', '', clean_symbol)
                 self._instrument_to_symbol[instrument_id] = root
 
                 if raw_symbol:
@@ -475,9 +477,10 @@ class DataHub:
             logger.warning(f"Symbol mapping message has no symbol for instrument {instrument_id}")
             return
 
-        # Extract root symbol (strip .FUT/.OPT suffix, then strip digits)
+        # Extract root symbol (strip .FUT/.OPT suffix, then strip trailing contract codes)
         clean_symbol = symbol.replace('.FUT', '').replace('.OPT', '')
-        root = "".join(ch for ch in clean_symbol if not ch.isdigit()) or clean_symbol
+        # Strip trailing contract month codes (e.g., Z4, H25) but keep leading digits (e.g., 6C, 6A)
+        root = re.sub(r'[FGHJKMNQUVXZ]\d{1,2}$', '', clean_symbol)
 
         if root:
             self._instrument_to_symbol[instrument_id] = root
