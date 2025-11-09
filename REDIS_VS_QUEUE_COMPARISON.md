@@ -329,13 +329,15 @@ except queue.Empty:
 
 ### ⚠️ Medium Risk Differences
 
-1. **No RESET signal:** Workers don't reset state when data hub reconnects
-   - **Mitigation:** RedisLiveData already handles stale bars by checking timestamps
-   - **Risk:** Low - timestamps prevent out-of-order issues
+1. **✅ FIXED: RESET signal** - Now implemented via `datahub:control` channel
+   - Workers subscribe to control channel and handle RESET signals
+   - Clears `_latest_dt` to accept fresh data after reconnect
+   - **Implementation:** `redis_feed.py:243-246`
 
-2. **No SHUTDOWN signal:** Workers don't know when data hub shuts down gracefully
-   - **Mitigation:** Workers detect missing heartbeats and timeout
-   - **Risk:** Low - workers will notice missing data and can shut down
+2. **✅ FIXED: SHUTDOWN signal** - Now implemented via `datahub:control` channel
+   - Data hub sends SHUTDOWN on graceful stop
+   - Workers detect and shut down cleanly
+   - **Implementation:** `data_hub_main.py:337`, `redis_feed.py:237-240`
 
 3. **Pub/sub fire-and-forget:** If worker is disconnected, it misses bars
    - **Mitigation:** Workers reconnect quickly, warmup cache provides latest bar
@@ -343,16 +345,17 @@ except queue.Empty:
 
 ### 🆕 New Capabilities (Redis Advantages)
 
-1. **Multi-timeframe pre-aggregation:** Data hub publishes 1min/hourly/daily
-   - Legacy: Consumers aggregate minute bars themselves
-   - New: Data hub does aggregation once, all workers benefit
-
-2. **Horizontal scaling:** Workers can run on different machines
+1. **Horizontal scaling:** Workers can run on different machines
    - Legacy: Limited to single process
    - New: Can scale to multiple servers
 
-3. **Monitoring:** Can inspect Redis channels to see what's being published
+2. **Monitoring:** Can inspect Redis channels to see what's being published
    - Legacy: Queues are opaque
+   - Can use `redis-cli MONITOR` or `PUBSUB CHANNELS` to debug
+
+3. **Control signals:** Centralized control via datahub:control channel
+   - Legacy: Control signals per queue
+   - New: Broadcast signals to all workers at once
 
 ---
 
@@ -365,25 +368,22 @@ The Redis implementation is fundamentally sound and provides significant archite
 - Multi-alpha support with shared data stream
 - Horizontal scaling capability
 
-### 🔧 Optional Enhancements
+### ✅ Implemented Enhancements
 
-1. **Add shutdown channel** for graceful worker shutdown:
+1. **✅ IMPLEMENTED: Control signals** for graceful shutdown and reset:
    ```python
-   # Data hub on shutdown:
-   redis_client.publish("datahub:control", {"type": "shutdown"})
+   # Data hub on shutdown (data_hub_main.py:337):
+   redis_client.publish_shutdown()
 
-   # Workers subscribe to control channel and handle shutdown
-   ```
-
-2. **Add reconnect event** to trigger worker state reset:
-   ```python
    # Data hub on reconnect:
-   redis_client.publish("datahub:control", {"type": "reconnect", "timestamp": ...})
+   redis_client.publish_reset(symbol="ES")  # or None for all
 
-   # Workers could clear stale state if needed
+   # Workers subscribe to datahub:control and handle signals (redis_feed.py:223-252):
+   - SHUTDOWN: Sets _stopped = True, graceful exit
+   - RESET: Clears _latest_dt to accept fresh data
    ```
 
-3. **✅ IMPLEMENTED: Monitor subscriber count** to detect disconnected workers:
+2. **✅ IMPLEMENTED: Monitor subscriber count** to detect disconnected workers:
    ```python
    num_subscribers = redis_client.publish_and_cache(symbol, timeframe, bar_data)
    if num_subscribers == 0:
@@ -422,16 +422,35 @@ The Redis implementation is fundamentally sound and provides significant archite
 
 1. 🔄 **Transport:** In-memory queues → Redis pub/sub
 2. 🔄 **Serialization:** Python objects → JSON
-3. 🔄 **Pre-aggregation:** Workers aggregate → Data hub aggregates
-4. 🔄 **Signals:** QueueSignal.RESET/SHUTDOWN → None (could add control channel)
+3. ✅ **Aggregation:** Workers aggregate (SAME - both aggregate in workers)
+4. ✅ **Signals:** Control signals via datahub:control channel (NOW IMPLEMENTED)
 5. 🔄 **Scope:** Single-process → Distributed
 
 ### What's Missing ❌
 
-1. ❌ RESET signal (low risk - timestamp check handles this)
-2. ❌ SHUTDOWN signal (low risk - timeout detection works)
-3. ❌ Backfill support (intentionally removed)
+1. ✅ ~~RESET signal~~ - **NOW IMPLEMENTED** via datahub:control
+2. ✅ ~~SHUTDOWN signal~~ - **NOW IMPLEMENTED** via datahub:control
+3. ❌ Backfill support (intentionally removed - not needed)
 
 ### Net Result 🎯
 
-**The Redis implementation provides equivalent functionality to the Queue approach, with architectural improvements for multi-alpha support. The missing control signals have low risk, as the timestamp-based stale detection and timeout mechanisms provide equivalent safety.**
+**The Redis implementation now provides COMPLETE functionality matching the Queue approach, plus architectural improvements for multi-alpha support:**
+
+✅ **All critical features implemented:**
+- Control signals (RESET/SHUTDOWN) via datahub:control channel
+- Worker-side aggregation (minute → hourly/daily)
+- Session-aware bar boundaries (23:00 UTC)
+- Warmup handling (qcheck=0 → normal qcheck)
+- Stale bar detection (timestamp checking)
+- Subscriber monitoring (detect disconnected workers)
+
+✅ **Architectural advantages:**
+- Multi-strategy support with shared data stream
+- Horizontal scaling (workers on different machines)
+- Cleaner separation (data hub vs workers)
+- Lower per-strategy overhead
+
+✅ **Only intentional differences:**
+- Transport: Redis pub/sub (required for distributed architecture)
+- Serialization: JSON (minimal overhead, human-readable)
+- Scope: Distributed (enables multi-alpha)

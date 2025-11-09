@@ -177,9 +177,9 @@ class RedisLiveData(bt.feeds.DataBase):
             # Create pub/sub object
             self.pubsub = self.redis_pubsub_client.pubsub()
 
-            # Subscribe to channel
-            self.pubsub.subscribe(self.channel)
-            logger.info("Subscribed to Redis channel: %s", self.channel)
+            # Subscribe to both data channel AND control channel
+            self.pubsub.subscribe(self.channel, "datahub:control")
+            logger.info("Subscribed to Redis channels: %s, datahub:control", self.channel)
 
             # Listen for messages
             for message in self.pubsub.listen():
@@ -189,8 +189,15 @@ class RedisLiveData(bt.feeds.DataBase):
                 if message['type'] != 'message':
                     continue  # Skip subscription confirmations
 
+                channel = message['channel']
+
                 try:
-                    # Parse bar data
+                    # Handle control signals
+                    if channel == 'datahub:control':
+                        self._handle_control_signal(message['data'])
+                        continue
+
+                    # Parse bar data from data channel
                     bar_data = json.loads(message['data'])
 
                     # Queue the bar
@@ -203,7 +210,7 @@ class RedisLiveData(bt.feeds.DataBase):
                         )
 
                 except json.JSONDecodeError as e:
-                    logger.error(f"Failed to decode bar data: {e}")
+                    logger.error(f"Failed to decode message: {e}")
                 except Exception as e:
                     logger.error(f"Error processing message: {e}")
 
@@ -212,6 +219,37 @@ class RedisLiveData(bt.feeds.DataBase):
                 logger.error(f"Redis subscription error: {e}", exc_info=True)
         finally:
             logger.info("Redis subscription loop ended for %s", self.p.symbol)
+
+    def _handle_control_signal(self, signal_data: str):
+        """
+        Handle control signals from data hub.
+
+        Matches legacy QueueSignal behavior for RESET and SHUTDOWN.
+
+        Args:
+            signal_data: JSON-encoded signal
+        """
+        try:
+            signal = json.loads(signal_data)
+            signal_type = signal.get('type')
+            symbol = signal.get('symbol')
+
+            if signal_type == 'shutdown':
+                logger.info("Received SHUTDOWN signal from data hub for %s", self.p.symbol)
+                self._stopped = True
+                self._stop_event.set()
+
+            elif signal_type == 'reset':
+                # Reset signal: clear stale state
+                if symbol is None or symbol == self.p.symbol:
+                    logger.info("Received RESET signal, clearing feed state for %s", self.p.symbol)
+                    self._latest_dt = None  # Allow fresh data
+
+            else:
+                logger.debug(f"Ignoring unknown control signal: {signal_type}")
+
+        except Exception as e:
+            logger.error(f"Failed to handle control signal: {e}")
 
     def _load(self) -> Optional[bool]:
         """

@@ -332,6 +332,13 @@ class DataHub:
         logger.info("Stopping DataHub...")
         self._stop_event.set()
 
+        # Notify workers that data hub is shutting down
+        try:
+            num_workers = self.redis_client.publish_shutdown()
+            logger.info(f"Notified {num_workers} workers of shutdown")
+        except Exception as e:
+            logger.warning(f"Failed to send shutdown signal: {e}")
+
         # Stop Databento client
         if self._databento_client:
             try:

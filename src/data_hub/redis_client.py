@@ -224,6 +224,73 @@ class RedisClient:
             logger.error(f"Failed to publish heartbeat: {e}")
             # Don't raise - heartbeat failure shouldn't crash data hub
 
+    def publish_control_signal(
+        self,
+        signal_type: str,
+        symbol: Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Publish control signal to workers (RESET, SHUTDOWN, etc).
+
+        This matches the legacy QueueSignal behavior for graceful handling.
+
+        Args:
+            signal_type: Type of signal ('reset', 'shutdown', 'reconnect')
+            symbol: Optional symbol for symbol-specific signals
+            **kwargs: Additional signal data
+
+        Returns:
+            Number of subscribers that received the signal
+        """
+        channel = "datahub:control"
+
+        try:
+            signal_data = {
+                'type': signal_type,
+                'timestamp': datetime.utcnow().isoformat(),
+                **kwargs
+            }
+
+            if symbol:
+                signal_data['symbol'] = symbol
+
+            message = json.dumps(signal_data)
+            num_subscribers = self.client.publish(channel, message)
+
+            logger.info(
+                f"Published control signal '{signal_type}' to {num_subscribers} workers"
+                f"{f' (symbol={symbol})' if symbol else ''}"
+            )
+
+            return num_subscribers
+
+        except Exception as e:
+            logger.error(f"Failed to publish control signal '{signal_type}': {e}")
+            # Don't raise - control signals are best-effort
+            return 0
+
+    def publish_shutdown(self) -> int:
+        """
+        Publish shutdown signal to all workers.
+
+        Returns:
+            Number of workers notified
+        """
+        return self.publish_control_signal('shutdown')
+
+    def publish_reset(self, symbol: Optional[str] = None) -> int:
+        """
+        Publish reset signal to workers (clear stale state).
+
+        Args:
+            symbol: Optional symbol to reset, or None for all
+
+        Returns:
+            Number of workers notified
+        """
+        return self.publish_control_signal('reset', symbol=symbol)
+
     def get_info(self) -> Dict[str, Any]:
         """
         Get Redis server info.
