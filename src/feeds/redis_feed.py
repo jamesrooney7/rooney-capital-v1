@@ -257,22 +257,22 @@ class RedisLiveData(bt.feeds.DataBase):
         Append historical bars to be consumed before live data.
 
         Args:
-            bars: Iterable of bar dictionaries or Databento records
+            bars: Iterable of Bar objects (from src.runner.databento_bridge)
 
         Returns:
             Number of bars appended
         """
         appended = 0
         for bar in bars:
-            # Convert Databento record to dict if needed
-            if hasattr(bar, 'ts_event'):
-                # Databento OHLCV record
+            # Convert Bar object to dict for Redis feed
+            if hasattr(bar, 'timestamp') and hasattr(bar, 'open'):
+                # Bar dataclass from databento_bridge
                 bar_data = {
-                    'timestamp': dt.datetime.fromtimestamp(bar.ts_event / 1e9, tz=dt.timezone.utc).isoformat(),
-                    'open': float(bar.open) / 1e9,  # Databento fixed-point prices
-                    'high': float(bar.high) / 1e9,
-                    'low': float(bar.low) / 1e9,
-                    'close': float(bar.close) / 1e9,
+                    'timestamp': bar.timestamp.isoformat() if hasattr(bar.timestamp, 'isoformat') else str(bar.timestamp),
+                    'open': float(bar.open),
+                    'high': float(bar.high),
+                    'low': float(bar.low),
+                    'close': float(bar.close),
                     'volume': float(bar.volume),
                 }
             elif isinstance(bar, dict):

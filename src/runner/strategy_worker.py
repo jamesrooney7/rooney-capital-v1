@@ -24,15 +24,19 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 import backtrader as bt
+import pandas as pd
 
 # Import configuration
 from src.config import load_config, RuntimeConfig, StrategyConfig
 
 # Import feeds
 from src.feeds import RedisLiveData, RedisResampledData
+
+# Import Bar dataclass from legacy databento_bridge
+from src.runner.databento_bridge import Bar
 
 # Import strategy factory
 from src.strategy.strategy_factory import load_strategy, create_strategy_config
@@ -336,6 +340,162 @@ class StrategyWorker:
 
         logger.info(f"Added strategy '{self.strategy_name}' for {primary_symbol}")
 
+    def _convert_databento_to_bars(
+        self,
+        symbol: str,
+        data: Any,
+        compression: str = "1min"
+    ) -> List[Bar]:
+        """
+        Convert Databento historical data to Bar objects.
+
+        This matches the legacy _convert_databento_to_bt_bars logic.
+        """
+        if data is None:
+            return []
+
+        # Convert to DataFrame
+        if hasattr(data, "to_df"):
+            df = data.to_df()
+        elif hasattr(data, "to_pandas"):
+            df = data.to_pandas()
+        else:
+            df = pd.DataFrame(data)
+
+        if df is None or df.empty:
+            return []
+
+        df = df.copy()
+
+        # Extract timestamps
+        if "ts_event" in df.columns:
+            timestamps = pd.to_datetime(df["ts_event"], unit="ns", utc=True)
+        elif df.index.name == "ts_event":
+            timestamps = pd.to_datetime(df.index, unit="ns", utc=True)
+        elif isinstance(df.index, pd.DatetimeIndex):
+            timestamps = pd.to_datetime(df.index, utc=True)
+        else:
+            raise ValueError(f"Historical payload for {symbol} missing ts_event column")
+
+        timestamps = pd.DatetimeIndex(timestamps)
+
+        # Map column names
+        column_aliases = {
+            "open": ("open", "open_px", "open_price"),
+            "high": ("high", "high_px", "high_price"),
+            "low": ("low", "low_px", "low_price"),
+            "close": ("close", "close_px", "px", "price"),
+        }
+
+        resolved_columns = {}
+        for target, candidates in column_aliases.items():
+            for candidate in candidates:
+                if candidate in df.columns:
+                    resolved_columns[target] = candidate
+                    break
+
+        volume_column = next(
+            (col for col in ("volume", "size", "qty", "trade_sz") if col in df.columns),
+            None,
+        )
+
+        # Build OHLCV dataframe
+        if set(resolved_columns) == set(column_aliases):
+            # Full OHLCV data available
+            ohlcv = pd.DataFrame(
+                {
+                    key: pd.to_numeric(df[col], errors="coerce").to_numpy()
+                    for key, col in resolved_columns.items()
+                },
+                index=timestamps,
+            )
+            if volume_column:
+                ohlcv["volume"] = pd.to_numeric(df[volume_column], errors="coerce").to_numpy()
+            else:
+                ohlcv["volume"] = 0.0
+            ohlcv = ohlcv.sort_index()
+            ohlcv = ohlcv.loc[~ohlcv.index.duplicated(keep="last")]
+        else:
+            # Only price data - need to resample to OHLCV
+            price_column = resolved_columns.get("close") or next(
+                (col for col in ("price", "px", "close", "trade_px") if col in df.columns),
+                None,
+            )
+            if price_column is None:
+                raise ValueError(f"Historical payload for {symbol} missing price column")
+
+            prices = pd.to_numeric(df[price_column], errors="coerce").to_numpy()
+            volumes = pd.to_numeric(df[volume_column], errors="coerce").to_numpy() if volume_column else [0.0] * len(df)
+
+            frame = pd.DataFrame(
+                {"price": prices, "volume": volumes}, index=timestamps
+            )
+            frame = frame.sort_index()
+            frame = frame.dropna(subset=["price"])
+            if frame.empty:
+                return []
+
+            # Resample to 1-minute OHLCV
+            ohlcv = frame.resample("1min").agg(
+                {"price": ["first", "max", "min", "last"], "volume": "sum"}
+            )
+
+            if ohlcv.empty:
+                return []
+
+            ohlcv.columns = ["open", "high", "low", "close", "volume"]
+            ohlcv = ohlcv.sort_index()
+
+        ohlcv = ohlcv.loc[~ohlcv.index.duplicated(keep="last")]
+
+        # Resample to target compression if needed
+        if compression != "1min":
+            aggregation = ohlcv.resample(compression).agg(
+                {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+            )
+            if aggregation.empty:
+                return []
+            ohlcv = aggregation
+
+        # Convert to Bar objects
+        bars: List[Bar] = []
+        last_close: Optional[float] = None
+
+        for timestamp, row in ohlcv.iterrows():
+            open_price = row.open
+            close_price = row.close
+            high_price = row.high
+            low_price = row.low
+            volume = row.volume
+
+            if pd.notna(open_price) and pd.notna(close_price):
+                open_value = float(open_price)
+                close_value = float(close_price)
+                high_value = float(high_price) if pd.notna(high_price) else close_value
+                low_value = float(low_price) if pd.notna(low_price) else close_value
+                volume_value = float(volume) if pd.notna(volume) else 0.0
+                last_close = close_value
+            elif last_close is not None:
+                # Fill gaps with last close
+                open_value = high_value = low_value = close_value = float(last_close)
+                volume_value = 0.0
+            else:
+                continue
+
+            bars.append(
+                Bar(
+                    symbol=symbol,
+                    timestamp=timestamp.to_pydatetime(),
+                    open=open_value,
+                    high=high_value,
+                    low=low_value,
+                    close=close_value,
+                    volume=volume_value,
+                )
+            )
+
+        return bars
+
     def _load_historical_warmup(self):
         """Load historical data from Databento and populate feeds for indicator warmup."""
         try:
@@ -415,6 +575,17 @@ class StrategyWorker:
                             continue
 
                     if data is not None and len(data) > 0:
+                        # Convert Databento data to Bar objects
+                        try:
+                            bars = self._convert_databento_to_bars(symbol, data, compression="1d")
+                        except Exception as e:
+                            logger.warning(f"Failed to convert daily warmup data for {symbol}: {e}")
+                            continue
+
+                        if not bars:
+                            logger.debug(f"  {symbol}: no bars after conversion")
+                            continue
+
                         # Find the daily feed for this symbol
                         feed_name = f"{symbol}_day"
                         if symbol == "ZB" and "TLT_day" in self.data_feeds:
@@ -423,7 +594,7 @@ class StrategyWorker:
 
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
-                            bars_added = feed.extend_warmup(data)
+                            bars_added = feed.extend_warmup(bars)
                             logger.info(f"  {symbol}: loaded {bars_added} daily warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no daily feed found")
@@ -468,11 +639,22 @@ class StrategyWorker:
                             continue
 
                     if data is not None and len(data) > 0:
+                        # Convert Databento data to Bar objects
+                        try:
+                            bars = self._convert_databento_to_bars(symbol, data, compression="1h")
+                        except Exception as e:
+                            logger.warning(f"Failed to convert hourly warmup data for {symbol}: {e}")
+                            continue
+
+                        if not bars:
+                            logger.debug(f"  {symbol}: no bars after conversion")
+                            continue
+
                         # Find the hourly feed for this symbol
                         feed_name = f"{symbol}_hour"
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
-                            bars_added = feed.extend_warmup(data)
+                            bars_added = feed.extend_warmup(bars)
                             logger.info(f"  {symbol}: loaded {bars_added} hourly warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no hourly feed found")
