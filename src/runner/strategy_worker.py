@@ -349,6 +349,18 @@ class StrategyWorker:
             self.data_feeds["TLT_day"] = data_tlt
             logger.info("Added reference feed: ZB as TLT_day")
 
+            # Add ZB hourly feed (aggregates from minute)
+            data_zb_hour = RedisResampledData(
+                symbol="ZB",
+                source_feed=data_zb_minute,
+                bar_interval_minutes=60,
+                session_end_hour=23,
+                name="ZB_hour"
+            )
+            self.cerebro.adddata(data_zb_hour, name="ZB_hour")
+            self.data_feeds["ZB_hour"] = data_zb_hour
+            logger.info("Added reference feed: ZB_hour")
+
     def _add_strategy(self):
         """Add strategy to Cerebro."""
         # Load strategy class from factory using strategy_type
@@ -916,6 +928,9 @@ class StrategyWorker:
 
             logger.info("Historical warmup complete")
 
+            # Enable fast warmup mode - Cerebro will drain bars quickly when it starts
+            self._set_strategies_warmup_mode(enabled=True)
+
         except ImportError:
             logger.error("databento module not found, cannot load warmup data")
         except Exception as e:
@@ -973,6 +988,87 @@ class StrategyWorker:
         """Callback when trading day rolls over."""
         logger.info(f"Trading day rollover for '{self.strategy_name}'")
 
+    def _set_strategies_warmup_mode(self, enabled: bool) -> None:
+        """Enable or disable historical warmup mode on all strategies."""
+        runstrats = getattr(self.cerebro, "runstrats", None)
+        if not runstrats:
+            return
+
+        for strat_list in runstrats:
+            if not strat_list:
+                continue
+            for strategy in strat_list:
+                try:
+                    setattr(strategy, "_in_historical_warmup", enabled)
+                except Exception:
+                    logger.debug("Failed to set warmup mode on strategy", exc_info=True)
+
+        if enabled:
+            logger.info("Historical warmup mode ENABLED on all strategies (fast mode)")
+        else:
+            logger.info("Historical warmup mode DISABLED on all strategies (full processing)")
+
+    def _warmup_backlog_size(self, feed: Any) -> int:
+        """Get the warmup backlog size for a feed."""
+        if hasattr(feed, 'warmup_backlog_size'):
+            try:
+                return int(feed.warmup_backlog_size())
+            except Exception:
+                return 0
+        return 0
+
+    def _monitor_warmup_drain(self) -> None:
+        """Background thread that monitors warmup backlog and disables warmup mode when drained.
+
+        This runs after Cerebro starts and checks all feeds for warmup bars.
+        Once all warmup bars are consumed, it disables strategy warmup mode.
+        """
+        # Give Cerebro a moment to start processing
+        time.sleep(0.5)
+
+        # Track all feeds that might have warmup bars
+        tracked_feeds: list[Any] = []
+
+        # Add all feeds from data_feeds dict
+        for feed_name, feed in self.data_feeds.items():
+            if feed is not None and hasattr(feed, 'warmup_backlog_size'):
+                tracked_feeds.append(feed)
+
+        if not tracked_feeds:
+            logger.debug("No feeds with warmup backlog found - skipping warmup monitoring")
+            return
+
+        logger.info(f"Monitoring {len(tracked_feeds)} feeds for warmup drain...")
+
+        # Poll until all warmup bars are drained
+        max_iterations = 200  # Safety limit
+        iteration = 0
+
+        while iteration < max_iterations and not self.stop_event.is_set():
+            total_backlog = 0
+            for feed in tracked_feeds:
+                try:
+                    backlog = self._warmup_backlog_size(feed)
+                    total_backlog += backlog
+                except Exception:
+                    pass  # Ignore errors
+
+            if total_backlog == 0:
+                # All warmup bars have been consumed!
+                logger.info("Warmup backlog drained - disabling warmup mode for full processing")
+                self._set_strategies_warmup_mode(enabled=False)
+                return
+
+            iteration += 1
+            time.sleep(0.1)  # Check every 100ms
+
+        # Timeout or stop requested
+        if not self.stop_event.is_set():
+            logger.warning(
+                f"Warmup drain monitoring timed out after {max_iterations} iterations - disabling warmup mode anyway"
+            )
+            self._set_strategies_warmup_mode(enabled=False)
+
     def run(self):
         """Run the strategy worker."""
         logger.info(f"Starting strategy worker for '{self.strategy_name}'...")
@@ -988,10 +1084,18 @@ class StrategyWorker:
         )
         self.heartbeat_thread.start()
 
+        # Start warmup monitoring thread
+        warmup_monitor = threading.Thread(
+            target=self._monitor_warmup_drain,
+            name=f"warmup-monitor-{self.strategy_name}",
+            daemon=True
+        )
+        warmup_monitor.start()
+
         # Run Cerebro (blocks until stopped)
         try:
             logger.info("Running Cerebro event loop...")
-            self.cerebro.run()
+            self.cerebro.run(runonce=False)
 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
