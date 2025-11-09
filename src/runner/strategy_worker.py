@@ -669,8 +669,9 @@ class StrategyWorker:
 
             logger.info(f"Loading warmup data for {len(all_symbols)} symbols...")
 
-            # Schema preferences (match legacy system)
-            schema_preferences = ("ohlcv-1min", "ohlcv-1s", "mbp-1")
+            # Schema preferences for OHLCV historical data
+            # Note: Databento uses 'ohlcv-1m' not 'ohlcv-1min'
+            schema_preferences = ("ohlcv-1m", "ohlcv-1s", "mbp-1")
 
             # Load daily bars first (252 trading days)
             # NOTE: We request 1-minute data which the feeds will aggregate to daily
@@ -685,20 +686,17 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading daily warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Resolve symbol to specific contract codes
-                    # CRITICAL: For historical OHLCV, use raw_symbol not parent!
-                    # parent downloads ALL contracts (ESH25+ESM25+ESU25...) = 5GB+
-                    # raw_symbol downloads only the requested symbol = ~300MB
+                    # Resolve symbol using contract map
+                    # For OHLCV data, stype_in="parent" is safe and only returns front month
                     request_symbols: List[str] = []
-                    stype_in = "raw_symbol"  # Default for historical data
+                    stype_in = "parent"  # Default
 
                     if self.contract_map is not None:
                         subscription = self.contract_map.subscription_for(symbol)
                         if subscription and subscription.codes:
-                            # Use subscription codes (e.g., ["SI.FUT"])
+                            # Use subscription codes and stype_in from contract map
                             request_symbols.extend(subscription.codes)
-                            # For historical data, always use raw_symbol to avoid expanding parent symbols
-                            stype_in = "raw_symbol"
+                            stype_in = subscription.stype_in
 
                     # Fallback: use product_id from config
                     if not request_symbols:
@@ -708,7 +706,7 @@ class StrategyWorker:
                         else:
                             product_id = f"{symbol}.FUT"
                         request_symbols = [product_id]
-                        stype_in = "raw_symbol"
+                        stype_in = "parent"
 
                     # Try schemas in order until one works
                     logger.info(f"  {symbol}: requesting from Databento: symbols={request_symbols}, stype_in={stype_in}, dataset={dataset}")
@@ -810,20 +808,17 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading hourly warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Resolve symbol to specific contract codes
-                    # CRITICAL: For historical OHLCV, use raw_symbol not parent!
-                    # parent downloads ALL contracts (ESH25+ESM25+ESU25...) = 5GB+
-                    # raw_symbol downloads only the requested symbol = ~300MB
+                    # Resolve symbol using contract map
+                    # For OHLCV data, stype_in="parent" is safe and only returns front month
                     request_symbols: List[str] = []
-                    stype_in = "raw_symbol"  # Default for historical data
+                    stype_in = "parent"  # Default
 
                     if self.contract_map is not None:
                         subscription = self.contract_map.subscription_for(symbol)
                         if subscription and subscription.codes:
-                            # Use subscription codes (e.g., ["SI.FUT"])
+                            # Use subscription codes and stype_in from contract map
                             request_symbols.extend(subscription.codes)
-                            # For historical data, always use raw_symbol to avoid expanding parent symbols
-                            stype_in = "raw_symbol"
+                            stype_in = subscription.stype_in
 
                     # Fallback: use product_id from config
                     if not request_symbols:
@@ -833,7 +828,7 @@ class StrategyWorker:
                         else:
                             product_id = f"{symbol}.FUT"
                         request_symbols = [product_id]
-                        stype_in = "raw_symbol"
+                        stype_in = "parent"
 
                     # Try schemas in order until one works
                     logger.info(f"  {symbol}: requesting hourly from Databento: symbols={request_symbols}, stype_in={stype_in}")
