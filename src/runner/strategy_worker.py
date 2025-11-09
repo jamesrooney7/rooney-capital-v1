@@ -118,6 +118,11 @@ class StrategyWorker:
         self.start_time: Optional[datetime] = None
         self.running = False
 
+        # Warmup batching configuration (matches legacy system)
+        self.warmup_batch_size = getattr(self.strategy_config, 'historical_warmup_batch_size', 5000)
+        self.warmup_queue_soft_limit = getattr(self.strategy_config, 'historical_warmup_queue_soft_limit', 20000)
+        self.warmup_wait_log_interval = 5.0  # Log every 5 seconds when waiting
+
         logger.info(
             f"StrategyWorker initialized for '{strategy_name}' "
             f"(instruments={len(self.strategy_config.instruments)})"
@@ -533,6 +538,80 @@ class StrategyWorker:
 
         return bars
 
+    @staticmethod
+    def _warmup_backlog_size(feed: Any) -> int:
+        """Get the current warmup backlog size for a feed (matches legacy system)."""
+        getter = getattr(feed, "warmup_backlog_size", None)
+        if callable(getter):
+            try:
+                return int(getter())
+            except Exception:
+                logger.debug("Failed to query warmup backlog size", exc_info=True)
+
+        deque_obj = getattr(feed, "_warmup_bars", None)
+        if deque_obj is None:
+            return 0
+
+        try:
+            return len(deque_obj)
+        except Exception:
+            return 0
+
+    def _wait_for_warmup_capacity(
+        self,
+        feed: Any,
+        *,
+        symbol: str,
+        incoming: int,
+        limit: int,
+        pending_batches: int = 1,
+        total_batches: Optional[int] = None,
+    ) -> None:
+        """
+        Wait for warmup queue to have capacity before adding more bars.
+
+        This prevents overwhelming the feed's warmup queue and allows Cerebro
+        to consume bars while we're still loading (matches legacy system).
+        """
+        if incoming <= 0:
+            return
+
+        base_limit = max(limit, incoming)
+        pending_batches = max(int(pending_batches), 1)
+        total_batches = max(int(total_batches or pending_batches), pending_batches)
+        extra_batches = max(pending_batches - 1, total_batches - 1)
+
+        if incoming:
+            effective_limit = base_limit + extra_batches * incoming
+        else:
+            effective_limit = base_limit
+
+        log_interval = max(float(self.warmup_wait_log_interval), 0.0)
+        next_log: Optional[float]
+        if log_interval:
+            next_log = time.monotonic()
+        else:
+            next_log = None
+
+        while not self.stop_event.is_set():
+            backlog = self._warmup_backlog_size(feed)
+            if backlog + incoming <= effective_limit:
+                return
+
+            now = time.monotonic()
+            if next_log is not None and now >= next_log:
+                logger.info(
+                    "Waiting for warmup backlog to drain for %s (queued=%d, limit=%d)",
+                    symbol,
+                    backlog,
+                    effective_limit,
+                )
+                next_log = now + log_interval
+
+            time.sleep(0.05)
+
+        logger.debug("Warmup backlog wait aborted for %s: stop requested", symbol)
+
     def _load_historical_warmup(self):
         """Load historical data from Databento and populate feeds for indicator warmup."""
         try:
@@ -631,8 +710,35 @@ class StrategyWorker:
 
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
-                            bars_added = feed.extend_warmup(bars)
-                            logger.info(f"  {symbol}: loaded {bars_added} daily warmup bars")
+
+                            # Batch the warmup loading to avoid overwhelming the queue
+                            batch_size = max(int(self.warmup_batch_size), 1)
+                            queue_limit = max(int(self.warmup_queue_soft_limit), batch_size)
+
+                            total_appended = 0
+                            total_batches = max((len(bars) + batch_size - 1) // batch_size, 1)
+
+                            for batch_index, start in enumerate(range(0, len(bars), batch_size)):
+                                chunk = bars[start : start + batch_size]
+                                if not chunk:
+                                    continue
+
+                                # Wait for capacity before adding more bars (except first batch)
+                                if total_appended > 0:
+                                    remaining_batches = max(total_batches - batch_index, 1)
+                                    self._wait_for_warmup_capacity(
+                                        feed,
+                                        symbol=symbol,
+                                        incoming=len(chunk),
+                                        limit=queue_limit,
+                                        pending_batches=remaining_batches,
+                                        total_batches=total_batches,
+                                    )
+
+                                appended = int(feed.extend_warmup(chunk))
+                                total_appended += appended
+
+                            logger.info(f"  {symbol}: loaded {total_appended} daily warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no daily feed found")
                     else:
@@ -691,8 +797,35 @@ class StrategyWorker:
                         feed_name = f"{symbol}_hour"
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
-                            bars_added = feed.extend_warmup(bars)
-                            logger.info(f"  {symbol}: loaded {bars_added} hourly warmup bars")
+
+                            # Batch the warmup loading to avoid overwhelming the queue
+                            batch_size = max(int(self.warmup_batch_size), 1)
+                            queue_limit = max(int(self.warmup_queue_soft_limit), batch_size)
+
+                            total_appended = 0
+                            total_batches = max((len(bars) + batch_size - 1) // batch_size, 1)
+
+                            for batch_index, start in enumerate(range(0, len(bars), batch_size)):
+                                chunk = bars[start : start + batch_size]
+                                if not chunk:
+                                    continue
+
+                                # Wait for capacity before adding more bars (except first batch)
+                                if total_appended > 0:
+                                    remaining_batches = max(total_batches - batch_index, 1)
+                                    self._wait_for_warmup_capacity(
+                                        feed,
+                                        symbol=symbol,
+                                        incoming=len(chunk),
+                                        limit=queue_limit,
+                                        pending_batches=remaining_batches,
+                                        total_batches=total_batches,
+                                    )
+
+                                appended = int(feed.extend_warmup(chunk))
+                                total_appended += appended
+
+                            logger.info(f"  {symbol}: loaded {total_appended} hourly warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no hourly feed found")
                     else:
