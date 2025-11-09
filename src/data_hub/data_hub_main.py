@@ -23,6 +23,13 @@ import time
 from pathlib import Path
 from typing import Dict, Optional, Any
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+env_path = Path(__file__).parent.parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    logging.info(f"Loaded environment variables from {env_path}")
+
 from databento import Live, SymbolMappingMsg, TradeMsg
 
 from .redis_client import RedisClient

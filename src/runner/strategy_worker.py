@@ -27,6 +27,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+env_path = Path(__file__).parent.parent.parent / '.env'
+if env_path.exists():
+    load_dotenv(env_path)
+    logging.info(f"Loaded environment variables from {env_path}")
+
 import backtrader as bt
 import pandas as pd
 
@@ -50,6 +57,9 @@ from src.runner.portfolio_coordinator import PortfolioCoordinator
 
 # Import TradersPost client (will adapt for multi-alpha)
 from src.runner.traderspost_client import TradersPostClient
+
+# Import Discord notifier
+from src.utils.discord_notifier import DiscordNotifier
 
 # Import ML model loader
 try:
@@ -105,6 +115,7 @@ class StrategyWorker:
         # Components
         self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
         self.traderspost_client: Optional[TradersPostClient] = None
+        self.discord_notifier: Optional[Any] = None  # Discord notifications
 
         # ML models per instrument
         self.ml_models: Dict[str, Any] = {}
@@ -196,6 +207,25 @@ class StrategyWorker:
         )
 
         logger.info(f"TradersPost client configured: {webhook_url[:50]}..." if webhook_url else "TradersPost client: NO WEBHOOK")
+
+        # Initialize Discord notifier for alerts and notifications
+        discord_url = self.strategy_config.discord_webhook_url
+        if discord_url:
+            try:
+                self.discord_notifier = DiscordNotifier(discord_url)
+                logger.info("Discord notifier initialized")
+                # Send startup notification
+                self.discord_notifier.send_system_alert(
+                    title="Strategy Worker Started",
+                    message=f"{self.strategy_name} initialized with {len(self.strategy_config.instruments)} instruments",
+                    alert_type="info"
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize Discord notifier: {e}")
+                self.discord_notifier = None
+        else:
+            logger.info("Discord notifier disabled: no webhook URL configured")
+            self.discord_notifier = None
 
     def _load_ml_models(self):
         """Load ML models for each instrument."""
@@ -957,8 +987,8 @@ class StrategyWorker:
                 logger.error(f"Failed to send order to TradersPost: {e}")
 
     def _on_trade(self, symbol: str, trade):
-        """Callback when trade is closed."""
-        # Send to TradersPost
+        """Callback when trade opens or closes."""
+        # Send to TradersPost (only for closed trades)
         if self.traderspost_client and trade.isclosed:
             try:
                 payload = {
@@ -975,14 +1005,63 @@ class StrategyWorker:
             except Exception as e:
                 logger.error(f"Failed to send trade to TradersPost: {e}")
 
+        # Send Discord notification for trade entry
+        if self.discord_notifier and trade.isopen:
+            try:
+                side = 'LONG' if trade.long else 'SHORT'
+                entry_price = trade.price
+
+                self.discord_notifier.send_trade_entry(
+                    symbol=symbol,
+                    side=side,
+                    price=entry_price,
+                    size=trade.size,
+                    strategy=self.strategy_name
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Discord trade entry notification: {e}")
+
+        # Send Discord notification for closed trades
+        if self.discord_notifier and trade.isclosed:
+            try:
+                side = 'LONG' if trade.long else 'SHORT'
+                entry_price = trade.price
+                exit_price = entry_price + (trade.pnl / trade.size) if trade.size else entry_price
+                duration = trade.barlen if hasattr(trade, 'barlen') else 0
+
+                self.discord_notifier.send_trade_exit(
+                    symbol=symbol,
+                    side=side,
+                    entry_price=entry_price,
+                    exit_price=exit_price,
+                    pnl=trade.pnl,
+                    duration_bars=duration,
+                    strategy=self.strategy_name
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Discord trade exit notification: {e}")
+
     def _on_emergency_exit(self, reason: str, context: Dict[str, Any]):
         """Callback when emergency exit triggered (e.g., daily stop loss hit)."""
         logger.critical(
             f"EMERGENCY EXIT triggered for '{self.strategy_name}': {reason} | Context: {context}"
         )
 
-        # Could send alert notification here
-        # For now, just log
+        # Send Discord emergency alert
+        if self.discord_notifier:
+            try:
+                self.discord_notifier.send_system_alert(
+                    title="🚨 PORTFOLIO STOP LOSS HIT",
+                    message=(
+                        f"Daily P&L: ${context.get('daily_pnl', 0):,.2f}\n"
+                        f"Stop Loss: ${context.get('daily_stop_loss', 0):,.2f}\n"
+                        f"Strategy: {self.strategy_name}\n"
+                        f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
+                    ),
+                    alert_type="error"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send Discord emergency alert: {e}")
 
     def _on_daily_summary(self):
         """Callback when trading day rolls over."""

@@ -52,6 +52,9 @@ class StrategyConfig:
     heartbeat_file: str = ""  # Path to heartbeat file
     heartbeat_interval: int = 30  # Heartbeat interval (seconds)
 
+    # Notifications
+    discord_webhook_url: str = ""  # Discord webhook URL for trade notifications
+
     def __post_init__(self):
         """Validate and set defaults after initialization."""
         if not self.heartbeat_file:
@@ -77,6 +80,7 @@ class StrategyConfig:
             'redis_port': self.redis_port,
             'heartbeat_file': self.heartbeat_file,
             'heartbeat_interval': self.heartbeat_interval,
+            'discord_webhook_url': self.discord_webhook_url,
         }
 
 
@@ -142,6 +146,7 @@ def validate_strategy_config(config_dict: Dict[str, Any]) -> StrategyConfig:
             historical_hourly_lookback_days=config_dict.get('historical_hourly_lookback_days', 15),
             heartbeat_file=config_dict.get('heartbeat_file', ''),
             heartbeat_interval=config_dict.get('heartbeat_interval', 30),
+            discord_webhook_url=config_dict.get('discord_webhook_url', ''),
         )
 
         logger.info(f"Validated configuration for strategy '{name}'")
