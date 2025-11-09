@@ -980,6 +980,12 @@ class StrategyWorker:
 
     def _on_order(self, symbol: str, order):
         """Callback when order is placed/executed."""
+        # Check killswitch before sending orders
+        killswitch = os.environ.get('POLICY_KILLSWITCH', 'false').lower()
+        if killswitch in ('true', '1', 'yes'):
+            logger.warning(f"⛔ KILLSWITCH ENABLED - Order not sent to TradersPost: {symbol}")
+            return
+
         # Send to TradersPost
         if self.traderspost_client and order.status in [order.Completed]:
             try:
