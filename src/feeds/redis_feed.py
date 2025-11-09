@@ -252,6 +252,51 @@ class RedisLiveData(bt.feeds.DataBase):
 
         return self._populate_lines(bar_data)
 
+    def extend_warmup(self, bars) -> int:
+        """
+        Append historical bars to be consumed before live data.
+
+        Args:
+            bars: Iterable of bar dictionaries or Databento records
+
+        Returns:
+            Number of bars appended
+        """
+        appended = 0
+        for bar in bars:
+            # Convert Databento record to dict if needed
+            if hasattr(bar, 'ts_event'):
+                # Databento OHLCV record
+                bar_data = {
+                    'timestamp': dt.datetime.fromtimestamp(bar.ts_event / 1e9, tz=dt.timezone.utc).isoformat(),
+                    'open': float(bar.open) / 1e9,  # Databento fixed-point prices
+                    'high': float(bar.high) / 1e9,
+                    'low': float(bar.low) / 1e9,
+                    'close': float(bar.close) / 1e9,
+                    'volume': float(bar.volume),
+                }
+            elif isinstance(bar, dict):
+                bar_data = bar
+            else:
+                logger.debug("Ignoring warmup payload of type %s", type(bar))
+                continue
+
+            self._warmup_bars.append(bar_data)
+            appended += 1
+
+        if appended:
+            logger.info(
+                "Buffered %d warmup bars for %s (%s)",
+                appended,
+                self.p.symbol,
+                self.p.timeframe_str
+            )
+        return appended
+
+    def warmup_backlog_size(self) -> int:
+        """Return the number of buffered warmup bars awaiting consumption."""
+        return len(self._warmup_bars)
+
     def _populate_lines(self, bar_data: Dict[str, Any]) -> bool:
         """
         Populate Backtrader lines from bar data.
@@ -358,6 +403,14 @@ class RedisResampledData(bt.feeds.DataBase):
         """Stop the resampled feed."""
         self._redis_feed.stop()
         super().stop()
+
+    def extend_warmup(self, bars) -> int:
+        """Append historical bars to underlying feed."""
+        return self._redis_feed.extend_warmup(bars)
+
+    def warmup_backlog_size(self) -> int:
+        """Return the number of buffered warmup bars awaiting consumption."""
+        return self._redis_feed.warmup_backlog_size()
 
     def _load(self) -> Optional[bool]:
         """Load next bar by delegating to Redis feed."""

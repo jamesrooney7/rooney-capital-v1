@@ -101,6 +101,9 @@ class StrategyWorker:
         # ML models per instrument
         self.ml_models: Dict[str, Any] = {}
 
+        # Data feeds (store references for warmup)
+        self.data_feeds: Dict[str, Any] = {}  # feed_name -> feed object
+
         # Heartbeat
         self.heartbeat_file = self.strategy_config.heartbeat_file
         self.heartbeat_interval = self.strategy_config.heartbeat_interval
@@ -131,6 +134,10 @@ class StrategyWorker:
 
         # Create Backtrader Cerebro
         self._setup_cerebro()
+
+        # Load historical data for warmup
+        if self.strategy_config.load_historical_warmup:
+            self._load_historical_warmup()
 
         logger.info("Strategy worker setup complete")
 
@@ -223,6 +230,7 @@ class StrategyWorker:
                 name=f"{symbol}_minute"
             )
             self.cerebro.adddata(data_minute, name=f"{symbol}_minute")
+            self.data_feeds[f"{symbol}_minute"] = data_minute
 
             # Add hourly resampled feed
             data_hourly = RedisResampledData(
@@ -233,6 +241,7 @@ class StrategyWorker:
                 name=f"{symbol}_hour"
             )
             self.cerebro.adddata(data_hourly, name=f"{symbol}_hour")
+            self.data_feeds[f"{symbol}_hour"] = data_hourly
 
             # Add daily resampled feed
             data_daily = RedisResampledData(
@@ -243,6 +252,7 @@ class StrategyWorker:
                 name=f"{symbol}_day"
             )
             self.cerebro.adddata(data_daily, name=f"{symbol}_day")
+            self.data_feeds[f"{symbol}_day"] = data_daily
 
             logger.info(f"Added Redis feeds for {symbol} (minute/hourly/daily)")
 
@@ -263,6 +273,7 @@ class StrategyWorker:
                 name=f"{symbol}_hour"
             )
             self.cerebro.adddata(data_hourly_ref, name=f"{symbol}_hour")
+            self.data_feeds[f"{symbol}_hour"] = data_hourly_ref
 
             # Add daily reference feed
             data_daily_ref = RedisResampledData(
@@ -273,6 +284,7 @@ class StrategyWorker:
                 name=f"{symbol}_day"
             )
             self.cerebro.adddata(data_daily_ref, name=f"{symbol}_day")
+            self.data_feeds[f"{symbol}_day"] = data_daily_ref
 
         logger.info(f"Added reference feeds for {len(self.config.instruments) - len(self.strategy_config.instruments)} symbols")
 
@@ -287,6 +299,7 @@ class StrategyWorker:
                 name="TLT_day"
             )
             self.cerebro.adddata(data_tlt, name="TLT_day")
+            self.data_feeds["TLT_day"] = data_tlt
             logger.info("Added reference feed: ZB as TLT_day")
 
     def _add_strategy(self):
@@ -322,6 +335,147 @@ class StrategyWorker:
         self.cerebro.addstrategy(strategy_class, **strategy_params)
 
         logger.info(f"Added strategy '{self.strategy_name}' for {primary_symbol}")
+
+    def _load_historical_warmup(self):
+        """Load historical data from Databento and populate feeds for indicator warmup."""
+        try:
+            # Import databento and historical loader
+            import databento as db
+            from datetime import timedelta, timezone
+
+            logger.info("Loading historical data for warmup...")
+
+            # Get Databento API key from environment
+            api_key = os.environ.get('DATABENTO_API_KEY')
+            if not api_key:
+                logger.warning("DATABENTO_API_KEY not found, skipping warmup")
+                return
+
+            # Get dataset from first instrument (assuming all use same dataset)
+            dataset = "GLBX.MDP3"  # Default CME dataset
+            if self.strategy_config.instruments:
+                first_symbol = self.strategy_config.instruments[0]
+                instr_config = self.config.get_instrument(first_symbol)
+                if instr_config:
+                    dataset = getattr(instr_config, 'databento_dataset', 'GLBX.MDP3')
+
+            # Create Databento Historical client
+            client = db.Historical(api_key)
+
+            # Collect all symbols we need warmup data for
+            all_symbols = set()
+
+            # Traded instruments need all timeframes
+            for symbol in self.strategy_config.instruments:
+                all_symbols.add(symbol)
+
+            # Reference instruments
+            for symbol in self.config.instruments.keys():
+                if symbol not in self.strategy_config.instruments:
+                    all_symbols.add(symbol)
+
+            logger.info(f"Loading warmup data for {len(all_symbols)} symbols...")
+
+            # Load daily bars first (252 trading days)
+            daily_lookback = self.strategy_config.historical_lookback_days
+            end = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+            start = end - timedelta(days=daily_lookback)
+
+            logger.info(f"Loading daily bars from {start.date()} to {end.date()}...")
+
+            for symbol in all_symbols:
+                try:
+                    # Get instrument product ID
+                    product_id = f"{symbol}.FUT"
+                    instr_config = self.config.get_instrument(symbol)
+                    if instr_config:
+                        product_id = getattr(instr_config, 'databento_product_id', product_id)
+
+                    # Request daily OHLCV
+                    data = client.timeseries.get_range(
+                        dataset=dataset,
+                        schema="ohlcv-1d",
+                        symbols=[product_id],
+                        start=start,
+                        end=end,
+                        stype_in="parent"
+                    )
+
+                    if data is not None and len(data) > 0:
+                        # Find the daily feed for this symbol
+                        feed_name = f"{symbol}_day"
+                        if symbol == "ZB" and "TLT_day" in self.data_feeds:
+                            # Special case: ZB data goes to TLT_day feed
+                            feed_name = "TLT_day"
+
+                        if feed_name in self.data_feeds:
+                            feed = self.data_feeds[feed_name]
+                            bars_added = feed.extend_warmup(data)
+                            logger.info(f"  {symbol}: loaded {bars_added} daily bars")
+                        else:
+                            logger.debug(f"  {symbol}: no daily feed found")
+                    else:
+                        logger.debug(f"  {symbol}: no daily data available")
+
+                except Exception as e:
+                    logger.warning(f"Failed to load daily warmup for {symbol}: {e}")
+
+            # Load hourly bars (15 calendar days)
+            hourly_lookback = self.strategy_config.historical_hourly_lookback_days
+            end_hourly = datetime.now(tz=timezone.utc) - timedelta(hours=24)
+            start_hourly = end_hourly - timedelta(days=hourly_lookback)
+
+            logger.info(f"Loading hourly bars from {start_hourly.date()} to {end_hourly.date()}...")
+
+            for symbol in all_symbols:
+                try:
+                    # Get instrument product ID
+                    product_id = f"{symbol}.FUT"
+                    instr_config = self.config.get_instrument(symbol)
+                    if instr_config:
+                        product_id = getattr(instr_config, 'databento_product_id', product_id)
+
+                    # Request hourly OHLCV (try 1h, fall back to 1min)
+                    data = None
+                    for schema in ["ohlcv-1h", "ohlcv-1min"]:
+                        try:
+                            data = client.timeseries.get_range(
+                                dataset=dataset,
+                                schema=schema,
+                                symbols=[product_id],
+                                start=start_hourly,
+                                end=end_hourly,
+                                stype_in="parent"
+                            )
+                            if data is not None and len(data) > 0:
+                                if schema == "ohlcv-1min":
+                                    logger.debug(f"  {symbol}: using 1min schema for hourly warmup")
+                                break
+                        except Exception as e:
+                            logger.debug(f"  {symbol}: {schema} failed: {e}")
+                            continue
+
+                    if data is not None and len(data) > 0:
+                        # Find the hourly feed for this symbol
+                        feed_name = f"{symbol}_hour"
+                        if feed_name in self.data_feeds:
+                            feed = self.data_feeds[feed_name]
+                            bars_added = feed.extend_warmup(data)
+                            logger.info(f"  {symbol}: loaded {bars_added} hourly bars")
+                        else:
+                            logger.debug(f"  {symbol}: no hourly feed found")
+                    else:
+                        logger.debug(f"  {symbol}: no hourly data available")
+
+                except Exception as e:
+                    logger.warning(f"Failed to load hourly warmup for {symbol}: {e}")
+
+            logger.info("Historical warmup complete")
+
+        except ImportError:
+            logger.error("databento module not found, cannot load warmup data")
+        except Exception as e:
+            logger.error(f"Failed to load historical warmup: {e}", exc_info=True)
 
     def _on_order(self, symbol: str, order):
         """Callback when order is placed/executed."""

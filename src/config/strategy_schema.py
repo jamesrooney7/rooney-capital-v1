@@ -43,6 +43,11 @@ class StrategyConfig:
     redis_host: str = "localhost"
     redis_port: int = 6379
 
+    # Historical data warmup
+    load_historical_warmup: bool = True  # Load historical data for indicator warmup
+    historical_lookback_days: int = 252  # Daily bars lookback (trading days ~= 1 year)
+    historical_hourly_lookback_days: int = 15  # Hourly bars lookback (calendar days)
+
     # Monitoring
     heartbeat_file: str = ""  # Path to heartbeat file
     heartbeat_interval: int = 30  # Heartbeat interval (seconds)
@@ -132,6 +137,9 @@ def validate_strategy_config(config_dict: Dict[str, Any]) -> StrategyConfig:
             max_bars_in_trade=config_dict.get('max_bars_in_trade', 100),
             redis_host=config_dict.get('redis_host', 'localhost'),
             redis_port=config_dict.get('redis_port', 6379),
+            load_historical_warmup=config_dict.get('load_historical_warmup', True),
+            historical_lookback_days=config_dict.get('historical_lookback_days', 252),
+            historical_hourly_lookback_days=config_dict.get('historical_hourly_lookback_days', 15),
             heartbeat_file=config_dict.get('heartbeat_file', ''),
             heartbeat_interval=config_dict.get('heartbeat_interval', 30),
         )
