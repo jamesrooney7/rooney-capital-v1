@@ -39,6 +39,9 @@ from src.feeds import RedisLiveData, RedisResampledData
 # Import Bar dataclass from legacy databento_bridge
 from src.runner.databento_bridge import Bar
 
+# Import contract map for resolving active contracts
+from src.runner.contract_map import ContractMap
+
 # Import strategy factory
 from src.strategy.strategy_factory import load_strategy, create_strategy_config
 
@@ -123,6 +126,19 @@ class StrategyWorker:
         self.warmup_batch_size = getattr(self.strategy_config, 'historical_warmup_batch_size', 5000)
         self.warmup_queue_soft_limit = getattr(self.strategy_config, 'historical_warmup_queue_soft_limit', 20000)
         self.warmup_wait_log_interval = 5.0  # Log every 5 seconds when waiting
+
+        # Load contract map for resolving symbols to active contracts
+        # This prevents downloading ALL contracts when requesting historical data
+        contract_map_path = getattr(config, 'contract_map_path', 'Data/Databento_contract_map.yml')
+        self.contract_map: Optional[ContractMap] = None
+        try:
+            if Path(contract_map_path).exists():
+                self.contract_map = ContractMap.load(contract_map_path)
+                logger.info(f"Loaded contract map from {contract_map_path}")
+            else:
+                logger.warning(f"Contract map not found at {contract_map_path}, will use parent symbols")
+        except Exception as e:
+            logger.warning(f"Failed to load contract map: {e}, will use parent symbols")
 
         logger.info(
             f"StrategyWorker initialized for '{strategy_name}' "
@@ -669,11 +685,35 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading daily warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Get instrument product ID
-                    product_id = f"{symbol}.FUT"
-                    instr_config = self.config.get_instrument(symbol)
-                    if instr_config:
-                        product_id = getattr(instr_config, 'databento_product_id', product_id)
+                    # Resolve symbol to specific contract codes (matches legacy historical_loader.py)
+                    request_symbols: List[str] = []
+                    stype_in = "parent"  # Default
+
+                    if self.contract_map is not None:
+                        # Try to get subscription codes first (preferred)
+                        subscription = self.contract_map.subscription_for(symbol)
+                        if subscription and subscription.codes:
+                            request_symbols.extend(subscription.codes)
+                            stype_in = subscription.stype_in
+                        # Otherwise try to get active contract
+                        elif subscription and subscription.stype_in == "product_id":
+                            try:
+                                contract = self.contract_map.active_contract(symbol)
+                                if contract and contract.databento.product_id:
+                                    request_symbols.append(contract.databento.product_id)
+                                    stype_in = "product_id"
+                            except KeyError:
+                                pass  # Fall through to parent
+
+                    # Fallback: use parent symbol if no contract map resolution
+                    if not request_symbols:
+                        instr_config = self.config.get_instrument(symbol)
+                        if instr_config:
+                            product_id = getattr(instr_config, 'databento_product_id', f"{symbol}.FUT")
+                        else:
+                            product_id = f"{symbol}.FUT"
+                        request_symbols = [product_id]
+                        stype_in = "parent"
 
                     # Try schemas in order until one works
                     data = None
@@ -682,10 +722,10 @@ class StrategyWorker:
                             data = client.timeseries.get_range(
                                 dataset=dataset,
                                 schema=schema,
-                                symbols=[product_id],
+                                symbols=request_symbols,
                                 start=start,
                                 end=end,
-                                stype_in="parent"
+                                stype_in=stype_in
                             )
                             if data is not None and len(data) > 0:
                                 logger.debug(f"  {symbol}: using schema {schema} for daily warmup")
@@ -770,11 +810,35 @@ class StrategyWorker:
                 symbols_completed += 1
                 logger.info(f"Loading hourly warmup for {symbol} ({symbols_completed}/{len(all_symbols)})...")
                 try:
-                    # Get instrument product ID
-                    product_id = f"{symbol}.FUT"
-                    instr_config = self.config.get_instrument(symbol)
-                    if instr_config:
-                        product_id = getattr(instr_config, 'databento_product_id', product_id)
+                    # Resolve symbol to specific contract codes (matches legacy historical_loader.py)
+                    request_symbols: List[str] = []
+                    stype_in = "parent"  # Default
+
+                    if self.contract_map is not None:
+                        # Try to get subscription codes first (preferred)
+                        subscription = self.contract_map.subscription_for(symbol)
+                        if subscription and subscription.codes:
+                            request_symbols.extend(subscription.codes)
+                            stype_in = subscription.stype_in
+                        # Otherwise try to get active contract
+                        elif subscription and subscription.stype_in == "product_id":
+                            try:
+                                contract = self.contract_map.active_contract(symbol)
+                                if contract and contract.databento.product_id:
+                                    request_symbols.append(contract.databento.product_id)
+                                    stype_in = "product_id"
+                            except KeyError:
+                                pass  # Fall through to parent
+
+                    # Fallback: use parent symbol if no contract map resolution
+                    if not request_symbols:
+                        instr_config = self.config.get_instrument(symbol)
+                        if instr_config:
+                            product_id = getattr(instr_config, 'databento_product_id', f"{symbol}.FUT")
+                        else:
+                            product_id = f"{symbol}.FUT"
+                        request_symbols = [product_id]
+                        stype_in = "parent"
 
                     # Try schemas in order until one works
                     data = None
@@ -783,10 +847,10 @@ class StrategyWorker:
                             data = client.timeseries.get_range(
                                 dataset=dataset,
                                 schema=schema,
-                                symbols=[product_id],
+                                symbols=request_symbols,
                                 start=start_hourly,
                                 end=end_hourly,
-                                stype_in="parent"
+                                stype_in=stype_in
                             )
                             if data is not None and len(data) > 0:
                                 logger.debug(f"  {symbol}: using schema {schema} for hourly warmup")
