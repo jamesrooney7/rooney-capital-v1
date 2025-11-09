@@ -376,12 +376,16 @@ class StrategyWorker:
 
             logger.info(f"Loading warmup data for {len(all_symbols)} symbols...")
 
+            # Schema preferences (match legacy system)
+            schema_preferences = ("ohlcv-1min", "ohlcv-1s", "mbp-1")
+
             # Load daily bars first (252 trading days)
+            # NOTE: We request 1-minute data which the feeds will aggregate to daily
             daily_lookback = self.strategy_config.historical_lookback_days
             end = datetime.now(tz=timezone.utc) - timedelta(hours=24)
             start = end - timedelta(days=daily_lookback)
 
-            logger.info(f"Loading daily bars from {start.date()} to {end.date()}...")
+            logger.info(f"Loading daily warmup data ({daily_lookback} days)...")
 
             for symbol in all_symbols:
                 try:
@@ -391,15 +395,24 @@ class StrategyWorker:
                     if instr_config:
                         product_id = getattr(instr_config, 'databento_product_id', product_id)
 
-                    # Request daily OHLCV
-                    data = client.timeseries.get_range(
-                        dataset=dataset,
-                        schema="ohlcv-1d",
-                        symbols=[product_id],
-                        start=start,
-                        end=end,
-                        stype_in="parent"
-                    )
+                    # Try schemas in order until one works
+                    data = None
+                    for schema in schema_preferences:
+                        try:
+                            data = client.timeseries.get_range(
+                                dataset=dataset,
+                                schema=schema,
+                                symbols=[product_id],
+                                start=start,
+                                end=end,
+                                stype_in="parent"
+                            )
+                            if data is not None and len(data) > 0:
+                                logger.debug(f"  {symbol}: using schema {schema} for daily warmup")
+                                break
+                        except Exception as e:
+                            logger.debug(f"  {symbol}: schema {schema} failed: {e}")
+                            continue
 
                     if data is not None and len(data) > 0:
                         # Find the daily feed for this symbol
@@ -411,7 +424,7 @@ class StrategyWorker:
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
                             bars_added = feed.extend_warmup(data)
-                            logger.info(f"  {symbol}: loaded {bars_added} daily bars")
+                            logger.info(f"  {symbol}: loaded {bars_added} daily warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no daily feed found")
                     else:
@@ -425,7 +438,7 @@ class StrategyWorker:
             end_hourly = datetime.now(tz=timezone.utc) - timedelta(hours=24)
             start_hourly = end_hourly - timedelta(days=hourly_lookback)
 
-            logger.info(f"Loading hourly bars from {start_hourly.date()} to {end_hourly.date()}...")
+            logger.info(f"Loading hourly warmup data ({hourly_lookback} days)...")
 
             for symbol in all_symbols:
                 try:
@@ -435,9 +448,9 @@ class StrategyWorker:
                     if instr_config:
                         product_id = getattr(instr_config, 'databento_product_id', product_id)
 
-                    # Request hourly OHLCV (try 1h, fall back to 1min)
+                    # Try schemas in order until one works
                     data = None
-                    for schema in ["ohlcv-1h", "ohlcv-1min"]:
+                    for schema in schema_preferences:
                         try:
                             data = client.timeseries.get_range(
                                 dataset=dataset,
@@ -448,11 +461,10 @@ class StrategyWorker:
                                 stype_in="parent"
                             )
                             if data is not None and len(data) > 0:
-                                if schema == "ohlcv-1min":
-                                    logger.debug(f"  {symbol}: using 1min schema for hourly warmup")
+                                logger.debug(f"  {symbol}: using schema {schema} for hourly warmup")
                                 break
                         except Exception as e:
-                            logger.debug(f"  {symbol}: {schema} failed: {e}")
+                            logger.debug(f"  {symbol}: schema {schema} failed: {e}")
                             continue
 
                     if data is not None and len(data) > 0:
@@ -461,7 +473,7 @@ class StrategyWorker:
                         if feed_name in self.data_feeds:
                             feed = self.data_feeds[feed_name]
                             bars_added = feed.extend_warmup(data)
-                            logger.info(f"  {symbol}: loaded {bars_added} hourly bars")
+                            logger.info(f"  {symbol}: loaded {bars_added} hourly warmup bars")
                         else:
                             logger.debug(f"  {symbol}: no hourly feed found")
                     else:
