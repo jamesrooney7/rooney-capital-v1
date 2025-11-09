@@ -170,10 +170,10 @@ data_hub_main.py (shared)                strategy_worker.py (per strategy)
 - Source feed passed as parameter
 
 **New:**
-- `RedisLiveData` subscribes to Redis channel
-- `RedisResampledData` wraps RedisLiveData (no aggregation)
-- Data hub pre-aggregates everything
-- **Difference:** Resampling happens in data hub, not in feed
+- `RedisLiveData` subscribes to Redis channel (1-minute only)
+- `RedisResampledData` aggregates minute bars from source feed
+- Source feed passed as parameter
+- **✅ SAME:** Both aggregate hourly/daily in workers from minute source feed
 
 ### 4. **Configuration** 🔄
 **Legacy:**

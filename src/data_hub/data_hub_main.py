@@ -33,12 +33,13 @@ logger = logging.getLogger(__name__)
 
 class BarAggregator:
     """
-    Aggregates trade ticks into OHLCV bars at multiple timeframes.
+    Aggregates trade ticks into 1-minute OHLCV bars.
 
     Responsibilities:
     - Collect ticks and build 1-minute bars
-    - Resample into hourly and daily bars
-    - Emit completed bars for publishing
+    - Emit completed minute bars for publishing to Redis
+
+    Note: Workers resample minute bars to hourly/daily themselves (matches legacy behavior)
     """
 
     def __init__(self, on_bar_completed):
@@ -50,15 +51,11 @@ class BarAggregator:
         """
         self.on_bar_completed = on_bar_completed
 
-        # Track current bars being built
+        # Track current minute bars being built
         self._minute_bars: Dict[str, Dict[str, Any]] = {}
-        self._hourly_bars: Dict[str, Dict[str, Any]] = {}
-        self._daily_bars: Dict[str, Dict[str, Any]] = {}
 
         # Track last emitted timestamps
         self._last_minute: Dict[str, dt.datetime] = {}
-        self._last_hour: Dict[str, dt.datetime] = {}
-        self._last_day: Dict[str, dt.datetime] = {}
 
         # Track contract symbols
         self._contract_symbols: Dict[str, str] = {}  # root -> contract symbol
@@ -75,7 +72,7 @@ class BarAggregator:
         contract_symbol: Optional[str] = None
     ) -> None:
         """
-        Apply a trade tick to build bars.
+        Apply a trade tick to build minute bars.
 
         Args:
             symbol: Root symbol (e.g., 'ES')
@@ -99,41 +96,6 @@ class BarAggregator:
                 price,
                 size,
                 '1min',
-                instrument_id,
-                contract_symbol
-            )
-
-            # Build hourly bar
-            hour = timestamp.replace(minute=0, second=0, microsecond=0)
-            self._update_bar(
-                self._hourly_bars,
-                symbol,
-                hour,
-                price,
-                size,
-                'hourly',
-                instrument_id,
-                contract_symbol
-            )
-
-            # Build daily bar using SESSION boundaries (23:00 UTC session end)
-            # CME futures session runs from 23:00 to 23:00 next day
-            # This matches the legacy databento_bridge.py ResampledLiveData behavior
-            if timestamp.hour >= 23:
-                # After 23:00, belongs to today's session
-                session_day = timestamp.replace(hour=23, minute=0, second=0, microsecond=0)
-            else:
-                # Before 23:00, belongs to previous session (started yesterday 23:00)
-                from datetime import timedelta
-                session_day = (timestamp - timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
-
-            self._update_bar(
-                self._daily_bars,
-                symbol,
-                session_day,
-                price,
-                size,
-                'daily',
                 instrument_id,
                 contract_symbol
             )
@@ -206,7 +168,7 @@ class BarAggregator:
             del bars_dict[prev_key]
 
     def _emit_bar(self, bar: Dict[str, Any]) -> None:
-        """Emit a completed bar via callback."""
+        """Emit a completed minute bar via callback."""
         symbol = bar['symbol']
         timeframe = bar['timeframe']
 
@@ -228,21 +190,13 @@ class BarAggregator:
         self.on_bar_completed(symbol, timeframe, bar_data)
 
         # Update last emitted timestamp
-        if timeframe == '1min':
-            self._last_minute[symbol] = bar['timestamp']
-        elif timeframe == 'hourly':
-            self._last_hour[symbol] = bar['timestamp']
-        elif timeframe == 'daily':
-            self._last_day[symbol] = bar['timestamp']
+        self._last_minute[symbol] = bar['timestamp']
 
     def flush(self) -> None:
-        """Flush all pending bars (called on shutdown)."""
+        """Flush all pending minute bars (called on shutdown)."""
         with self._lock:
-            # Emit all pending bars
-            all_bars = []
-            all_bars.extend(self._minute_bars.values())
-            all_bars.extend(self._hourly_bars.values())
-            all_bars.extend(self._daily_bars.values())
+            # Emit all pending minute bars
+            all_bars = list(self._minute_bars.values())
 
             # Sort by timestamp
             all_bars.sort(key=lambda b: (b['symbol'], b['timestamp']))
@@ -252,8 +206,6 @@ class BarAggregator:
 
             # Clear all
             self._minute_bars.clear()
-            self._hourly_bars.clear()
-            self._daily_bars.clear()
 
 
 class DataHub:

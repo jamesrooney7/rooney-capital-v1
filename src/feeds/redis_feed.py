@@ -23,39 +23,30 @@ class RedisLiveData(bt.feeds.DataBase):
     """
     Backtrader live feed powered by Redis pub/sub.
 
-    Subscribes to Redis channels: market:{symbol}:{timeframe}
-    Receives bars published by the data hub.
+    Subscribes to Redis channels: market:{symbol}:1min
+    Receives 1-minute bars published by the data hub.
     """
 
     params = (
         ("symbol", None),  # Trading symbol (e.g., 'ES')
-        ("timeframe_str", "1min"),  # Timeframe string ('1min', 'hourly', 'daily')
         ("redis_host", "localhost"),
         ("redis_port", 6379),
         ("redis_db", 0),
         ("qcheck", 0.5),  # Queue check interval
-        ("warmup_bars", 100),  # Number of bars to load from cache on startup
     )
 
     def __init__(self, **kwargs):
-        # Set Backtrader timeframe from timeframe_str
-        timeframe_str = kwargs.get("timeframe_str", "1min")
-        if timeframe_str == "1min":
-            kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
-            kwargs.setdefault("compression", 1)
-        elif timeframe_str == "hourly":
-            kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
-            kwargs.setdefault("compression", 60)
-        elif timeframe_str == "daily":
-            kwargs.setdefault("timeframe", bt.TimeFrame.Days)
-            kwargs.setdefault("compression", 1)
+        # Set Backtrader timeframe to 1-minute
+        kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
+        kwargs.setdefault("compression", 1)
 
         super().__init__(**kwargs)
 
         if not self.p.symbol:
             raise ValueError("symbol parameter is required")
 
-        self.channel = f"market:{self.p.symbol}:{self.p.timeframe_str}"
+        # Subscribe to 1-minute channel only (workers resample to hourly/daily)
+        self.channel = f"market:{self.p.symbol}:1min"
 
         # Redis clients (need separate for pub/sub and regular operations)
         self.redis_pubsub_client: Optional[redis.Redis] = None
@@ -76,9 +67,8 @@ class RedisLiveData(bt.feeds.DataBase):
         self._qcheck: Optional[float] = None  # Will be set based on warmup state
 
         logger.info(
-            "Initialized RedisLiveData for %s (%s) on channel %s",
+            "Initialized RedisLiveData for %s on channel %s",
             self.p.symbol,
-            self.p.timeframe_str,
             self.channel
         )
 
@@ -125,7 +115,7 @@ class RedisLiveData(bt.feeds.DataBase):
         # Close connections
         if self.redis_pubsub_client:
             try:
-                self.redis_pubsub_client.close()
+                self.redis_pubssub_client.close()
             except Exception as e:
                 logger.debug(f"Error closing pubsub client: {e}")
 
@@ -168,7 +158,7 @@ class RedisLiveData(bt.feeds.DataBase):
     def _load_warmup_from_cache(self):
         """Load latest cached bar from Redis for warmup."""
         try:
-            key = f"market:{self.p.symbol}:{self.p.timeframe_str}:latest"
+            key = f"market:{self.p.symbol}:1min:latest"
             cached_data = self.redis_cache_client.get(key)
 
             if cached_data:
@@ -286,10 +276,9 @@ class RedisLiveData(bt.feeds.DataBase):
 
         if appended:
             logger.info(
-                "Buffered %d warmup bars for %s (%s)",
+                "Buffered %d warmup bars for %s (1min)",
                 appended,
-                self.p.symbol,
-                self.p.timeframe_str
+                self.p.symbol
             )
         return appended
 
@@ -351,78 +340,218 @@ class RedisLiveData(bt.feeds.DataBase):
 
 class RedisResampledData(bt.feeds.DataBase):
     """
-    Resampled feed that reads from minute Redis feed and aggregates to hourly/daily.
+    Hybrid feed that aggregates minute bars into hourly/daily.
 
-    This is a simplified version - for now, we'll just subscribe to the
-    pre-aggregated hourly/daily channels published by the data hub.
+    This feed operates in two modes:
+    1. Warmup mode: Consumes pre-aggregated hourly/daily bars from warmup queue
+    2. Live mode: Aggregates minute bars from source feed into hourly/daily bars
 
-    NOTE: This class delegates to RedisLiveData internally, which is redundant
-    since RedisLiveData already supports all timeframes directly. Consider using
-    RedisLiveData(timeframe_str='hourly') instead of RedisResampledData.
-    This class may be deprecated in future versions.
+    This matches the legacy ResampledLiveData behavior, allowing us to:
+    - Load pre-aggregated hourly/daily bars during warmup (fast)
+    - Seamlessly switch to aggregating live minute bars (correct)
+    - Preserve full OHLC data for indicators
     """
 
     params = (
         ("symbol", None),
-        ("timeframe_str", "hourly"),  # 'hourly' or 'daily'
-        ("redis_host", "localhost"),
-        ("redis_port", 6379),
-        ("redis_db", 0),
+        ("source_feed", None),  # The minute-resolution feed to aggregate from
+        ("session_end_hour", 23),  # Hour when daily bar closes (UTC)
+        ("session_end_minute", 0),
+        ("bar_interval_minutes", 1440),  # 1440=daily, 60=hourly
         ("qcheck", 0.5),
     )
 
     def __init__(self, **kwargs):
-        # Set Backtrader timeframe before calling parent
-        timeframe_str = kwargs.get("timeframe_str", "hourly")
-        if timeframe_str == "hourly":
-            kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
-            kwargs.setdefault("compression", 60)
-        elif timeframe_str == "daily":
+        # Set Backtrader timeframe based on interval
+        interval = kwargs.get("bar_interval_minutes", 1440)
+        if interval >= 1440:
             kwargs.setdefault("timeframe", bt.TimeFrame.Days)
             kwargs.setdefault("compression", 1)
+        else:
+            kwargs.setdefault("timeframe", bt.TimeFrame.Minutes)
+            kwargs.setdefault("compression", interval)
 
         super().__init__(**kwargs)
 
-        # After super().__init__, params are available as self.p.*
-        # Create underlying RedisLiveData feed with params from self.p
-        self._redis_feed = RedisLiveData(
-            symbol=self.p.symbol,
-            timeframe_str=self.p.timeframe_str,
-            redis_host=self.p.redis_host,
-            redis_port=self.p.redis_port,
-            redis_db=self.p.redis_db,
-            qcheck=self.p.qcheck
-        )
+        self._warmup_bars = collections.deque()
+        self._current_bar: Optional[Dict[str, Any]] = None
+        self._last_bar_timestamp: Optional[dt.datetime] = None
+        self._stopped = False
 
     def start(self):
         """Start the resampled feed."""
         super().start()
-        self._redis_feed.start()
+        logger.info(
+            "Starting RedisResampledData for %s (%d-min bars)",
+            self.p.symbol,
+            self.p.bar_interval_minutes
+        )
 
     def stop(self):
         """Stop the resampled feed."""
-        self._redis_feed.stop()
+        logger.info("Stopping RedisResampledData for %s", self.p.symbol)
         super().stop()
-
-    def extend_warmup(self, bars) -> int:
-        """Append historical bars to underlying feed."""
-        return self._redis_feed.extend_warmup(bars)
-
-    def warmup_backlog_size(self) -> int:
-        """Return the number of buffered warmup bars awaiting consumption."""
-        return self._redis_feed.warmup_backlog_size()
+        self._stopped = True
 
     def _load(self) -> Optional[bool]:
-        """Load next bar by delegating to Redis feed."""
-        result = self._redis_feed._load()
+        """Load next bar (from warmup queue or by aggregating from source)."""
+        if self._stopped:
+            return False
 
-        if result is True:
-            # Copy data from redis feed to our lines
-            self.lines.datetime[0] = self._redis_feed.lines.datetime[0]
-            self.lines.open[0] = self._redis_feed.lines.open[0]
-            self.lines.high[0] = self._redis_feed.lines.high[0]
-            self.lines.low[0] = self._redis_feed.lines.low[0]
-            self.lines.close[0] = self._redis_feed.lines.close[0]
-            self.lines.volume[0] = self._redis_feed.lines.volume[0]
+        # Mode 1: Warmup - drain pre-aggregated bars from queue
+        if self._warmup_bars:
+            self._qcheck = 0.0  # Fast warmup
+            bar_data = self._warmup_bars.popleft()
+            return self._populate_lines_from_dict(bar_data)
 
-        return result
+        # Mode 2: Live - aggregate minute bars from source feed
+        if not self._qcheck:
+            self._qcheck = self.p.qcheck or 0.5  # Restore normal qcheck
+
+        if self.p.source_feed is None:
+            return None  # No source feed configured
+
+        # Try to aggregate minute bars into our timeframe
+        return self._aggregate_from_source()
+
+    def _aggregate_from_source(self) -> Optional[bool]:
+        """Aggregate minute bars from source feed into hourly/daily bars."""
+        source = self.p.source_feed
+
+        # Check if source has data available
+        if len(source) == 0:
+            return None
+
+        # Get current minute bar from source
+        minute_timestamp = bt.num2date(source.datetime[0])
+
+        # Determine if this minute bar belongs to a new aggregation period
+        if self._should_start_new_bar(minute_timestamp):
+            # Close and emit the previous bar if it exists
+            if self._current_bar is not None:
+                result = self._populate_lines_from_dict(self._current_bar)
+                self._current_bar = None
+                self._last_bar_timestamp = minute_timestamp
+                return result
+            self._last_bar_timestamp = minute_timestamp
+
+        # Aggregate this minute bar into current bar
+        self._aggregate_minute_bar(
+            timestamp=minute_timestamp,
+            open_price=source.open[0],
+            high_price=source.high[0],
+            low_price=source.low[0],
+            close_price=source.close[0],
+            volume=source.volume[0]
+        )
+
+        # Check if we should close this bar (end of period)
+        if self._is_bar_complete(minute_timestamp):
+            result = self._populate_lines_from_dict(self._current_bar)
+            self._current_bar = None
+            return result
+
+        return None  # Bar still building, not ready to emit
+
+    def _should_start_new_bar(self, timestamp: dt.datetime) -> bool:
+        """Check if this timestamp starts a new aggregation period."""
+        if self._current_bar is None:
+            return True  # No current bar, start fresh
+
+        current_start = self._current_bar['timestamp']
+
+        if self.p.bar_interval_minutes >= 1440:
+            # Daily bars: new bar if different day
+            return timestamp.date() != current_start.date()
+        else:
+            # Hourly bars: new bar if crossed hour boundary
+            hours_diff = (timestamp - current_start).total_seconds() / 3600
+            return hours_diff >= (self.p.bar_interval_minutes / 60)
+
+    def _is_bar_complete(self, timestamp: dt.datetime) -> bool:
+        """Check if current bar is complete and should be emitted."""
+        if self.p.bar_interval_minutes >= 1440:
+            # Daily bar: complete at session end (23:00 UTC)
+            return (timestamp.hour == self.p.session_end_hour and
+                    timestamp.minute == self.p.session_end_minute)
+        else:
+            # Hourly bar: complete at top of next hour
+            return timestamp.minute == 0
+
+    def _aggregate_minute_bar(
+        self,
+        timestamp: dt.datetime,
+        open_price: float,
+        high_price: float,
+        low_price: float,
+        close_price: float,
+        volume: float
+    ) -> None:
+        """Add minute bar data to current aggregated bar."""
+        if self._current_bar is None:
+            # Start new bar
+            self._current_bar = {
+                'timestamp': timestamp,
+                'open': open_price,
+                'high': high_price,
+                'low': low_price,
+                'close': close_price,
+                'volume': volume
+            }
+        else:
+            # Update existing bar
+            self._current_bar['high'] = max(self._current_bar['high'], high_price)
+            self._current_bar['low'] = min(self._current_bar['low'], low_price)
+            self._current_bar['close'] = close_price
+            self._current_bar['volume'] += volume
+            self._current_bar['timestamp'] = timestamp  # Use latest timestamp
+
+    def _populate_lines_from_dict(self, bar_dict: Dict[str, Any]) -> bool:
+        """Populate feed lines from a dictionary."""
+        self.lines.datetime[0] = bt.date2num(bar_dict['timestamp'])
+        self.lines.open[0] = bar_dict['open']
+        self.lines.high[0] = bar_dict['high']
+        self.lines.low[0] = bar_dict['low']
+        self.lines.close[0] = bar_dict['close']
+        self.lines.volume[0] = bar_dict['volume']
+        return True
+
+    def extend_warmup(self, bars) -> int:
+        """
+        Add pre-aggregated bars for warmup (called before live trading).
+
+        Args:
+            bars: Iterable of Bar objects (from databento warmup)
+
+        Returns:
+            Number of bars added to warmup queue
+        """
+        appended = 0
+        for bar in bars:
+            # Convert Bar object to dict for internal use
+            if hasattr(bar, 'timestamp') and hasattr(bar, 'open'):
+                bar_dict = {
+                    'timestamp': bar.timestamp,
+                    'open': float(bar.open),
+                    'high': float(bar.high),
+                    'low': float(bar.low),
+                    'close': float(bar.close),
+                    'volume': float(bar.volume),
+                }
+                self._warmup_bars.append(bar_dict)
+                appended += 1
+            else:
+                logger.debug("Ignoring warmup payload of type %s", type(bar))
+
+        if appended:
+            logger.debug(
+                "Buffered %d warmup bars for %s (%d-min)",
+                appended,
+                self.p.symbol,
+                self.p.bar_interval_minutes
+            )
+        return appended
+
+    def warmup_backlog_size(self) -> int:
+        """Return number of buffered warmup bars awaiting consumption."""
+        return len(self._warmup_bars)

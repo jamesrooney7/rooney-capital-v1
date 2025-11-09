@@ -228,7 +228,6 @@ class StrategyWorker:
             # Add minute feed
             data_minute = RedisLiveData(
                 symbol=symbol,
-                timeframe_str='1min',
                 redis_host=self.strategy_config.redis_host,
                 redis_port=self.strategy_config.redis_port,
                 name=f"{symbol}_minute"
@@ -236,23 +235,23 @@ class StrategyWorker:
             self.cerebro.adddata(data_minute, name=f"{symbol}_minute")
             self.data_feeds[f"{symbol}_minute"] = data_minute
 
-            # Add hourly resampled feed
+            # Add hourly resampled feed (aggregates from minute feed)
             data_hourly = RedisResampledData(
                 symbol=symbol,
-                timeframe_str='hourly',
-                redis_host=self.strategy_config.redis_host,
-                redis_port=self.strategy_config.redis_port,
+                source_feed=data_minute,  # Aggregate from minute feed
+                bar_interval_minutes=60,  # Hourly bars
+                session_end_hour=23,
                 name=f"{symbol}_hour"
             )
             self.cerebro.adddata(data_hourly, name=f"{symbol}_hour")
             self.data_feeds[f"{symbol}_hour"] = data_hourly
 
-            # Add daily resampled feed
+            # Add daily resampled feed (aggregates from minute feed)
             data_daily = RedisResampledData(
                 symbol=symbol,
-                timeframe_str='daily',
-                redis_host=self.strategy_config.redis_host,
-                redis_port=self.strategy_config.redis_port,
+                source_feed=data_minute,  # Aggregate from minute feed
+                bar_interval_minutes=1440,  # Daily bars
+                session_end_hour=23,  # CME session end
                 name=f"{symbol}_day"
             )
             self.cerebro.adddata(data_daily, name=f"{symbol}_day")
@@ -262,29 +261,40 @@ class StrategyWorker:
 
         # Add reference feeds (hour/day only) for ALL other configured instruments
         # This allows cross-instrument features to work
+        # Note: We need minute feeds for these too, since resampled feeds aggregate from minute
         for symbol in self.config.instruments.keys():
             if symbol in self.strategy_config.instruments:
                 continue  # Already added above
             if symbol == "ZB":
                 continue  # Handled separately below
 
-            # Add hourly reference feed
-            data_hourly_ref = RedisResampledData(
+            # Add minute reference feed (needed for resampling)
+            data_minute_ref = RedisLiveData(
                 symbol=symbol,
-                timeframe_str='hourly',
                 redis_host=self.strategy_config.redis_host,
                 redis_port=self.strategy_config.redis_port,
+                name=f"{symbol}_minute"
+            )
+            self.cerebro.adddata(data_minute_ref, name=f"{symbol}_minute")
+            self.data_feeds[f"{symbol}_minute"] = data_minute_ref
+
+            # Add hourly reference feed (aggregates from minute)
+            data_hourly_ref = RedisResampledData(
+                symbol=symbol,
+                source_feed=data_minute_ref,
+                bar_interval_minutes=60,
+                session_end_hour=23,
                 name=f"{symbol}_hour"
             )
             self.cerebro.adddata(data_hourly_ref, name=f"{symbol}_hour")
             self.data_feeds[f"{symbol}_hour"] = data_hourly_ref
 
-            # Add daily reference feed
+            # Add daily reference feed (aggregates from minute)
             data_daily_ref = RedisResampledData(
                 symbol=symbol,
-                timeframe_str='daily',
-                redis_host=self.strategy_config.redis_host,
-                redis_port=self.strategy_config.redis_port,
+                source_feed=data_minute_ref,
+                bar_interval_minutes=1440,
+                session_end_hour=23,
                 name=f"{symbol}_day"
             )
             self.cerebro.adddata(data_daily_ref, name=f"{symbol}_day")
@@ -295,11 +305,22 @@ class StrategyWorker:
         # Add reference feed: ZB (Treasury futures) as TLT_day
         # The IBS strategy requires a TLT_day feed for market regime detection
         if self.config.get_instrument("ZB"):
-            data_tlt = RedisResampledData(
+            # Add ZB minute feed (needed for resampling)
+            data_zb_minute = RedisLiveData(
                 symbol="ZB",
-                timeframe_str='daily',
                 redis_host=self.strategy_config.redis_host,
                 redis_port=self.strategy_config.redis_port,
+                name="ZB_minute"
+            )
+            self.cerebro.adddata(data_zb_minute, name="ZB_minute")
+            self.data_feeds["ZB_minute"] = data_zb_minute
+
+            # Add ZB daily feed as TLT_day (aggregates from minute)
+            data_tlt = RedisResampledData(
+                symbol="ZB",
+                source_feed=data_zb_minute,
+                bar_interval_minutes=1440,
+                session_end_hour=23,
                 name="TLT_day"
             )
             self.cerebro.adddata(data_tlt, name="TLT_day")
