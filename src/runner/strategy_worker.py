@@ -205,7 +205,8 @@ class StrategyWorker:
         logger.info("Cerebro configured successfully")
 
     def _add_data_feeds(self):
-        """Add Redis data feeds for all instruments."""
+        """Add Redis data feeds for all instruments + reference feeds."""
+        # Add full feeds (minute/hour/day) for this strategy's instruments
         for symbol in self.strategy_config.instruments:
             # Get instrument config
             instr_config = self.config.get_instrument(symbol)
@@ -244,6 +245,36 @@ class StrategyWorker:
             self.cerebro.adddata(data_daily, name=f"{symbol}_day")
 
             logger.info(f"Added Redis feeds for {symbol} (minute/hourly/daily)")
+
+        # Add reference feeds (hour/day only) for ALL other configured instruments
+        # This allows cross-instrument features to work
+        for symbol in self.config.instruments.keys():
+            if symbol in self.strategy_config.instruments:
+                continue  # Already added above
+            if symbol == "ZB":
+                continue  # Handled separately below
+
+            # Add hourly reference feed
+            data_hourly_ref = RedisResampledData(
+                symbol=symbol,
+                timeframe_str='hourly',
+                redis_host=self.strategy_config.redis_host,
+                redis_port=self.strategy_config.redis_port,
+                name=f"{symbol}_hour"
+            )
+            self.cerebro.adddata(data_hourly_ref, name=f"{symbol}_hour")
+
+            # Add daily reference feed
+            data_daily_ref = RedisResampledData(
+                symbol=symbol,
+                timeframe_str='daily',
+                redis_host=self.strategy_config.redis_host,
+                redis_port=self.strategy_config.redis_port,
+                name=f"{symbol}_day"
+            )
+            self.cerebro.adddata(data_daily_ref, name=f"{symbol}_day")
+
+        logger.info(f"Added reference feeds for {len(self.config.instruments) - len(self.strategy_config.instruments)} symbols")
 
         # Add reference feed: ZB (Treasury futures) as TLT_day
         # The IBS strategy requires a TLT_day feed for market regime detection
