@@ -66,7 +66,7 @@ Databento API → Live Data Bridge → Backtrader Engine → IBS Strategy + ML V
 
 5. **Order Routing** (`src/runner/traderspost_client.py`)
    - Sends orders to TradersPost webhook
-   - 1-hour GTD (Good Till Date) time-in-force
+   - Day time-in-force (active until market close, then auto-cancels)
    - Includes symbol, action, quantity, price
 
 6. **Notifications** (`src/utils/discord_notifier.py`)
