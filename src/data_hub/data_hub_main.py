@@ -321,20 +321,29 @@ class DataHub:
     ) -> None:
         """Callback when a bar is completed - publish to Redis."""
         try:
-            # Publish to Redis
-            self.redis_client.publish_and_cache(symbol, timeframe, bar_data)
+            # Publish to Redis and get subscriber count
+            num_subscribers = self.redis_client.publish_and_cache(symbol, timeframe, bar_data)
             self._bar_count += 1
 
-            logger.info(
-                "Published %s %s bar: OHLCV=%.2f/%.2f/%.2f/%.2f V=%.0f",
-                symbol,
-                timeframe,
-                bar_data['open'],
-                bar_data['high'],
-                bar_data['low'],
-                bar_data['close'],
-                bar_data['volume']
-            )
+            # Log subscriber count for monitoring
+            if num_subscribers == 0:
+                logger.warning(
+                    "Published %s %s bar but NO SUBSCRIBERS are listening",
+                    symbol,
+                    timeframe
+                )
+            else:
+                logger.info(
+                    "Published %s %s bar to %d subscriber(s): OHLCV=%.2f/%.2f/%.2f/%.2f V=%.0f",
+                    symbol,
+                    timeframe,
+                    num_subscribers,
+                    bar_data['open'],
+                    bar_data['high'],
+                    bar_data['low'],
+                    bar_data['close'],
+                    bar_data['volume']
+                )
 
         except Exception as e:
             logger.error(f"Failed to publish bar for {symbol} {timeframe}: {e}")
