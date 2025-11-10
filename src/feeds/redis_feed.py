@@ -181,15 +181,24 @@ class RedisLiveData(bt.feeds.DataBase):
             self.pubsub.subscribe(self.channel, "datahub:control")
             logger.info("Subscribed to Redis channels: %s, datahub:control", self.channel)
 
+            print(f"[DEBUG] {self.p.symbol}: Subscription thread started, entering listen loop", flush=True)
+
             # Listen for messages
+            message_count = 0
             for message in self.pubsub.listen():
                 if self._stop_event.is_set():
                     break
+
+                message_count += 1
+                if message_count <= 5 or message_count % 100 == 0:
+                    print(f"[DEBUG] {self.p.symbol}: Received message #{message_count}, type={message['type']}", flush=True)
 
                 if message['type'] != 'message':
                     continue  # Skip subscription confirmations
 
                 channel = message['channel']
+
+                print(f"[DEBUG] {self.p.symbol}: Processing message from channel {channel}", flush=True)
 
                 try:
                     # Handle control signals
@@ -199,6 +208,8 @@ class RedisLiveData(bt.feeds.DataBase):
 
                     # Parse bar data from data channel
                     bar_data = json.loads(message['data'])
+
+                    print(f"[DEBUG] {self.p.symbol}: Received bar: {bar_data.get('timestamp', 'unknown')}", flush=True)
 
                     # Queue the bar
                     try:
