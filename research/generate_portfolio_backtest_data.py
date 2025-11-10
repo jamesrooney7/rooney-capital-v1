@@ -49,10 +49,12 @@ class TradeLoggingStrategy(IbsStrategy):
 
     def __init__(self, *args, **kwargs):
         self.output_dir = kwargs.pop('output_dir', None)
+        self.filter_start_date = kwargs.pop('filter_start_date', None)
         self.csv_file = None
         self.csv_writer = None
         self.trade_entries = {}  # {order_id: entry_data}
         self.all_trades = []  # Store all trades in memory
+        self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
         super().__init__(*args, **kwargs)
 
@@ -100,6 +102,18 @@ class TradeLoggingStrategy(IbsStrategy):
                     # ML selected? (Always 1 since this strategy uses ML filtering)
                     model_selected = 1
 
+                    # Check if trade is within the target date range (exclude warmup)
+                    if self.filter_start_date:
+                        import pandas as pd
+                        filter_dt = pd.to_datetime(self.filter_start_date)
+                        entry_dt = pd.to_datetime(entry_data['entry_time'])
+
+                        if entry_dt < filter_dt:
+                            # This trade was during warmup - don't save it
+                            self.warmup_trades_filtered += 1
+                            logger.debug(f"Filtered warmup trade: {entry_data['entry_time']} < {self.filter_start_date}")
+                            return  # Skip this trade
+
                     # Save trade
                     trade_record = {
                         'Date/Time': entry_data['entry_time'],
@@ -133,6 +147,8 @@ class TradeLoggingStrategy(IbsStrategy):
             df.to_csv(csv_path, index=False)
 
             logger.info(f"✅ Saved {len(self.all_trades)} trades to: {csv_path}")
+            if self.warmup_trades_filtered > 0:
+                logger.info(f"   (Filtered {self.warmup_trades_filtered} warmup trades)")
 
         super().stop()
 
@@ -144,11 +160,23 @@ def run_backtest_with_trade_logging(
     output_dir: Path,
     data_dir: str = 'data/resampled',
     initial_cash: float = 100000.0,
+    warmup_days: int = 252,  # 1 year warmup
 ):
-    """Run backtest and save detailed trade data."""
+    """Run backtest and save detailed trade data.
+
+    Args:
+        warmup_days: Number of days before start_date to load for warmup (default: 252 = 1 year)
+    """
+    from datetime import datetime, timedelta
+
+    # Calculate warmup start date
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    warmup_start_dt = start_dt - timedelta(days=warmup_days)
+    warmup_start_date = warmup_start_dt.strftime('%Y-%m-%d')
 
     logger.info(f"\n{'='*80}")
     logger.info(f"Backtesting {symbol}: {start_date} to {end_date}")
+    logger.info(f"Warmup period: {warmup_start_date} to {start_date} ({warmup_days} days)")
     logger.info(f"{'='*80}")
 
     # Load ML model
@@ -199,15 +227,17 @@ def run_backtest_with_trade_logging(
 
     logger.info(f"Loading {len(symbols_to_load)} data feeds ({primary_symbol} + {len(symbols_to_load)-1} references)")
 
+    # Load data with warmup period
     setup_cerebro_with_data(
         cerebro,
         symbols=symbols_to_load,
         data_dir=data_dir,
-        start_date=start_date,
+        start_date=warmup_start_date,  # Use warmup start
         end_date=end_date
     )
 
     # Add strategy with ML model
+    # Pass actual start_date to filter out warmup trades
     symbol_output_dir = output_dir / f"{symbol}_optimization"
 
     cerebro.addstrategy(
@@ -217,6 +247,7 @@ def run_backtest_with_trade_logging(
         ml_model=bundle.model,
         ml_features=bundle.features,
         ml_threshold=bundle.threshold,
+        filter_start_date=start_date,  # Only save trades from this date forward
     )
 
     # Run backtest
