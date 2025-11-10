@@ -214,6 +214,9 @@ def run_backtest_with_trade_logging(
         TradeLoggingStrategy,
         symbol=symbol,
         output_dir=str(symbol_output_dir),
+        ml_model=bundle.model,
+        ml_features=bundle.features,
+        ml_threshold=bundle.threshold,
     )
 
     # Run backtest
