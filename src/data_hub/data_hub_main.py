@@ -431,9 +431,14 @@ class DataHub:
 
         # Process messages
         try:
+            record_count = 0
             for record in client:
                 if self._stop_event.is_set():
                     break
+
+                record_count += 1
+                if record_count % 100 == 0:  # Log every 100 records
+                    print(f"[DEBUG] Processed {record_count} records", flush=True)
 
                 self._handle_record(record)
         finally:
@@ -488,8 +493,12 @@ class DataHub:
     def _handle_record(self, record) -> None:
         """Handle a single Databento record."""
         if isinstance(record, SymbolMappingMsg):
+            print(f"[DEBUG] Received SymbolMappingMsg", flush=True)
             self._handle_symbol_mapping(record)
         elif isinstance(record, TradeMsg):
+            # Only log first few trades to avoid spam
+            if self._trade_count < 5:
+                print(f"[DEBUG] Received TradeMsg #{self._trade_count + 1}", flush=True)
             self._handle_trade(record)
 
     def _handle_symbol_mapping(self, msg: SymbolMappingMsg) -> None:
