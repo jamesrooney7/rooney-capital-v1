@@ -576,6 +576,7 @@ class DataHub:
 
 def main():
     """Entry point for data hub process."""
+    print("[DEBUG] main() called", flush=True)
     parser = argparse.ArgumentParser(description="Data Hub for Multi-Alpha Architecture")
     parser.add_argument(
         "--config",
@@ -601,25 +602,32 @@ def main():
         ]
     )
 
+    print("[DEBUG] Logging configured", flush=True)
     logger.info("Starting Data Hub...")
 
     # Load configuration from YAML file
+    print(f"[DEBUG] About to load config from {args.config}", flush=True)
     try:
         config = load_config(args.config)
+        print("[DEBUG] Config loaded successfully", flush=True)
         logger.info(f"Loaded configuration from {args.config}")
     except Exception as e:
+        print(f"[DEBUG] Config load failed: {e}", flush=True)
         logger.error(f"Failed to load configuration: {e}")
         sys.exit(1)
 
     # Extract product codes from instruments
+    print("[DEBUG] Extracting product codes from instruments", flush=True)
     product_codes = [
         instr.databento_product_id
         for instr in config.instruments.values()
     ]
 
+    print(f"[DEBUG] Found {len(product_codes)} product codes", flush=True)
     logger.info(f"Data hub will subscribe to {len(product_codes)} instruments")
 
     # Create data hub from config
+    print("[DEBUG] Creating DataHub instance", flush=True)
     data_hub = DataHub(
         databento_api_key=config.databento.api_key,
         databento_dataset=config.databento.dataset,
@@ -628,6 +636,7 @@ def main():
         redis_port=config.data_hub.redis_port,
         heartbeat_interval=config.data_hub.heartbeat_interval
     )
+    print("[DEBUG] DataHub instance created", flush=True)
 
     # Handle shutdown signals
     def signal_handler(signum, frame):
