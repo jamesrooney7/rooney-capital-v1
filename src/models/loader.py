@@ -117,8 +117,8 @@ def load_model_bundle(symbol: str, base_dir: str | Path | None = None) -> ModelB
 
     sym = _normalise_symbol(symbol)
     models_dir = _models_dir(base_dir)
-    metadata_path = models_dir / f"{sym}_best.json"
-    model_path = models_dir / f"{sym}_rf_model.pkl"
+    metadata_path = models_dir / sym / f"{sym}_best.json"
+    model_path = models_dir / sym / f"{sym}_rf_model.pkl"
 
     metadata = _load_metadata(metadata_path)
     model, model_features = _load_model_payload(model_path)
