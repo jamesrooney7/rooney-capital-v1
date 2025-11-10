@@ -422,9 +422,12 @@ class DataHub:
         print("[DEBUG] Subscribe call completed", flush=True)
 
         # Process metadata for symbol mappings
+        print("[DEBUG] About to process metadata", flush=True)
         self._process_metadata(client)
+        print("[DEBUG] Metadata processing completed", flush=True)
 
         logger.info("Databento connected, starting stream...")
+        print("[DEBUG] Starting message processing loop", flush=True)
 
         # Process messages
         try:
@@ -442,16 +445,25 @@ class DataHub:
 
     def _process_metadata(self, client: Live) -> None:
         """Process Databento metadata to extract symbol mappings."""
+        print("[DEBUG] _process_metadata() called", flush=True)
         try:
+            print("[DEBUG] Accessing client.metadata", flush=True)
             metadata = client.metadata
-        except Exception:
+            print(f"[DEBUG] Got metadata: {metadata is not None}", flush=True)
+        except Exception as e:
+            print(f"[DEBUG] Exception getting metadata: {e}", flush=True)
             metadata = None
 
         if not metadata:
+            print("[DEBUG] No metadata available, returning", flush=True)
             return
 
+        print("[DEBUG] Processing metadata mappings", flush=True)
         # Process mappings
-        for mapping in getattr(metadata, "mappings", []) or []:
+        mappings = getattr(metadata, "mappings", []) or []
+        print(f"[DEBUG] Found {len(mappings)} mappings", flush=True)
+
+        for i, mapping in enumerate(mappings):
             instrument_id = getattr(mapping, "instrument_id", None)
             symbol = getattr(mapping, "symbol", None) or getattr(mapping, "stype_in_symbol", None)
             raw_symbol = getattr(mapping, "raw_symbol", None)
@@ -470,6 +482,8 @@ class DataHub:
                     "Metadata mapping: instrument=%s symbol=%s root=%s contract=%s",
                     instrument_id, symbol, root, raw_symbol
                 )
+
+        print(f"[DEBUG] Processed {len(self._instrument_to_symbol)} instrument mappings", flush=True)
 
     def _handle_record(self, record) -> None:
         """Handle a single Databento record."""
