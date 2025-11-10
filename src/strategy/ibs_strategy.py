@@ -13,7 +13,7 @@ try:  # pragma: no cover - optional dependency guard
 except Exception:  # pragma: no cover - pandas is optional at runtime
     pd = None
 
-from config import COMMISSION_PER_SIDE, PAIR_MAP
+from src.config import COMMISSION_PER_SIDE, PAIR_MAP
 from .filter_column import FilterColumn
 from .safe_div import monkey_patch_division, safe_div
 from .contract_specs import CONTRACT_SPECS, point_value
