@@ -302,6 +302,10 @@ def main():
                        help='Output directory for trade CSVs')
     parser.add_argument('--initial-cash', type=float, default=100000.0,
                        help='Initial capital per backtest')
+    parser.add_argument('--parallel', action='store_true',
+                       help='Run backtests in parallel (faster)')
+    parser.add_argument('--jobs', type=int, default=4,
+                       help='Number of parallel jobs (default: 4)')
 
     args = parser.parse_args()
 
@@ -322,34 +326,71 @@ def main():
     logger.info(f"Period: {args.start} to {args.end}")
     logger.info(f"Symbols: {len(symbols)} - {', '.join(symbols)}")
     logger.info(f"Output: {output_dir}/")
+    if args.parallel:
+        logger.info(f"Mode: PARALLEL ({args.jobs} jobs)")
+    else:
+        logger.info(f"Mode: SEQUENTIAL")
     logger.info(f"{'#'*80}\n")
 
     results = {}
     success_count = 0
     failed_symbols = []
 
-    for symbol in symbols:
-        try:
-            metadata = run_backtest_with_trade_logging(
-                symbol=symbol,
-                start_date=args.start,
-                end_date=args.end,
-                output_dir=output_dir,
-                data_dir=args.data_dir,
-                initial_cash=args.initial_cash,
-            )
+    if args.parallel:
+        # Parallel execution using multiprocessing
+        from multiprocessing import Pool, cpu_count
+        from functools import partial
 
+        # Limit jobs to available CPUs
+        num_jobs = min(args.jobs, cpu_count(), len(symbols))
+        logger.info(f"Running {num_jobs} parallel jobs (CPU count: {cpu_count()})\n")
+
+        # Create a partial function with fixed parameters
+        run_func = partial(
+            run_backtest_with_trade_logging,
+            start_date=args.start,
+            end_date=args.end,
+            output_dir=output_dir,
+            data_dir=args.data_dir,
+            initial_cash=args.initial_cash,
+        )
+
+        # Run in parallel
+        with Pool(processes=num_jobs) as pool:
+            results_list = pool.map(run_func, symbols)
+
+        # Collect results
+        for symbol, metadata in zip(symbols, results_list):
             if metadata:
                 results[symbol] = metadata
                 success_count += 1
             else:
                 failed_symbols.append(symbol)
 
-        except Exception as e:
-            logger.error(f"❌ {symbol}: Failed - {e}")
-            failed_symbols.append(symbol)
-            import traceback
-            traceback.print_exc()
+    else:
+        # Sequential execution (original behavior)
+        for symbol in symbols:
+            try:
+                metadata = run_backtest_with_trade_logging(
+                    symbol=symbol,
+                    start_date=args.start,
+                    end_date=args.end,
+                    output_dir=output_dir,
+                    data_dir=args.data_dir,
+                    initial_cash=args.initial_cash,
+                )
+
+                if metadata:
+                    results[symbol] = metadata
+                    success_count += 1
+                else:
+                    failed_symbols.append(symbol)
+
+            except Exception as e:
+                logger.error(f"❌ {symbol}: Failed - {e}")
+                failed_symbols.append(symbol)
+                import traceback
+                traceback.print_exc()
 
     # Final summary
     logger.info(f"\n{'='*80}")
