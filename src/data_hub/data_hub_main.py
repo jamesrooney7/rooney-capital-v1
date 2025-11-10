@@ -417,7 +417,7 @@ class DataHub:
             dataset=self.databento_dataset,
             schema="trades",
             symbols=self.product_codes,
-            stype_in="parent"  # Use "parent" for continuous symbols like "ES", "NQ"
+            stype_in="parent"  # Use "parent" with format ROOT.FUT like "ES.FUT", "NQ.FUT"
         )
         print("[DEBUG] Subscribe call completed", flush=True)
 
@@ -634,7 +634,7 @@ def main():
     # Extract product codes from instruments
     print("[DEBUG] Extracting product codes from instruments", flush=True)
     product_codes = [
-        instr.databento_product_id.replace('.FUT', '').replace('.OPT', '')  # Strip .FUT/.OPT suffix for parent symbols
+        instr.databento_product_id  # Keep full format like "ES.FUT" for parent subscription
         for instr in config.instruments.values()
     ]
 
