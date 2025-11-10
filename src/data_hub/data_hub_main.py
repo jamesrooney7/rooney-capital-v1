@@ -310,29 +310,36 @@ class DataHub:
 
     def start(self) -> None:
         """Start the data hub."""
+        print("[DEBUG] start() called", flush=True)
         if self._thread and self._thread.is_alive():
             logger.warning("DataHub already running")
             return
 
+        print("[DEBUG] Clearing stop event", flush=True)
         self._stop_event.clear()
         self._start_time = dt.datetime.now(dt.timezone.utc)
 
         # Start Databento subscriber thread
+        print("[DEBUG] Creating Databento subscriber thread", flush=True)
         self._thread = threading.Thread(
             target=self._run_databento,
             name="databento-subscriber",
             daemon=True
         )
+        print("[DEBUG] Starting Databento subscriber thread", flush=True)
         self._thread.start()
 
         # Start heartbeat thread
+        print("[DEBUG] Creating heartbeat thread", flush=True)
         self._heartbeat_thread = threading.Thread(
             target=self._run_heartbeat,
             name="heartbeat",
             daemon=True
         )
+        print("[DEBUG] Starting heartbeat thread", flush=True)
         self._heartbeat_thread.start()
 
+        print("[DEBUG] Threads started", flush=True)
         logger.info("DataHub started")
 
     def stop(self) -> None:
@@ -370,10 +377,13 @@ class DataHub:
 
     def _run_databento(self) -> None:
         """Main Databento subscription loop."""
+        print("[DEBUG] _run_databento() thread started", flush=True)
         while not self._stop_event.is_set():
             try:
+                print("[DEBUG] Calling _connect_and_stream()", flush=True)
                 self._connect_and_stream()
             except Exception as e:
+                print(f"[DEBUG] Exception in _connect_and_stream: {e}", flush=True)
                 logger.error(f"Databento stream error: {e}", exc_info=True)
 
                 if self._stop_event.is_set():
@@ -385,6 +395,7 @@ class DataHub:
 
     def _connect_and_stream(self) -> None:
         """Connect to Databento and process messages."""
+        print("[DEBUG] _connect_and_stream() called", flush=True)
         logger.info(
             "Connecting to Databento: dataset=%s products=%s",
             self.databento_dataset,
@@ -392,19 +403,23 @@ class DataHub:
         )
 
         # Create Databento client
+        print("[DEBUG] Creating Databento Live client", flush=True)
         client = Live(
             key=self.databento_api_key,
             reconnect_policy="none"
         )
+        print("[DEBUG] Databento Live client created", flush=True)
         self._databento_client = client
 
         # Subscribe
+        print(f"[DEBUG] Subscribing to {len(self.product_codes)} symbols with stype_in=product_id", flush=True)
         client.subscribe(
             dataset=self.databento_dataset,
             schema="trades",
             symbols=self.product_codes,
-            stype_in="parent"
+            stype_in="product_id"  # Changed from "parent" to match product IDs like "ES.FUT"
         )
+        print("[DEBUG] Subscribe call completed", flush=True)
 
         # Process metadata for symbol mappings
         self._process_metadata(client)
@@ -648,7 +663,9 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Start data hub
+    print("[DEBUG] Calling data_hub.start()", flush=True)
     data_hub.start()
+    print("[DEBUG] data_hub.start() returned", flush=True)
 
     # Keep running
     logger.info("Data Hub running. Press Ctrl+C to stop.")
