@@ -241,7 +241,24 @@ def deflated_sharpe_ratio(sr: float, n: int, kurt_excess: float = 0.0, m: int = 
     return _psr(sr, n, kurt_excess, sr_star)
 
 def build_core_features(Xy: pd.DataFrame) -> pd.DataFrame:
-    return build_normalised_feature_matrix(Xy)
+    """Build normalized feature matrix while preserving Date and target columns.
+
+    Args:
+        Xy: DataFrame with raw features, metadata, and targets
+
+    Returns:
+        DataFrame with normalized features + preserved Date and target columns
+    """
+    # Get normalized features only
+    X_normalized = build_normalised_feature_matrix(Xy)
+
+    # Preserve metadata and target columns needed by training pipeline
+    preserve_cols = ['Date', 'Date/Time', 'Exit Date/Time', 'y_binary', 'y_return', 'y_pnl_usd', 'y_pnl_gross']
+    preserved = Xy[[col for col in preserve_cols if col in Xy.columns]].copy()
+
+    # Combine: preserved columns first, then normalized features
+    result = pd.concat([preserved, X_normalized], axis=1)
+    return result
 
 def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     Xn = X.copy()
