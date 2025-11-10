@@ -654,13 +654,17 @@ def main():
     print("[DEBUG] DataHub instance created", flush=True)
 
     # Handle shutdown signals
+    print("[DEBUG] Setting up signal handlers", flush=True)
     def signal_handler(signum, frame):
         logger.info(f"Received signal {signum}, shutting down...")
         data_hub.stop()
         sys.exit(0)
 
+    print("[DEBUG] Registering SIGINT handler", flush=True)
     signal.signal(signal.SIGINT, signal_handler)
+    print("[DEBUG] Registering SIGTERM handler", flush=True)
     signal.signal(signal.SIGTERM, signal_handler)
+    print("[DEBUG] Signal handlers registered", flush=True)
 
     # Start data hub
     print("[DEBUG] Calling data_hub.start()", flush=True)
