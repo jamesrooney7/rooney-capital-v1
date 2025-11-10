@@ -5648,6 +5648,7 @@ class IbsStrategy(bt.Strategy):
         return True
 
     def next(self):
+        print(f"[DEBUG] {self.p.symbol} next() called, warmup={getattr(self, '_in_historical_warmup', None)}", flush=True)
         self.update_pivots()
         # Refresh daily ATR percentile only once per completed daily bar
         try:
@@ -5692,7 +5693,9 @@ class IbsStrategy(bt.Strategy):
 
         # Skip expensive ML and filter processing during historical warmup
         # Indicators still update automatically, but we don't run strategy logic
+        print(f"[DEBUG] {self.p.symbol} about to check warmup flag: _in_historical_warmup={self._in_historical_warmup}", flush=True)
         if self._in_historical_warmup:
+            print(f"[DEBUG] {self.p.symbol} SKIPPING strategy logic (still in warmup mode)", flush=True)
             return
 
         price = line_val(self.hourly.close)
