@@ -154,9 +154,12 @@ def run_backtest_with_trade_logging(
     # Load ML model
     try:
         bundle = load_model_bundle(symbol, base_dir='src/models')
-        logger.info(f"✅ Loaded ML model: {len(bundle.features)} features, threshold={bundle.threshold:.3f}")
+        threshold_str = f"{bundle.threshold:.3f}" if bundle.threshold is not None else "N/A"
+        logger.info(f"✅ Loaded ML model: {len(bundle.features)} features, threshold={threshold_str}")
     except Exception as e:
         logger.error(f"❌ Failed to load model for {symbol}: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
     # Create Cerebro

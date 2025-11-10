@@ -123,13 +123,15 @@ def load_model_bundle(symbol: str, base_dir: str | Path | None = None) -> ModelB
     metadata = _load_metadata(metadata_path)
     model, model_features = _load_model_payload(model_path)
 
-    threshold = metadata.get("Prod_Threshold")
+    # Try both "threshold" (new training script) and "Prod_Threshold" (legacy)
+    threshold = metadata.get("threshold") or metadata.get("Prod_Threshold")
     try:
         threshold_val = float(threshold) if threshold is not None else None
     except (TypeError, ValueError):
         threshold_val = None
 
-    metadata_features = _coerce_features(metadata.get("Features"))
+    # Try both "features" (new training script) and "Features" (legacy)
+    metadata_features = _coerce_features(metadata.get("features") or metadata.get("Features"))
     features = metadata_features or model_features
 
     return ModelBundle(
