@@ -1,0 +1,215 @@
+# Multi-Alpha Trading System Configuration
+# This format is required for the data_hub + strategy_worker architecture
+
+# Databento Live API configuration
+databento:
+  api_key: ${DATABENTO_API_KEY}
+  dataset: GLBX.MDP3
+  schema: trades
+  stype_in: parent  # Use parent symbols like "ES.FUT"
+
+# Data hub configuration
+data_hub:
+  redis_host: localhost
+  redis_port: 6379
+  publish_channels:
+    - market
+  heartbeat_file: /var/run/pine/data_hub_heartbeat.json
+  heartbeat_interval: 30
+
+# Global paths
+contract_map_path: Data/Databento_contract_map.yml
+models_path: models
+
+# Strategy definitions
+strategies:
+  ibs:  # Strategy name (used with --strategy ibs)
+    enabled: true
+    strategy_type: ibs
+    instruments:
+      - 6A
+      - 6C
+      - 6M
+      - CL
+      - GC
+      - HG
+
+    # Portfolio settings
+    max_positions: 2
+    daily_stop_loss: 2500
+    starting_cash: 250000
+
+    # Redis settings (inherited from data_hub if not specified)
+    redis_host: localhost
+    redis_port: 6379
+
+    # Broker/Trading settings
+    broker_account: ${TRADERSPOST_IBS_A_WEBHOOK}
+    discord_webhook_url: ${DISCORD_WEBHOOK_URL}
+
+    # Heartbeat
+    heartbeat_file: /var/run/pine/ibs_heartbeat.json
+    heartbeat_interval: 30
+
+    # ML models
+    models_path: models
+
+    # Historical warmup
+    load_historical_warmup: true
+    historical_lookback_days: 252
+    historical_hourly_lookback_days: 15
+
+# Instrument specifications (all instruments that will be subscribed)
+instruments:
+  ES:
+    databento_product_id: ES.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 50
+    margin: 13200
+    commission: 4.0
+
+  NQ:
+    databento_product_id: NQ.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 20
+    margin: 17600
+    commission: 4.0
+
+  RTY:
+    databento_product_id: RTY.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 50
+    margin: 8800
+    commission: 4.0
+
+  YM:
+    databento_product_id: YM.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 5
+    margin: 9350
+    commission: 4.0
+
+  CL:
+    databento_product_id: CL.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 1000
+    margin: 5500
+    commission: 4.5
+
+  NG:
+    databento_product_id: NG.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 10000
+    margin: 3300
+    commission: 4.5
+
+  GC:
+    databento_product_id: GC.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 100
+    margin: 11000
+    commission: 4.5
+
+  SI:
+    databento_product_id: SI.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 5000
+    margin: 14300
+    commission: 4.5
+
+  HG:
+    databento_product_id: HG.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 25000
+    margin: 4400
+    commission: 4.5
+
+  6A:
+    databento_product_id: 6A.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 100000
+    margin: 2200
+    commission: 4.5
+
+  6B:
+    databento_product_id: 6B.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 62500
+    margin: 2750
+    commission: 4.5
+
+  6C:
+    databento_product_id: 6C.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 100000
+    margin: 2200
+    commission: 4.5
+
+  6E:
+    databento_product_id: 6E.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 125000
+    margin: 2750
+    commission: 4.5
+
+  6J:
+    databento_product_id: 6J.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 12500000
+    margin: 3300
+    commission: 4.5
+
+  6M:
+    databento_product_id: 6M.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 500000
+    margin: 3850
+    commission: 4.5
+
+  6N:
+    databento_product_id: 6N.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 100000
+    margin: 1980
+    commission: 4.5
+
+  6S:
+    databento_product_id: 6S.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 125000
+    margin: 2420
+    commission: 4.5
+
+  ZC:
+    databento_product_id: ZC.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 50
+    margin: 1650
+    commission: 4.5
+
+  ZS:
+    databento_product_id: ZS.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 50
+    margin: 2200
+    commission: 4.5
+
+  ZW:
+    databento_product_id: ZW.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 50
+    margin: 2750
+    commission: 4.5
+
+  ZB:
+    databento_product_id: ZB.FUT
+    databento_dataset: GLBX.MDP3
+    multiplier: 1000
+    margin: 3300
+    commission: 4.5
+
+# Dashboard configuration (optional)
+dashboard:
+  port: 5000
+  strategies:
+    - ibs
