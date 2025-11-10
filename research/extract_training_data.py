@@ -399,10 +399,10 @@ def extract_training_data(
     # Use FixedSlippage slicer
     cerebro.broker.set_slippage_fixed(tick_size)
 
-    # Enable cheat-on-close to execute at bar close price (not next bar open)
-    # This matches live trading: signal at bar close → execute at bar close
-    # NOTE: This must be set AFTER slippage for Backtrader compatibility
-    cerebro.broker.set_coc(True)
+    # NOTE: Cheat-on-close is DISABLED (default Backtrader behavior)
+    # Orders fill at NEXT bar's open price, matching live trading execution
+    # Features are calculated at bar close, order fills at next bar open
+    # This ensures training PnL matches live PnL calculation
 
     # Load data for symbol + reference symbols
     # Try to load common reference symbols, but skip gracefully if data is missing/incomplete
