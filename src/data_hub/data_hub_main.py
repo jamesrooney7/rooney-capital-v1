@@ -412,12 +412,12 @@ class DataHub:
         self._databento_client = client
 
         # Subscribe
-        print(f"[DEBUG] Subscribing to {len(self.product_codes)} symbols with stype_in=product_id", flush=True)
+        print(f"[DEBUG] Subscribing to {len(self.product_codes)} symbols with stype_in=parent", flush=True)
         client.subscribe(
             dataset=self.databento_dataset,
             schema="trades",
             symbols=self.product_codes,
-            stype_in="product_id"  # Changed from "parent" to match product IDs like "ES.FUT"
+            stype_in="parent"  # Use "parent" for continuous symbols like "ES", "NQ"
         )
         print("[DEBUG] Subscribe call completed", flush=True)
 
@@ -634,11 +634,11 @@ def main():
     # Extract product codes from instruments
     print("[DEBUG] Extracting product codes from instruments", flush=True)
     product_codes = [
-        instr.databento_product_id
+        instr.databento_product_id.replace('.FUT', '').replace('.OPT', '')  # Strip .FUT/.OPT suffix for parent symbols
         for instr in config.instruments.values()
     ]
 
-    print(f"[DEBUG] Found {len(product_codes)} product codes", flush=True)
+    print(f"[DEBUG] Found {len(product_codes)} product codes: {product_codes}", flush=True)
     logger.info(f"Data hub will subscribe to {len(product_codes)} instruments")
 
     # Create data hub from config
