@@ -1,7 +1,7 @@
 #!/bin/bash
-# Extract training data for all symbols using year-by-year chunked extraction
+# Extract training data for all symbols using progressive year-by-year extraction
 # Runs 4 symbols in parallel to maximize CPU usage while staying within memory limits
-# Memory: ~25GB per symbol × 4 = ~100GB (safe within 125GB total)
+# Each year runs progressively longer backtest (2010, 2010-2011, 2010-2012, etc.)
 
 set -e
 
@@ -9,9 +9,8 @@ set -e
 SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
 YEARS=(2010 2011 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024)
 START_DATE="2010-01-01"
-END_DATE="2024-12-31"
-OUTPUT_DIR="data/training"
 CHUNKS_DIR="data/training_chunks"
+OUTPUT_DIR="data/training"
 BATCH_SIZE=4  # Number of symbols to process in parallel
 
 # Color output
@@ -22,14 +21,13 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Extract Training Data (Parallel Batches)${NC}"
+echo -e "${GREEN}Extract Training Data (Progressive)${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Symbols: ${#SYMBOLS[@]}"
 echo "Years: ${#YEARS[@]} (2010-2024)"
 echo "Parallel batch size: $BATCH_SIZE symbols at a time"
-echo "Strategy: Extract year-by-year to avoid memory exhaustion"
-echo "Date range: $START_DATE to $END_DATE"
+echo "Strategy: Progressive end dates (2010, 2010-2011, ..., 2010-2024)"
 echo ""
 
 # Create directories
@@ -37,7 +35,7 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p "$CHUNKS_DIR"
 mkdir -p logs
 
-# Function to process a single symbol (all years)
+# Function to process a single symbol (all years progressively)
 process_symbol() {
     local sym=$1
     local symbol_num=$2
@@ -48,59 +46,42 @@ process_symbol() {
     echo -e "${GREEN}[$sym] Starting extraction ($symbol_num/$total)${NC}"
     echo -e "${GREEN}========================================${NC}"
 
-    # Extract each year separately
+    # Extract each year progressively (expanding end date)
     local year_count=0
+    local prev_trades=0
+
     for year in "${YEARS[@]}"; do
         year_count=$((year_count + 1))
-        echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]})...${NC}"
+        local end_date="${year}-12-31"
+        echo -e "${YELLOW}[$sym] Extracting through $year ($year_count/${#YEARS[@]})...${NC}"
 
         python3 research/extract_training_data.py \
             --symbol "$sym" \
             --start "$START_DATE" \
-            --end "$END_DATE" \
-            --filter-year $year \
+            --end "$end_date" \
             --output "$CHUNKS_DIR/${sym}_${year}.csv" \
             >> "logs/${sym}_extraction.log" 2>&1
 
         if [ $? -eq 0 ]; then
             rows=$(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv" 2>/dev/null || echo "0")
             if [ "$rows" -gt 1 ]; then
-                echo -e "${GREEN}[$sym]   ✓ $year: $((rows-1)) trades${NC}"
+                new_trades=$((rows - 1 - prev_trades))
+                echo -e "${GREEN}[$sym]   ✓ Through $year: $((rows-1)) total trades (+$new_trades new)${NC}"
+                prev_trades=$((rows - 1))
             else
-                echo -e "${YELLOW}[$sym]   ⊘ $year: 0 trades (no signals)${NC}"
+                echo -e "${YELLOW}[$sym]   ⊘ Through $year: 0 trades${NC}"
             fi
         else
-            echo -e "${RED}[$sym]   ✗ $year: FAILED${NC}"
+            echo -e "${RED}[$sym]   ✗ Through $year: FAILED${NC}"
         fi
     done
 
-    # Combine all years into one file
-    echo -e "${YELLOW}[$sym] Combining ${#YEARS[@]} years...${NC}"
+    # Use the final year file (has all trades from 2010-2024)
+    echo -e "${YELLOW}[$sym] Using final extraction (all years)...${NC}"
 
-    # Start with header from first year that has data
-    local header_written=false
-    for year in "${YEARS[@]}"; do
-        if [ -f "$CHUNKS_DIR/${sym}_${year}.csv" ] && [ $(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv") -gt 1 ]; then
-            head -1 "$CHUNKS_DIR/${sym}_${year}.csv" > "$OUTPUT_DIR/${sym}_transformed_features.csv"
-            header_written=true
-            break
-        fi
-    done
+    if [ -f "$CHUNKS_DIR/${sym}_2024.csv" ]; then
+        cp "$CHUNKS_DIR/${sym}_2024.csv" "$OUTPUT_DIR/${sym}_transformed_features.csv"
 
-    if [ "$header_written" = false ]; then
-        echo -e "${RED}[$sym]   ✗ No data for any year!${NC}"
-        return 1
-    fi
-
-    # Append data from all years (skip headers)
-    for year in "${YEARS[@]}"; do
-        if [ -f "$CHUNKS_DIR/${sym}_${year}.csv" ]; then
-            tail -n +2 "$CHUNKS_DIR/${sym}_${year}.csv" >> "$OUTPUT_DIR/${sym}_transformed_features.csv" 2>/dev/null || true
-        fi
-    done
-
-    # Verify final file
-    if [ -f "$OUTPUT_DIR/${sym}_transformed_features.csv" ]; then
         local total_rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv")
         local size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
         echo -e "${GREEN}[$sym] ✓ COMPLETE: $((total_rows-1)) trades, $size${NC}"
@@ -109,7 +90,7 @@ process_symbol() {
         rm -f "$CHUNKS_DIR/${sym}_"*.csv
         return 0
     else
-        echo -e "${RED}[$sym] ✗ Final file not created${NC}"
+        echo -e "${RED}[$sym] ✗ Final file (2024) not created${NC}"
         return 1
     fi
 }
