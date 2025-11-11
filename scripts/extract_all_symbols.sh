@@ -1,6 +1,7 @@
 #!/bin/bash
-# Extract training data for all symbols in parallel
+# Extract training data for all symbols in parallel batches
 # Optimized for 16 cores / 125GB RAM
+# Runs 4 symbols at a time to avoid memory contention
 
 set -e
 
@@ -9,7 +10,7 @@ SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
 START_DATE="2010-01-01"
 END_DATE="2024-12-31"
 OUTPUT_DIR="data/training"
-MAX_PARALLEL=16  # Match your CPU cores
+BATCH_SIZE=4  # Run 4 symbols at a time (optimal for 16 cores)
 
 # Color output
 GREEN='\033[0;32m'
@@ -23,56 +24,61 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Symbols to extract: ${#SYMBOLS[@]}"
 echo "Date range: $START_DATE to $END_DATE"
-echo "Max parallel jobs: $MAX_PARALLEL"
+echo "Batch size: $BATCH_SIZE (parallel per batch)"
 echo ""
 
-# Create output directory
+# Create output directory and logs directory
 mkdir -p "$OUTPUT_DIR"
+mkdir -p logs
 
-# Function to extract one symbol
-extract_symbol() {
-    local symbol=$1
-    local output_file="$OUTPUT_DIR/${symbol}_transformed_features.csv"
+# Process symbols in batches
+total=${#SYMBOLS[@]}
+for ((i=0; i<$total; i+=BATCH_SIZE)); do
+    batch_num=$((i/BATCH_SIZE + 1))
+    batch_symbols=("${SYMBOLS[@]:i:BATCH_SIZE}")
 
-    echo -e "${GREEN}[$(date '+%H:%M:%S')] Starting extraction for $symbol${NC}"
+    echo ""
+    echo -e "${GREEN}========================================${NC}"
+    echo -e "${GREEN}BATCH $batch_num: ${batch_symbols[@]}${NC}"
+    echo -e "${GREEN}========================================${NC}"
 
-    python research/extract_training_data.py \
-        --symbol "$symbol" \
-        --start "$START_DATE" \
-        --end "$END_DATE" \
-        --output "$output_file" \
-        2>&1 | tee "$OUTPUT_DIR/${symbol}_extraction.log"
+    # Start batch
+    for sym in "${batch_symbols[@]}"; do
+        echo -e "${YELLOW}[$(date '+%H:%M:%S')] Starting extraction for $sym${NC}"
+        nohup python3 research/extract_training_data.py \
+            --symbol "$sym" \
+            --start "$START_DATE" \
+            --end "$END_DATE" \
+            > logs/${sym}_extraction.log 2>&1 &
+    done
 
-    local exit_code=${PIPESTATUS[0]}
+    # Wait for this batch to complete
+    echo -e "${YELLOW}Waiting for batch $batch_num to complete...${NC}"
+    while pgrep -f "extract_training_data.py" > /dev/null; do
+        sleep 10
+        # Show progress
+        running=$(pgrep -f "extract_training_data.py" | wc -l)
+        completed=$(ls $OUTPUT_DIR/*.csv 2>/dev/null | wc -l)
+        echo -e "${YELLOW}  Progress: $completed/18 complete, $running running${NC}"
+    done
 
-    if [ $exit_code -eq 0 ]; then
-        echo -e "${GREEN}[$(date '+%H:%M:%S')] ✓ Completed $symbol${NC}"
+    echo -e "${GREEN}✅ Batch $batch_num complete!${NC}"
 
-        # Show file size and row count
-        if [ -f "$output_file" ]; then
-            local rows=$(wc -l < "$output_file" | xargs)
-            local size=$(du -h "$output_file" | cut -f1)
-            echo -e "${YELLOW}  → $symbol: $((rows-1)) trades, $size${NC}"
+    # Show which symbols completed in this batch
+    for sym in "${batch_symbols[@]}"; do
+        if [ -f "$OUTPUT_DIR/${sym}_transformed_features.csv" ]; then
+            size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
+            rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv" | xargs)
+            echo -e "  ${GREEN}✓${NC} $sym: $((rows-1)) trades, $size"
+        else
+            echo -e "  ${RED}✗${NC} $sym: FAILED (check logs/${sym}_extraction.log)"
         fi
-    else
-        echo -e "${RED}[$(date '+%H:%M:%S')] ✗ Failed $symbol${NC}"
-    fi
-
-    return $exit_code
-}
-
-export -f extract_symbol
-export OUTPUT_DIR START_DATE END_DATE GREEN YELLOW RED NC
-
-# Run extractions in parallel
-echo -e "${GREEN}Starting parallel extraction...${NC}"
-echo ""
-
-printf '%s\n' "${SYMBOLS[@]}" | xargs -P "$MAX_PARALLEL" -I {} bash -c 'extract_symbol "$@"' _ {}
+    done
+done
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Extraction Complete!${NC}"
+echo -e "${GREEN}ALL EXTRACTIONS COMPLETE!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 
@@ -101,7 +107,24 @@ echo ""
 echo "Results: $success succeeded, $failed failed (out of $total total)"
 echo ""
 
+# Verify warmup fix is present
+echo "Verifying warmup fix:"
+grep "warmup period" logs/*_extraction.log | head -3
+echo ""
+
+# Check for any errors
+echo "Checking for errors:"
+if grep -qi error logs/*_extraction.log; then
+    echo -e "${RED}⚠️  Errors found in logs. Check individual log files.${NC}"
+else
+    echo -e "${GREEN}✓ No errors found!${NC}"
+fi
+echo ""
+
 if [ $success -gt 0 ]; then
-    echo -e "${GREEN}Next step:${NC}"
-    echo "  ./scripts/parallel_optimization.sh"
+    echo -e "${GREEN}Ready to start training!${NC}"
+    echo "Next step:"
+    echo "  for sym in ES NQ RTY YM; do"
+    echo "    nohup python3 research/train_rf_three_way_split.py --symbol \$sym --bo-trials 50 > logs/\${sym}_training.log 2>&1 &"
+    echo "  done"
 fi
