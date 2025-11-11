@@ -18,6 +18,15 @@ This unified guide contains:
 - Troubleshooting
 - Quick command reference
 
+**👉 For GitHub → Server workflow, see [GITHUB_SERVER_WORKFLOW.md](GITHUB_SERVER_WORKFLOW.md)**
+
+This workflow guide explains:
+- GitHub as source of truth for all code
+- How to pull code from GitHub to your server
+- What files live in GitHub vs server-only
+- Why data/results aren't in git (too large, generated)
+- Common operations and troubleshooting
+
 ---
 
 ## Table of Contents
