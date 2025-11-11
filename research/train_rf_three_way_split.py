@@ -284,8 +284,12 @@ def phase1_hyperparameter_tuning(
                 **p
             })
 
-        bo_df = pd.DataFrame(bo_rows).sort_values("Sharpe", ascending=False)
-        logger.info(f"\nBayesian Optimization complete. Best Sharpe: {bo_df.iloc[0]['Sharpe']:.3f}")
+        if bo_rows:
+            bo_df = pd.DataFrame(bo_rows).sort_values("Sharpe", ascending=False)
+            logger.info(f"\nBayesian Optimization complete. Best Sharpe: {bo_df.iloc[0]['Sharpe']:.3f}")
+        else:
+            bo_df = pd.DataFrame()
+            logger.info(f"\nBayesian Optimization skipped (0 trials)")
 
     except ImportError:
         logger.warning("Optuna not available, skipping Bayesian Optimization")
