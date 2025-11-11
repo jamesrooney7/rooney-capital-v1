@@ -1,16 +1,16 @@
 #!/bin/bash
-# Extract training data for all symbols in parallel batches
-# Optimized for 16 cores / 125GB RAM
-# Runs 4 symbols at a time to avoid memory contention
+# Extract training data for all symbols using year-by-year chunked extraction
+# This avoids memory exhaustion by processing one year at a time per symbol
 
 set -e
 
 # Configuration
 SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
+YEARS=(2010 2011 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024)
 START_DATE="2010-01-01"
 END_DATE="2024-12-31"
 OUTPUT_DIR="data/training"
-BATCH_SIZE=4  # Run 4 symbols at a time (optimal for 16 cores)
+CHUNKS_DIR="data/training_chunks"
 
 # Color output
 GREEN='\033[0;32m'
@@ -19,61 +19,93 @@ RED='\033[0;31m'
 NC='\033[0m'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Extract Training Data (All Symbols)${NC}"
+echo -e "${GREEN}Extract Training Data (Chunked by Year)${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
-echo "Symbols to extract: ${#SYMBOLS[@]}"
+echo "Symbols: ${#SYMBOLS[@]}"
+echo "Years: ${#YEARS[@]} (2010-2024)"
+echo "Strategy: Extract year-by-year to avoid memory exhaustion"
 echo "Date range: $START_DATE to $END_DATE"
-echo "Batch size: $BATCH_SIZE (parallel per batch)"
 echo ""
 
-# Create output directory and logs directory
+# Create directories
 mkdir -p "$OUTPUT_DIR"
+mkdir -p "$CHUNKS_DIR"
 mkdir -p logs
 
-# Process symbols in batches
-total=${#SYMBOLS[@]}
-for ((i=0; i<$total; i+=BATCH_SIZE)); do
-    batch_num=$((i/BATCH_SIZE + 1))
-    batch_symbols=("${SYMBOLS[@]:i:BATCH_SIZE}")
+# Track progress
+total_symbols=${#SYMBOLS[@]}
+completed_symbols=0
 
+for sym in "${SYMBOLS[@]}"; do
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}BATCH $batch_num: ${batch_symbols[@]}${NC}"
+    echo -e "${GREEN}Extracting $sym ($((completed_symbols+1))/$total_symbols)${NC}"
     echo -e "${GREEN}========================================${NC}"
 
-    # Start batch
-    for sym in "${batch_symbols[@]}"; do
-        echo -e "${YELLOW}[$(date '+%H:%M:%S')] Starting extraction for $sym${NC}"
-        nohup python3 research/extract_training_data.py \
+    # Extract each year separately
+    year_count=0
+    for year in "${YEARS[@]}"; do
+        year_count=$((year_count + 1))
+        echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]})...${NC}"
+
+        python3 research/extract_training_data.py \
             --symbol "$sym" \
             --start "$START_DATE" \
             --end "$END_DATE" \
-            > logs/${sym}_extraction.log 2>&1 &
-    done
+            --filter-year $year \
+            --output "$CHUNKS_DIR/${sym}_${year}.csv" \
+            >> "logs/${sym}_extraction.log" 2>&1
 
-    # Wait for this batch to complete
-    echo -e "${YELLOW}Waiting for batch $batch_num to complete...${NC}"
-    while pgrep -f "extract_training_data.py" > /dev/null; do
-        sleep 10
-        # Show progress
-        running=$(pgrep -f "extract_training_data.py" | wc -l)
-        completed=$(ls $OUTPUT_DIR/*.csv 2>/dev/null | wc -l)
-        echo -e "${YELLOW}  Progress: $completed/18 complete, $running running${NC}"
-    done
-
-    echo -e "${GREEN}✅ Batch $batch_num complete!${NC}"
-
-    # Show which symbols completed in this batch
-    for sym in "${batch_symbols[@]}"; do
-        if [ -f "$OUTPUT_DIR/${sym}_transformed_features.csv" ]; then
-            size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
-            rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv" | xargs)
-            echo -e "  ${GREEN}✓${NC} $sym: $((rows-1)) trades, $size"
+        if [ $? -eq 0 ]; then
+            rows=$(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv" 2>/dev/null || echo "0")
+            if [ "$rows" -gt 1 ]; then
+                echo -e "${GREEN}  ✓ $year: $((rows-1)) trades${NC}"
+            else
+                echo -e "${YELLOW}  ⊘ $year: 0 trades (no signals)${NC}"
+            fi
         else
-            echo -e "  ${RED}✗${NC} $sym: FAILED (check logs/${sym}_extraction.log)"
+            echo -e "${RED}  ✗ $year: FAILED${NC}"
         fi
     done
+
+    # Combine all years into one file
+    echo -e "${YELLOW}[$sym] Combining ${#YEARS[@]} years...${NC}"
+
+    # Start with header from first year that has data
+    header_written=false
+    for year in "${YEARS[@]}"; do
+        if [ -f "$CHUNKS_DIR/${sym}_${year}.csv" ] && [ $(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv") -gt 1 ]; then
+            head -1 "$CHUNKS_DIR/${sym}_${year}.csv" > "$OUTPUT_DIR/${sym}_transformed_features.csv"
+            header_written=true
+            break
+        fi
+    done
+
+    if [ "$header_written" = false ]; then
+        echo -e "${RED}  ✗ $sym: No data for any year!${NC}"
+        continue
+    fi
+
+    # Append data from all years (skip headers)
+    for year in "${YEARS[@]}"; do
+        if [ -f "$CHUNKS_DIR/${sym}_${year}.csv" ]; then
+            tail -n +2 "$CHUNKS_DIR/${sym}_${year}.csv" >> "$OUTPUT_DIR/${sym}_transformed_features.csv" 2>/dev/null || true
+        fi
+    done
+
+    # Verify final file
+    if [ -f "$OUTPUT_DIR/${sym}_transformed_features.csv" ]; then
+        total_rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv")
+        size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
+        echo -e "${GREEN}✓ $sym complete: $((total_rows-1)) trades, $size${NC}"
+        completed_symbols=$((completed_symbols + 1))
+
+        # Clean up chunks for this symbol to save space
+        rm -f "$CHUNKS_DIR/${sym}_"*.csv
+    else
+        echo -e "${RED}✗ $sym: Final file not created${NC}"
+    fi
 done
 
 echo ""
@@ -89,13 +121,12 @@ success=0
 failed=0
 
 for symbol in "${SYMBOLS[@]}"; do
-    output_file="$OUTPUT_DIR/${symbol}_transformed_features.csv"
     total=$((total + 1))
-
-    if [ -f "$output_file" ]; then
-        rows=$(wc -l < "$output_file" | xargs)
-        size=$(du -h "$output_file" | cut -f1)
-        echo -e "  ${GREEN}✓${NC} $symbol: $((rows-1)) trades, $size"
+    if [ -f "$OUTPUT_DIR/${symbol}_transformed_features.csv" ]; then
+        rows=$(wc -l < "$OUTPUT_DIR/${symbol}_transformed_features.csv")
+        size=$(du -h "$OUTPUT_DIR/${symbol}_transformed_features.csv" | cut -f1)
+        cols=$(head -1 "$OUTPUT_DIR/${symbol}_transformed_features.csv" | awk -F',' '{print NF}')
+        echo -e "  ${GREEN}✓${NC} $symbol: $((rows-1)) trades, $cols columns, $size"
         success=$((success + 1))
     else
         echo -e "  ${RED}✗${NC} $symbol: FAILED"
@@ -114,7 +145,7 @@ echo ""
 
 # Check for any errors
 echo "Checking for errors:"
-if grep -qi error logs/*_extraction.log; then
+if grep -qi "error\|traceback" logs/*_extraction.log; then
     echo -e "${RED}⚠️  Errors found in logs. Check individual log files.${NC}"
 else
     echo -e "${GREEN}✓ No errors found!${NC}"
