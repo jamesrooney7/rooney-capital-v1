@@ -1,8 +1,9 @@
 #!/bin/bash
 # Extract training data for all symbols year-by-year with proper warmup
 # Runs 4 symbols in parallel to maximize CPU usage
-# Each year only loads that year + warmup (not full 15 years!)
-# Memory per symbol: ~2-3GB (very safe!)
+# 2010: No warmup (data starts in 2010)
+# 2011+: Uses previous year for warmup (e.g., 2010 data for 2011 warmup)
+# Memory per symbol: ~2-3GB for 2010, ~3-4GB for 2011+, ~4-5GB for 2024 (very safe!)
 
 set -e
 
@@ -27,21 +28,14 @@ echo ""
 echo "Symbols: ${#SYMBOLS[@]}"
 echo "Years: ${#YEARS[@]} (2010-2024)"
 echo "Parallel batch size: $BATCH_SIZE symbols at a time"
-echo "Strategy: Extract one year at a time (with warmup only)"
-echo "Memory per symbol: ~2-3GB (year + warmup, not full 15 years!)"
+echo "Strategy: 2010 (no warmup), 2011+ (previous year as warmup)"
+echo "Memory per symbol: ~2-3GB for early years, ~4-5GB for recent years"
 echo ""
 
 # Create directories
 mkdir -p "$OUTPUT_DIR"
 mkdir -p "$CHUNKS_DIR"
 mkdir -p logs
-
-# Function to calculate warmup start date (252 trading days ≈ 352 calendar days back)
-calculate_warmup_start() {
-    local year=$1
-    # Go back ~352 days from Jan 1 of the year
-    python3 -c "from datetime import datetime, timedelta; d = datetime($year, 1, 1) - timedelta(days=352); print(d.strftime('%Y-%m-%d'))"
-}
 
 # Function to process a single symbol (all years)
 process_symbol() {
@@ -54,20 +48,28 @@ process_symbol() {
     echo -e "${GREEN}[$sym] Starting extraction ($symbol_num/$total)${NC}"
     echo -e "${GREEN}========================================${NC}"
 
-    # Extract each year separately (with warmup)
+    # Extract each year separately (with warmup from previous year)
     local year_count=0
 
     for year in "${YEARS[@]}"; do
         year_count=$((year_count + 1))
-        local warmup_start=$(calculate_warmup_start $year)
-        local year_start="${year}-01-01"
-        local year_end="${year}-12-31"
 
-        echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]}) [warmup from $warmup_start]...${NC}"
+        # For 2010: no warmup available (data starts in 2010)
+        # For 2011+: use previous year for warmup (e.g., 2010 for 2011)
+        if [ "$year" -eq 2010 ]; then
+            local data_start="2010-01-01"
+            echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]}) [no warmup - first year]...${NC}"
+        else
+            local prev_year=$((year - 1))
+            local data_start="${prev_year}-01-01"
+            echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]}) [warmup from $prev_year]...${NC}"
+        fi
+
+        local year_end="${year}-12-31"
 
         python3 research/extract_training_data.py \
             --symbol "$sym" \
-            --start "$year_start" \
+            --start "$data_start" \
             --end "$year_end" \
             --output "$CHUNKS_DIR/${sym}_${year}.csv" \
             >> "logs/${sym}_extraction.log" 2>&1
