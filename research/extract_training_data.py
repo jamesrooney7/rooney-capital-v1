@@ -266,7 +266,11 @@ class FeatureLoggingStrategy(IbsStrategy):
             if order.isbuy():
                 # Entry order completed - capture features
                 try:
-                    features = self.collect_filter_values(intraday_ago=0)
+                    # CRITICAL: Use intraday_ago=-1 to capture features from the bar
+                    # when the entry DECISION was made, not the bar when order executed.
+                    # Orders execute at open of next bar (cheat_on_close=False), so
+                    # we need previous bar's features to avoid lookahead bias.
+                    features = self.collect_filter_values(intraday_ago=-1)
                     entry_time = bt.num2date(self.hourly.datetime[0])
                     entry_price = order.executed.price
 
