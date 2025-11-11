@@ -471,6 +471,32 @@ def phase3_final_evaluation(
     # Portfolio metrics
     portfolio = portfolio_metrics_from_daily(daily)
 
+    # YEAR-BY-YEAR BREAKDOWN
+    logger.info(f"\n{'='*60}")
+    logger.info("YEAR-BY-YEAR TEST PERFORMANCE:")
+    logger.info(f"{'='*60}")
+
+    test_df = Xy_test[passed].copy()
+    test_df['Year'] = test_df['Date'].dt.year
+
+    yearly_results = {}
+    for year in sorted(test_df['Year'].unique()):
+        year_data = test_df[test_df['Year'] == year]
+        year_pnl = year_data['y_pnl_usd'].sum()
+        year_trades = len(year_data)
+        year_wins = (year_data['y_binary'] == 1).sum()
+        year_win_rate = year_wins / year_trades if year_trades > 0 else 0
+
+        yearly_results[int(year)] = {
+            'trades': int(year_trades),
+            'pnl_usd': float(year_pnl),
+            'win_rate': float(year_win_rate)
+        }
+
+        logger.info(f"{year}: {year_trades:>4d} trades | PnL: ${year_pnl:>12,.2f} | Win Rate: {year_win_rate:>5.1%}")
+
+    logger.info(f"{'='*60}\n")
+
     test_metrics = {
         "trades": int(passed.sum()),
         "sharpe": float(portfolio.get("Sharpe", 0.0)),
@@ -483,6 +509,7 @@ def phase3_final_evaluation(
         "cagr": float(portfolio.get("CAGR", 0.0)),
         "start_date": str(Xy_test["Date"].min()),
         "end_date": str(Xy_test["Date"].max()),
+        "yearly_breakdown": yearly_results,
     }
 
     logger.info(f"\n{'='*60}")
