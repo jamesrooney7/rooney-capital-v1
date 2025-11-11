@@ -1,6 +1,7 @@
 #!/bin/bash
 # Extract training data for all symbols using year-by-year chunked extraction
-# This avoids memory exhaustion by processing one year at a time per symbol
+# Runs 4 symbols in parallel to maximize CPU usage while staying within memory limits
+# Memory: ~25GB per symbol × 4 = ~100GB (safe within 125GB total)
 
 set -e
 
@@ -11,19 +12,22 @@ START_DATE="2010-01-01"
 END_DATE="2024-12-31"
 OUTPUT_DIR="data/training"
 CHUNKS_DIR="data/training_chunks"
+BATCH_SIZE=4  # Number of symbols to process in parallel
 
 # Color output
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${GREEN}========================================${NC}"
-echo -e "${GREEN}Extract Training Data (Chunked by Year)${NC}"
+echo -e "${GREEN}Extract Training Data (Parallel Batches)${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
 echo "Symbols: ${#SYMBOLS[@]}"
 echo "Years: ${#YEARS[@]} (2010-2024)"
+echo "Parallel batch size: $BATCH_SIZE symbols at a time"
 echo "Strategy: Extract year-by-year to avoid memory exhaustion"
 echo "Date range: $START_DATE to $END_DATE"
 echo ""
@@ -33,18 +37,19 @@ mkdir -p "$OUTPUT_DIR"
 mkdir -p "$CHUNKS_DIR"
 mkdir -p logs
 
-# Track progress
-total_symbols=${#SYMBOLS[@]}
-completed_symbols=0
+# Function to process a single symbol (all years)
+process_symbol() {
+    local sym=$1
+    local symbol_num=$2
+    local total=$3
 
-for sym in "${SYMBOLS[@]}"; do
     echo ""
     echo -e "${GREEN}========================================${NC}"
-    echo -e "${GREEN}Extracting $sym ($((completed_symbols+1))/$total_symbols)${NC}"
+    echo -e "${GREEN}[$sym] Starting extraction ($symbol_num/$total)${NC}"
     echo -e "${GREEN}========================================${NC}"
 
     # Extract each year separately
-    year_count=0
+    local year_count=0
     for year in "${YEARS[@]}"; do
         year_count=$((year_count + 1))
         echo -e "${YELLOW}[$sym] Year $year ($year_count/${#YEARS[@]})...${NC}"
@@ -60,12 +65,12 @@ for sym in "${SYMBOLS[@]}"; do
         if [ $? -eq 0 ]; then
             rows=$(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv" 2>/dev/null || echo "0")
             if [ "$rows" -gt 1 ]; then
-                echo -e "${GREEN}  ✓ $year: $((rows-1)) trades${NC}"
+                echo -e "${GREEN}[$sym]   ✓ $year: $((rows-1)) trades${NC}"
             else
-                echo -e "${YELLOW}  ⊘ $year: 0 trades (no signals)${NC}"
+                echo -e "${YELLOW}[$sym]   ⊘ $year: 0 trades (no signals)${NC}"
             fi
         else
-            echo -e "${RED}  ✗ $year: FAILED${NC}"
+            echo -e "${RED}[$sym]   ✗ $year: FAILED${NC}"
         fi
     done
 
@@ -73,7 +78,7 @@ for sym in "${SYMBOLS[@]}"; do
     echo -e "${YELLOW}[$sym] Combining ${#YEARS[@]} years...${NC}"
 
     # Start with header from first year that has data
-    header_written=false
+    local header_written=false
     for year in "${YEARS[@]}"; do
         if [ -f "$CHUNKS_DIR/${sym}_${year}.csv" ] && [ $(wc -l < "$CHUNKS_DIR/${sym}_${year}.csv") -gt 1 ]; then
             head -1 "$CHUNKS_DIR/${sym}_${year}.csv" > "$OUTPUT_DIR/${sym}_transformed_features.csv"
@@ -83,8 +88,8 @@ for sym in "${SYMBOLS[@]}"; do
     done
 
     if [ "$header_written" = false ]; then
-        echo -e "${RED}  ✗ $sym: No data for any year!${NC}"
-        continue
+        echo -e "${RED}[$sym]   ✗ No data for any year!${NC}"
+        return 1
     fi
 
     # Append data from all years (skip headers)
@@ -96,16 +101,48 @@ for sym in "${SYMBOLS[@]}"; do
 
     # Verify final file
     if [ -f "$OUTPUT_DIR/${sym}_transformed_features.csv" ]; then
-        total_rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv")
-        size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
-        echo -e "${GREEN}✓ $sym complete: $((total_rows-1)) trades, $size${NC}"
-        completed_symbols=$((completed_symbols + 1))
+        local total_rows=$(wc -l < "$OUTPUT_DIR/${sym}_transformed_features.csv")
+        local size=$(du -h "$OUTPUT_DIR/${sym}_transformed_features.csv" | cut -f1)
+        echo -e "${GREEN}[$sym] ✓ COMPLETE: $((total_rows-1)) trades, $size${NC}"
 
         # Clean up chunks for this symbol to save space
         rm -f "$CHUNKS_DIR/${sym}_"*.csv
+        return 0
     else
-        echo -e "${RED}✗ $sym: Final file not created${NC}"
+        echo -e "${RED}[$sym] ✗ Final file not created${NC}"
+        return 1
     fi
+}
+
+# Process symbols in batches of 4
+total_symbols=${#SYMBOLS[@]}
+completed_symbols=0
+batch_num=0
+
+for ((i=0; i<${#SYMBOLS[@]}; i+=BATCH_SIZE)); do
+    batch_num=$((batch_num + 1))
+    batch_symbols=("${SYMBOLS[@]:i:BATCH_SIZE}")
+
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}BATCH $batch_num: Processing ${#batch_symbols[@]} symbols in parallel${NC}"
+    echo -e "${BLUE}Symbols: ${batch_symbols[*]}${NC}"
+    echo -e "${BLUE}========================================${NC}"
+    echo ""
+
+    # Start all symbols in this batch in parallel
+    for sym in "${batch_symbols[@]}"; do
+        completed_symbols=$((completed_symbols + 1))
+        process_symbol "$sym" $completed_symbols $total_symbols &
+    done
+
+    # Wait for all symbols in this batch to complete
+    wait
+
+    echo ""
+    echo -e "${BLUE}========================================${NC}"
+    echo -e "${BLUE}BATCH $batch_num COMPLETE${NC}"
+    echo -e "${BLUE}========================================${NC}"
 done
 
 echo ""
@@ -140,12 +177,12 @@ echo ""
 
 # Verify warmup fix is present
 echo "Verifying warmup fix:"
-grep "warmup period" logs/*_extraction.log | head -3
+grep "warmup period" logs/*_extraction.log 2>/dev/null | head -3 || echo "  (logs not yet available)"
 echo ""
 
 # Check for any errors
 echo "Checking for errors:"
-if grep -qi "error\|traceback" logs/*_extraction.log; then
+if grep -qi "error\|traceback" logs/*_extraction.log 2>/dev/null; then
     echo -e "${RED}⚠️  Errors found in logs. Check individual log files.${NC}"
 else
     echo -e "${GREEN}✓ No errors found!${NC}"
