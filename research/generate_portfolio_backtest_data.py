@@ -210,13 +210,14 @@ def run_backtest_with_trade_logging(
     symbols_to_load = [primary_symbol]
 
     # Try loading reference symbols
+    # IMPORTANT: Load from warmup_start_date so cross-asset features have proper historical data
     from research.utils.data_loader import load_symbol_data
     for ref_symbol in reference_symbols:
         try:
             hourly_df, daily_df = load_symbol_data(
                 ref_symbol,
                 data_dir=data_dir,
-                start_date=start_date,
+                start_date=warmup_start_date,  # Use warmup start for reference data too
                 end_date=end_date
             )
 
