@@ -384,6 +384,15 @@ def extract_training_data(
     logger.info(f"Extracting training data for {symbol}")
     logger.info(f"Period: {start_date} to {end_date}")
 
+    # Calculate warmup start date for reference symbols
+    # Reference symbols need 252 days of history before start_date for accurate cross-asset features
+    from datetime import datetime, timedelta
+    start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+    warmup_days = 252 * 7 // 5  # 252 trading days = ~352 calendar days (accounting for weekends)
+    warmup_start_dt = start_dt - timedelta(days=warmup_days)
+    warmup_start_date = warmup_start_dt.strftime('%Y-%m-%d')
+    logger.info(f"Reference symbols will load from {warmup_start_date} (warmup period)")
+
     # Create Cerebro instance
     cerebro = bt.Cerebro(runonce=False)
 
@@ -427,10 +436,12 @@ def extract_training_data(
     from research.utils.data_loader import load_symbol_data
     for ref_symbol in reference_symbols:
         try:
+            # CRITICAL: Load reference symbols from warmup_start_date to ensure
+            # cross-asset features have complete historical data from day 1
             hourly_df, daily_df = load_symbol_data(
                 ref_symbol,
                 data_dir=data_dir,
-                start_date=start_date,
+                start_date=warmup_start_date,  # Use warmup start for reference data
                 end_date=end_date
             )
 
