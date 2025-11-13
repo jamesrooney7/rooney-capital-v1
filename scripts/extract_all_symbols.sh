@@ -13,7 +13,7 @@ SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
 YEARS=(2011 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024)  # Skip 2010 (no warmup available)
 CHUNKS_DIR="data/training_chunks"
 OUTPUT_DIR="data/training"
-BATCH_SIZE=4  # Number of symbols to process in parallel
+BATCH_SIZE=14  # Number of symbols to process in parallel (all remaining symbols)
 
 # Color output
 GREEN='\033[0;32m'
