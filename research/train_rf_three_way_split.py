@@ -194,10 +194,13 @@ def load_and_split_data(
     logger.info(f"  Trades: {len(df_test)} (HELD OUT - never touched until final eval)")
     logger.info(f"{'='*60}\n")
 
-    # Prepare feature matrices
-    Xy_train = build_core_features(df_train)
-    Xy_threshold = build_core_features(df_threshold)
-    Xy_test = build_core_features(df_test)
+    # Prepare feature matrices with proper scaler handling to prevent data leakage
+    # CRITICAL: Fit scaler on training data only, reuse for threshold/test
+    logger.info("Normalizing features (fitting scaler on training data only)...")
+    Xy_train, train_scaler = build_core_features(df_train, scaler=None)  # Fit new scaler
+    Xy_threshold, _ = build_core_features(df_threshold, scaler=train_scaler)  # Reuse train scaler
+    Xy_test, _ = build_core_features(df_test, scaler=train_scaler)  # Reuse train scaler
+    logger.info("Features normalized using training set statistics (prevents data leakage)")
 
     # Extract feature columns (exclude metadata and targets)
     exclude_cols = {

@@ -240,17 +240,20 @@ def deflated_sharpe_ratio(sr: float, n: int, kurt_excess: float = 0.0, m: int = 
     sr_star = _norm_ppf(1 - 1.0/m) / np.sqrt(max(n - 1, 1)) if m>1 else 0.0
     return _psr(sr, n, kurt_excess, sr_star)
 
-def build_core_features(Xy: pd.DataFrame) -> pd.DataFrame:
+def build_core_features(Xy: pd.DataFrame, scaler=None):
     """Build normalized feature matrix while preserving Date and target columns.
 
     Args:
         Xy: DataFrame with raw features, metadata, and targets
+        scaler: Optional pre-fitted StandardScaler (to prevent data leakage)
 
     Returns:
-        DataFrame with normalized features + preserved Date and target columns
+        Tuple of (result, scaler) where:
+        - result: DataFrame with normalized features + preserved Date and target columns
+        - scaler: The StandardScaler used (either fitted or passed in)
     """
     # Get normalized features only
-    X_normalized = build_normalised_feature_matrix(Xy)
+    X_normalized, scaler = build_normalised_feature_matrix(Xy, scaler)
 
     # Preserve metadata and target columns needed by training pipeline
     preserve_cols = ['Date', 'Date/Time', 'Exit Date/Time', 'y_binary', 'y_return', 'y_pnl_usd', 'y_pnl_gross']
@@ -258,7 +261,7 @@ def build_core_features(Xy: pd.DataFrame) -> pd.DataFrame:
 
     # Combine: preserved columns first, then normalized features
     result = pd.concat([preserved, X_normalized], axis=1)
-    return result
+    return result, scaler
 
 def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     Xn = X.copy()
