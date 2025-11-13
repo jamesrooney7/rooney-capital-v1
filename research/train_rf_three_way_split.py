@@ -60,6 +60,67 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def remove_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove duplicate columns that have identical values.
+
+    Keeps the column with the simplest name (shortest, or prefers lowercase).
+    """
+    # Find groups of columns with identical values
+    cols_to_check = [c for c in df.columns if c not in ['Date', 'Date/Time', 'entry_time', 'exit_time',
+                                                          'y_binary', 'y_return', 'y_pnl_usd', 'y_pnl_gross']]
+
+    if not cols_to_check:
+        return df
+
+    # Build correlation matrix to find perfect correlations
+    try:
+        corr_matrix = df[cols_to_check].corr().abs()
+    except Exception as e:
+        logger.warning(f"Could not compute correlation matrix for deduplication: {e}")
+        return df
+
+    # Find groups of perfectly correlated features (correlation = 1.0)
+    duplicate_groups = []
+    already_grouped = set()
+
+    for i, col1 in enumerate(cols_to_check):
+        if col1 in already_grouped:
+            continue
+
+        group = [col1]
+        for j, col2 in enumerate(cols_to_check):
+            if i != j and col2 not in already_grouped:
+                if corr_matrix.loc[col1, col2] > 0.9999:  # Perfect correlation
+                    group.append(col2)
+                    already_grouped.add(col2)
+
+        if len(group) > 1:
+            duplicate_groups.append(group)
+            already_grouped.add(col1)
+
+    if not duplicate_groups:
+        logger.info("No duplicate columns found")
+        return df
+
+    # For each group, keep the column with simplest name
+    cols_to_drop = []
+    for group in duplicate_groups:
+        # Sort by: 1) prefer lowercase, 2) prefer shorter names
+        sorted_group = sorted(group, key=lambda x: (not x.islower(), len(x), x))
+        keep_col = sorted_group[0]
+        drop_cols = sorted_group[1:]
+
+        logger.info(f"Duplicate group: {group}")
+        logger.info(f"  Keeping: {keep_col}, Dropping: {drop_cols}")
+        cols_to_drop.extend(drop_cols)
+
+    # Drop duplicate columns
+    df_dedup = df.drop(columns=cols_to_drop)
+    logger.info(f"Removed {len(cols_to_drop)} duplicate columns ({len(df.columns)} → {len(df_dedup.columns)})")
+
+    return df_dedup
+
+
 def load_and_split_data(
     symbol: str,
     data_dir: str,
@@ -88,6 +149,9 @@ def load_and_split_data(
     logger.info(f"Loading training data from: {csv_path}")
     df = pd.read_csv(csv_path)
     logger.info(f"Loaded {len(df)} trades with {len(df.columns)} columns")
+
+    # Remove duplicate columns (e.g., 'ES Hourly Return' and 'enableESReturnHour')
+    df = remove_duplicate_columns(df)
 
     # Ensure we have date column
     if "Date/Time" in df.columns:
