@@ -9,7 +9,8 @@
 set -e
 
 # Configuration
-SYMBOLS=(ES NQ RTY YM GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
+# ES, NQ, RTY, YM already completed - starting from GC onwards
+SYMBOLS=(GC SI HG CL NG PL 6A 6B 6C 6E 6J 6M 6N 6S)
 YEARS=(2011 2012 2013 2014 2015 2016 2017 2018 2019 2020 2021 2022 2023 2024)  # Skip 2010 (no warmup available)
 CHUNKS_DIR="data/training_chunks"
 OUTPUT_DIR="data/training"
