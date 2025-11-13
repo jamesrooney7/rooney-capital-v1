@@ -63,8 +63,16 @@ logger = logging.getLogger(__name__)
 def remove_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Remove duplicate columns that have identical values.
 
+    Also removes VIX-related features (not available in live Databento trading).
+
     Keeps the column with the simplest name (shortest, or prefers lowercase).
     """
+    # Remove VIX-related columns (not available in live Databento trading)
+    vix_cols = [c for c in df.columns if 'vix' in c.lower()]
+    if vix_cols:
+        logger.info(f"Removing {len(vix_cols)} VIX-related columns (not available in live trading): {vix_cols}")
+        df = df.drop(columns=vix_cols)
+
     # Find groups of columns with identical values
     cols_to_check = [c for c in df.columns if c not in ['Date', 'Date/Time', 'entry_time', 'exit_time',
                                                           'y_binary', 'y_return', 'y_pnl_usd', 'y_pnl_gross']]
