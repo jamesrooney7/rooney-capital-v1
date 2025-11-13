@@ -80,14 +80,7 @@ def remove_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
     if not cols_to_check:
         return df
 
-    # Build correlation matrix to find perfect correlations
-    try:
-        corr_matrix = df[cols_to_check].corr().abs()
-    except Exception as e:
-        logger.warning(f"Could not compute correlation matrix for deduplication: {e}")
-        return df
-
-    # Find groups of perfectly correlated features (correlation = 1.0)
+    # Find groups of identical columns by comparing actual values
     duplicate_groups = []
     already_grouped = set()
 
@@ -96,11 +89,19 @@ def remove_duplicate_columns(df: pd.DataFrame) -> pd.DataFrame:
             continue
 
         group = [col1]
-        for j, col2 in enumerate(cols_to_check):
-            if i != j and col2 not in already_grouped:
-                if corr_matrix.loc[col1, col2] > 0.9999:  # Perfect correlation
+        for j in range(i + 1, len(cols_to_check)):
+            col2 = cols_to_check[j]
+            if col2 in already_grouped:
+                continue
+
+            # Check if columns have identical values (accounting for NaN)
+            try:
+                if df[col1].equals(df[col2]):
                     group.append(col2)
                     already_grouped.add(col2)
+            except Exception:
+                # If comparison fails, skip
+                continue
 
         if len(group) > 1:
             duplicate_groups.append(group)
