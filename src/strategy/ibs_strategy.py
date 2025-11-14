@@ -5712,13 +5712,20 @@ class IbsStrategy(bt.Strategy):
             ml_threshold = self.p.ml_threshold
 
             # Count how many features were calculated (non-None values)
+            # FIX: Normalize filter_snapshot keys to match ML feature names
             if hasattr(self.p, "ml_features") and self.p.ml_features:
                 features = self.p.ml_features
             else:
                 features = []
             total_features = len(features)
+
+            # Normalize the snapshot keys to match feature names
+            normalized_snapshot = {
+                normalize_column_name(key): value
+                for key, value in filter_snapshot.items()
+            }
             calculated_features = sum(
-                1 for feat in features if filter_snapshot.get(feat) is not None
+                1 for feat in features if normalized_snapshot.get(feat) is not None
             )
 
             if ml_score is not None:
@@ -5741,7 +5748,7 @@ class IbsStrategy(bt.Strategy):
                 missing_features = [
                     feature
                     for feature in features
-                    if filter_snapshot.get(feature) is None
+                    if normalized_snapshot.get(feature) is None
                 ]
                 max_display = 8
                 displayed_features = missing_features[:max_display]
@@ -6084,7 +6091,15 @@ class IbsStrategy(bt.Strategy):
                     }
             else:
                 # Order canceled or rejected - release pending position slot
-                logger.info(f"ℹ️ {self.p.symbol} ORDER {order.getstatusname()}")
+                action = "BUY" if order.isbuy() else "SELL"
+                status = order.getstatusname()
+                # Log with more context to help diagnose issues
+                broker_cash = self.broker.getcash()
+                broker_value = self.broker.getvalue()
+                logger.warning(
+                    f"⚠️ {self.p.symbol} ORDER {status} | {action} | Bar: {len(self.hourly)} | "
+                    f"Cash: ${broker_cash:,.0f} | Portfolio Value: ${broker_value:,.0f}"
+                )
                 if self.p.portfolio_coordinator and order.isbuy():
                     self.p.portfolio_coordinator.release_pending_position(self.p.symbol)
             self.order = None
