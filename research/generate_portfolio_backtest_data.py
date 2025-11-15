@@ -59,6 +59,114 @@ class TradeLoggingStrategy(IbsStrategy):
 
         super().__init__(*args, **kwargs)
 
+        # CRITICAL: Force calculation of ALL features (not just enabled ones)
+        # This populates ml_feature_param_keys to tell collect_filter_values()
+        # to calculate every possible feature, matching how training data was extracted
+        self.ml_feature_param_keys = self._get_all_filter_param_keys()
+        logger.info(f"Forcing calculation of {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
+
+    def _get_all_filter_param_keys(self) -> set:
+        """
+        Return comprehensive set of all filter parameter keys.
+
+        This ensures collect_filter_values() calculates ALL possible features,
+        not just the ones explicitly enabled in the strategy config.
+        This matches how training data was extracted in extract_training_data.py
+        """
+        keys = {
+            # Calendar filters
+            'allowedDOW', 'allowedMon', 'enableDOM', 'domDay',
+            'enableBegWeek', 'enableEvenOdd',
+
+            # Price/return filters
+            'enablePrevDayPct', 'prev_day_pct',
+            'enablePrevBarPct', 'prev_bar_pct',
+
+            # IBS filters
+            'enableIBSEntry', 'enableIBSExit', 'ibs',
+            'enableDailyIBS', 'daily_ibs',
+            'enablePrevIBS', 'prev_ibs',
+            'enablePrevIBSDaily', 'prev_daily_ibs',
+
+            # Pair filters
+            'enablePairIBS', 'pair_ibs',
+            'enablePairZ', 'pair_z',
+
+            # RSI filters
+            'enableRSIEntry', 'rsi_entry',
+            'enableRSIEntry2Len', 'rsi_entry2_len',
+            'enableRSIEntry14Len', 'rsi_entry14_len',
+            'enableRSIEntry2', 'rsi2_entry',
+            'enableDailyRSI', 'daily_rsi',
+            'enableDailyRSI2Len', 'daily_rsi2_len',
+            'enableDailyRSI14Len', 'daily_rsi14_len',
+
+            # Bollinger Bands
+            'enableBBHigh', 'bb_high',
+            'enableBBHighD', 'bb_high_d',
+
+            # EMA filters
+            'enableEMA8', 'ema8',
+            'enableEMA20', 'ema20',
+
+            # ATR filters
+            'enableATRZ', 'atrz',
+            'enableHourlyATRPercentile', 'hourly_atr_percentile',
+
+            # Volume filters
+            'enableVolZ', 'volz',
+
+            # Momentum/distance filters
+            'enableDistZ', 'distz',
+            'enableMom3Z', 'mom3z',
+            'enablePriceZ', 'pricez',
+
+            # Daily ATR/volume
+            'enableDATRZ', 'datrz',
+            'enableDVolZ', 'dvolz',
+
+            # Trend/ratio filters
+            'enableTRATRRatio', 'tratr_ratio',
+
+            # Supply zone
+            'use_supply_zone', 'supply_zone',
+
+            # N7 bar
+            'enableN7Bar', 'n7_bar',
+
+            # Inside bar
+            'enableInsideBar', 'inside_bar',
+
+            # Bear count
+            'enableBearCount', 'bear_count',
+
+            # Spiral ER
+            'enableSER', 'ser',
+
+            # TWRC
+            'enableTWRC', 'twrc',
+
+            # VIX regime
+            'enableVIXReg', 'vix_reg',
+        }
+
+        # Add cross-asset z-score and return keys dynamically
+        cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
+                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT', 'VIX']
+        timeframes = ['Hour', 'Day']
+
+        for symbol in cross_symbols:
+            for tf in timeframes:
+                # Z-score filters
+                keys.add(f'enable{symbol}ZScore{tf}')
+                keys.add(f'{symbol.lower()}_z_score_{tf.lower()}')
+
+                # Daily return filters
+                keys.add(f'{symbol.lower()}_daily_return')
+                keys.add(f'{symbol.lower()}_hourly_return')
+
+        return keys
+
     def notify_order(self, order):
         """Capture entry and exit details with ML feature values."""
         if order.status in [order.Submitted, order.Accepted]:
