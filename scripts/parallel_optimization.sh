@@ -11,9 +11,13 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # Configuration
 MAX_PARALLEL_JOBS=16  # Optimized for 125GB RAM / 16 cores (change to 12 if running other workloads)
 DATA_DIR="$PROJECT_ROOT/data/training"
-OUTPUT_BASE_DIR="$PROJECT_ROOT/results"
-FEATURE_SELECTION_END="2020-12-31"
-HOLDOUT_DATE="2023-01-01"
+OUTPUT_DIR="$PROJECT_ROOT/src/models"
+TRAIN_END="2018-12-31"        # End of hyperparameter tuning period
+THRESHOLD_END="2020-12-31"     # End of threshold optimization period
+RS_TRIALS=120                  # Random search trials
+BO_TRIALS=300                  # Bayesian optimization trials
+EMBARGO_DAYS=3                 # CPCV embargo days
+K_FEATURES=30                  # Number of features to select
 
 # Color output
 RED='\033[0;31m'
@@ -59,52 +63,47 @@ echo ""
 optimize_symbol() {
     local csv_path=$1
     local symbol=$(basename "$csv_path" | sed 's/_transformed_features.csv//')
-    local output_dir="$OUTPUT_BASE_DIR/${symbol}_optimization"
+    local log_dir="$PROJECT_ROOT/logs"
 
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] Starting optimization for $symbol${NC}"
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] Starting three-way split optimization for $symbol${NC}"
 
     # Run optimization with logging
     # Set PYTHONPATH to include research and src directories
     cd "$PROJECT_ROOT" || exit 1
 
-    # Create output directory (after cd to project root)
-    mkdir -p "$output_dir"
+    # Create log directory
+    mkdir -p "$log_dir"
 
     PYTHONPATH="$PROJECT_ROOT/research:$PROJECT_ROOT/src:$PYTHONPATH" \
-    python3 research/rf_cpcv_random_then_bo.py \
-        --input "$csv_path" \
-        --outdir "$output_dir" \
+    python3 research/train_rf_three_way_split.py \
         --symbol "$symbol" \
-        --screen_method clustered \
-        --n_clusters 15 \
-        --features_per_cluster 2 \
-        --feature_selection_end "$FEATURE_SELECTION_END" \
-        --holdout_start "$HOLDOUT_DATE" \
-        --rs_trials 25 \
-        --bo_trials 65 \
-        --folds 5 \
-        --k_test 2 \
-        --embargo_days 2 \
-        2>&1 | tee "$output_dir/optimization_${symbol}.log"
+        --data-dir "$DATA_DIR" \
+        --output-dir "$OUTPUT_DIR" \
+        --train-end "$TRAIN_END" \
+        --threshold-end "$THRESHOLD_END" \
+        --rs-trials "$RS_TRIALS" \
+        --bo-trials "$BO_TRIALS" \
+        --embargo-days "$EMBARGO_DAYS" \
+        --k-features "$K_FEATURES" \
+        2>&1 | tee "$log_dir/${symbol}_optimization.log"
 
     local exit_code=${PIPESTATUS[0]}
 
     if [ $exit_code -eq 0 ]; then
         echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Completed $symbol${NC}"
 
-        # Print summary
-        if [ -f "$output_dir/best.json" ]; then
+        # Print summary from test results
+        if [ -f "$OUTPUT_DIR/${symbol}_test_results.json" ]; then
             echo -e "${YELLOW}Summary for $symbol:${NC}"
             python3 -c "
 import json
-with open('$output_dir/best.json') as f:
+with open('$OUTPUT_DIR/${symbol}_test_results.json') as f:
     data = json.load(f)
-    perf = data.get('performance', {})
-    print(f\"  Sharpe: {perf.get('sharpe_ratio', 'N/A'):.3f}\")
-    print(f\"  DSR: {perf.get('deflated_sharpe_ratio', 'N/A'):.3f}\")
-    print(f\"  Profit Factor: {perf.get('profit_factor', 'N/A'):.2f}\")
-    print(f\"  Era Positive: {perf.get('era_positive', 'N/A'):.2f}\")
-    print(f\"  Features: {len(data.get('ml_features', []))}\")
+    print(f\"  Test Sharpe: {data.get('test_sharpe', 'N/A'):.3f}\")
+    print(f\"  Test Sortino: {data.get('test_sortino', 'N/A'):.3f}\")
+    print(f\"  Profit Factor: {data.get('test_profit_factor', 'N/A'):.2f}\")
+    print(f\"  Win Rate: {data.get('test_win_rate', 'N/A'):.1f}%\")
+    print(f\"  Trades: {data.get('test_trades', 'N/A')}\")
 " 2>/dev/null || echo "  (Could not parse results)"
         fi
     else
@@ -115,7 +114,7 @@ with open('$output_dir/best.json') as f:
 }
 
 export -f optimize_symbol
-export PROJECT_ROOT DATA_DIR OUTPUT_BASE_DIR FEATURE_SELECTION_END HOLDOUT_DATE GREEN RED YELLOW NC
+export PROJECT_ROOT DATA_DIR OUTPUT_DIR TRAIN_END THRESHOLD_END RS_TRIALS BO_TRIALS EMBARGO_DAYS K_FEATURES GREEN RED YELLOW NC
 
 # Run optimizations in parallel
 echo -e "${GREEN}Starting parallel optimization (max $MAX_PARALLEL_JOBS jobs)...${NC}"
@@ -133,10 +132,14 @@ echo ""
 echo "Results Summary:"
 for csv in "${CSV_FILES[@]}"; do
     symbol=$(basename "$csv" | sed 's/_transformed_features.csv//')
-    output_dir="$OUTPUT_BASE_DIR/${symbol}_optimization"
 
-    if [ -f "$output_dir/best.json" ]; then
-        echo -e "  ${GREEN}✓${NC} $symbol: $output_dir/best.json"
+    if [ -f "$OUTPUT_DIR/${symbol}_rf_model.pkl" ] && [ -f "$OUTPUT_DIR/${symbol}_best.json" ]; then
+        echo -e "  ${GREEN}✓${NC} $symbol: Model and metadata saved"
+        if [ -f "$OUTPUT_DIR/${symbol}_test_results.json" ]; then
+            # Show test Sharpe
+            test_sharpe=$(python3 -c "import json; print(json.load(open('$OUTPUT_DIR/${symbol}_test_results.json')).get('test_sharpe', 'N/A'))" 2>/dev/null)
+            echo -e "       Test Sharpe: $test_sharpe"
+        fi
     else
         echo -e "  ${RED}✗${NC} $symbol: FAILED"
     fi
@@ -144,6 +147,7 @@ done
 
 echo ""
 echo "Next steps:"
-echo "  1. Review results in $OUTPUT_BASE_DIR/*/best.json"
-echo "  2. Deploy models: cp $OUTPUT_BASE_DIR/*/best.json src/models/"
-echo "  3. Deploy pickles: cp $OUTPUT_BASE_DIR/*/*.pkl src/models/"
+echo "  1. Review test results: cat $OUTPUT_DIR/*_test_results.json"
+echo "  2. Review model metadata: cat $OUTPUT_DIR/*_best.json"
+echo "  3. Models are ready for production in: $OUTPUT_DIR/"
+echo "  4. Individual logs available in: logs/"
