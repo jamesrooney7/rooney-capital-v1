@@ -294,12 +294,18 @@ def run_backtest_with_trade_logging(
     output_dir: Path,
     data_dir: str = 'data/resampled',
     initial_cash: float = 100000.0,
-    warmup_days: int = 252,  # 1 year warmup
+    warmup_days: int = 365,  # ~252 TRADING days (accounting for weekends/holidays)
 ):
     """Run backtest and save detailed trade data with ML features.
 
     Args:
-        warmup_days: Number of days before start_date to load for warmup (default: 252 = 1 year)
+        warmup_days: Number of CALENDAR days before start_date to load for warmup
+                     (default: 365 = ~252 trading days to populate 252-period indicators)
+
+    IMPORTANT: Many indicators use 252-period windows (atrWindow, volWindow, cross-asset
+    z-scores). These require 252 TRADING DAYS, which is ~365 calendar days accounting
+    for weekends and holidays. Using less than 365 days will cause features to return
+    None during early backtest period.
     """
     # Calculate warmup start date
     start_dt = datetime.strptime(start_date, '%Y-%m-%d')
