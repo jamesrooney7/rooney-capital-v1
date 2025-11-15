@@ -224,6 +224,11 @@ def run_backtest_with_trade_logging(
     tick_size = spec["tick_size"]
     cerebro.broker.set_slippage_fixed(tick_size)
 
+    # Enable cheat-on-close to match original test methodology
+    # WARNING: This introduces look-ahead bias but matches how the model was tested
+    # Signal at bar close → Execute at bar close (unrealistic, for testing only)
+    cerebro.broker.set_coc(True)
+
     # Load data (primary + references)
     primary_symbol = symbol
     reference_symbols = ['TLT', 'VIX', 'ES', 'NQ', 'RTY', 'YM',
