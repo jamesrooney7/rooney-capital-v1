@@ -151,7 +151,7 @@ class TradeLoggingStrategy(IbsStrategy):
 
         # Add cross-asset z-score and return keys dynamically
         cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
-                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT', 'VIX']
+                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT']
         timeframes = ['Hour', 'Day']
 
         for symbol in cross_symbols:
@@ -173,16 +173,26 @@ class TradeLoggingStrategy(IbsStrategy):
 
         if order.status == order.Completed:
             if order.isbuy():
-                # Entry - capture ML features from order.info
-                entry_time = bt.num2date(self.hourly.datetime[0])
-                entry_price = order.executed.price
-                filter_snapshot = order.info.get('filter_snapshot', {})
+                # Entry - capture ML features by calling collect_filter_values() DIRECTLY
+                # This ensures we get ALL features using our comprehensive ml_feature_param_keys
+                try:
+                    entry_time = bt.num2date(self.hourly.datetime[0])
+                    entry_price = order.executed.price
 
-                self.trade_entries[id(order)] = {
-                    'entry_time': entry_time,
-                    'entry_price': entry_price,
-                    'filter_snapshot': filter_snapshot,  # Save ML features!
-                }
+                    # CRITICAL: Call collect_filter_values() directly to ensure complete feature set
+                    # This matches how extract_training_data.py works
+                    filter_snapshot = self.collect_filter_values(intraday_ago=0)
+
+                    self.trade_entries[id(order)] = {
+                        'entry_time': entry_time,
+                        'entry_price': entry_price,
+                        'filter_snapshot': filter_snapshot,  # Save ALL ML features!
+                    }
+
+                    logger.debug(f"Captured entry features for order at {entry_time}: {len(filter_snapshot)} features")
+
+                except Exception as e:
+                    logger.error(f"Error capturing entry features: {e}", exc_info=True)
 
             elif order.issell():
                 # Exit
@@ -244,9 +254,16 @@ class TradeLoggingStrategy(IbsStrategy):
                             if key not in trade_record:  # Don't overwrite existing columns
                                 trade_record[key] = value
 
+                    # Add Date column for compatibility (matches extract_training_data.py)
+                    trade_record['Date'] = entry_data['entry_time'].date()
+
                     self.all_trades.append(trade_record)
 
-                    logger.debug(f"Trade: {entry_data['entry_time']} -> {exit_time} | PnL=${pnl_usd:.2f}")
+                    logger.info(
+                        f"Logged trade: {entry_data['entry_time']} → {exit_time} | "
+                        f"PnL=${pnl_usd:.2f} | Return={price_return*100:.2f}% | "
+                        f"Features={len(filter_snapshot)}"
+                    )
 
         # Call parent
         super().notify_order(order)
