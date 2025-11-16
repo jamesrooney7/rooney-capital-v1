@@ -57,14 +57,12 @@ class TradeLoggingStrategy(IbsStrategy):
         self.all_trades = []  # Store all trades in memory
         self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
-        # CRITICAL: Set ml_feature_param_keys BEFORE calling super().__init__()
-        # The parent __init__ checks _is_feature_requested() to initialize indicators,
-        # which in turn checks ml_feature_param_keys. Setting it AFTER super().__init__()
-        # is too late - indicators won't be initialized!
-        self.ml_feature_param_keys = self._get_all_filter_param_keys()
-        logger.info(f"Forcing calculation of {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
-
         super().__init__(*args, **kwargs)
+
+        # Populate comprehensive list of all possible filter parameter keys
+        # This tells collect_filter_values() to calculate ALL features
+        self.ml_feature_param_keys = self._get_all_filter_param_keys()
+        logger.info(f"✅ Configured to calculate {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
 
     def _get_all_filter_param_keys(self) -> set:
         """
