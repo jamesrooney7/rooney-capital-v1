@@ -60,13 +60,13 @@ class FeatureLoggingStrategy(IbsStrategy):
         self.trade_count = 0
         self.filtered_count = 0
 
+        # CRITICAL: Set ml_feature_param_keys BEFORE super().__init__()
+        # This ensures the parent class loads ALL cross-asset feeds for complete features
+        self.ml_feature_param_keys = self._build_all_filter_param_keys()
+
         super().__init__(*args, **kwargs)
 
-        # Populate comprehensive list of all possible filter parameter keys
-        # This tells collect_filter_values() to calculate ALL features
-        self.ml_feature_param_keys = self._get_all_filter_param_keys()
-
-    def _get_all_filter_param_keys(self) -> set:
+    def _build_all_filter_param_keys(self) -> set:
         """
         Return comprehensive set of all filter parameter keys.
 

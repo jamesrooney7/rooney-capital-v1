@@ -57,14 +57,17 @@ class TradeLoggingStrategy(IbsStrategy):
         self.all_trades = []  # Store all trades in memory
         self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
+        # CRITICAL: Set ml_feature_param_keys BEFORE super().__init__()
+        # This ensures the parent class loads ALL cross-asset feeds, not just the ones
+        # from the ML model. We must do this before super().__init__() runs.
+        self.ml_feature_param_keys = self._build_all_filter_param_keys()
+        logger.info(f"✅ Pre-configured {len(self.ml_feature_param_keys)} filter parameters BEFORE parent init")
+
         super().__init__(*args, **kwargs)
 
-        # Populate comprehensive list of all possible filter parameter keys
-        # This tells collect_filter_values() to calculate ALL features
-        self.ml_feature_param_keys = self._get_all_filter_param_keys()
-        logger.info(f"✅ Configured to calculate {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
+        logger.info(f"✅ Strategy initialized with complete feature set")
 
-    def _get_all_filter_param_keys(self) -> set:
+    def _build_all_filter_param_keys(self) -> set:
         """
         Return comprehensive set of all filter parameter keys.
 
