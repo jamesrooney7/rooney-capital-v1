@@ -30,10 +30,11 @@ from models.loader import load_model_bundle
 from strategy.feature_utils import normalize_column_name
 
 # All trading instruments (excludes TLT and VIX - they're filters only)
+# Note: 6N excluded due to missing model file
 ALL_INSTRUMENTS = [
     "ES", "NQ", "RTY", "YM",                    # Equity indices
     "GC", "SI", "HG", "CL", "NG", "PL",         # Commodities
-    "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S",  # Currencies
+    "6A", "6B", "6C", "6E", "6J", "6M", "6S",   # Currencies (6N excluded - no model)
 ]
 
 
