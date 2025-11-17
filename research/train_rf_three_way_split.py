@@ -199,12 +199,45 @@ def phase1_hyperparameter_tuning(
     rng = random.Random(seed)
     n_trials_total = rs_trials + bo_trials
 
-    # Feature screening on training set
-    logger.info("Performing feature screening...")
+    # Filter out problematic features BEFORE feature screening
+    # This ensures we select k_features valid features (e.g., 30) after filtering
+    logger.info("Filtering features before screening...")
     X_train_full = X_train.copy()
+
+    # Remove Title Case cross-instrument features (e.g., "ES Hourly Return")
+    # These are duplicates of normalized features and won't work at runtime
+    # Pattern: Contains space and starts with symbol name (e.g., "ES Hourly Return", "6A Daily Return")
+    valid_cols = []
+    filtered_title_case = 0
+    filtered_vix = 0
+
+    for col in X_train_full.columns:
+        # Skip Title Case cross-instrument features
+        if " " in col and any(col.startswith(sym + " ") for sym in
+            ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
+             "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]):
+            logger.debug(f"Filtering out Title Case duplicate: {col}")
+            filtered_title_case += 1
+            continue
+
+        # Skip VIX-related features (all variations: vix, VIX, enable_vix, etc.)
+        if "vix" in col.lower():
+            logger.debug(f"Filtering out VIX feature: {col}")
+            filtered_vix += 1
+            continue
+
+        valid_cols.append(col)
+
+    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates and {filtered_vix} VIX features")
+    logger.info(f"Screening from {len(valid_cols)} valid candidate features")
+
+    X_train_filtered = X_train_full[valid_cols].copy()
+
+    # Feature screening on filtered feature set
+    logger.info("Performing feature screening...")
     feats = screen_features(
         Xy_train,
-        X_train_full,
+        X_train_filtered,
         seed,
         method=screen_method,
         folds=folds,
@@ -213,23 +246,6 @@ def phase1_hyperparameter_tuning(
         top_n=k_features,
     )
 
-    # Filter out Title Case cross-instrument features (e.g., "ES Hourly Return")
-    # These are duplicates of normalized features and won't work in runtime
-    # Pattern: Contains space and starts with uppercase (e.g., "ES Hourly Return", "6A Daily Return")
-    filtered_feats = []
-    for feat in feats:
-        # Skip features with spaces that look like cross-instrument features
-        if " " in feat and any(feat.startswith(sym + " ") for sym in
-            ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
-             "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]):
-            logger.debug(f"Skipping Title Case duplicate: {feat}")
-            continue
-        filtered_feats.append(feat)
-
-    if len(filtered_feats) < len(feats):
-        logger.info(f"Filtered out {len(feats) - len(filtered_feats)} Title Case duplicates")
-
-    feats = filtered_feats
     X_train_selected = X_train[feats].copy()
     logger.info(f"Selected {len(feats)} features: {', '.join(feats[:10])}{'...' if len(feats) > 10 else ''}")
 
