@@ -66,10 +66,16 @@ class TradeLoggingStrategy(IbsStrategy):
             normalize_column_name(name) for name in all_feature_names
         )
         logger.info(f"🔍 Pre-set _normalized_ml_features to {len(self._normalized_ml_features)} features BEFORE parent init")
+        logger.info(f"🔍 First 10 normalized features: {self._normalized_ml_features[:10]}")
 
         super().__init__(*args, **kwargs)
 
         logger.info(f"✅ Strategy initialized with {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
+        logger.info(f"🔍 AFTER super().__init__, _normalized_ml_features has {len(self._normalized_ml_features)} features")
+        logger.info(f"🔍 AFTER: First 10 = {self._normalized_ml_features[:10]}")
+
+        # Check what return pipelines were actually built
+        logger.info(f"🔍 return_meta has {len(self.return_meta)} entries: {list(self.return_meta.keys())[:10]}")
 
     def _get_all_feature_names(self) -> list[str]:
         """
