@@ -57,68 +57,41 @@ class TradeLoggingStrategy(IbsStrategy):
         self.all_trades = []  # Store all trades in memory
         self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
-        # CRITICAL: Temporarily expand ml_features to include ALL cross-asset features
-        # The parent will use self.ml_features to set _normalized_ml_features
-        # After that, return pipelines will be built for all features
-        # We'll restore the original ml_features after super().__init__()
-        original_ml_features = kwargs.get('ml_features')
-        all_feature_names = self._get_all_feature_names()
+        # CRITICAL: Extract ML params but DON'T pass to parent during init
+        # This way parent initializes WITHOUT ML model (like extract_training_data.py)
+        # We'll add ML model AFTER parent builds all pipelines
+        ml_model = kwargs.pop('ml_model', None)
+        ml_features = kwargs.pop('ml_features', None)
+        ml_threshold = kwargs.pop('ml_threshold', None)
 
-        # Combine original ML features with all cross-asset features
-        if original_ml_features:
-            expanded_features = list(original_ml_features) + all_feature_names
-        else:
-            expanded_features = all_feature_names
+        logger.info(f"🔍 Extracted ML params: model={ml_model is not None}, features={len(ml_features) if ml_features else 0}, threshold={ml_threshold}")
 
-        kwargs['ml_features'] = tuple(expanded_features)
-        logger.info(f"🔍 Temporarily expanded ml_features to {len(expanded_features)} for pipeline building")
-
+        # Initialize parent WITHOUT ML model
         super().__init__(*args, **kwargs)
 
-        # Restore original ml_features so ML scoring uses correct features
-        if original_ml_features:
-            self.ml_features = tuple(original_ml_features)
-            logger.info(f"🔍 Restored ml_features to {len(self.ml_features)} for ML scoring")
+        # NOW set ML model AFTER parent has initialized all pipelines
+        if ml_model is not None:
+            self.ml_model = ml_model
+            self.ml_features = ml_features
+            self.p.ml_threshold = ml_threshold
+            self.ml_threshold = ml_threshold
+            # Update normalized features for ML scoring
+            from strategy.feature_utils import normalize_column_name
+            self._normalized_ml_features = tuple(normalize_column_name(f) for f in ml_features)
+            logger.info(f"✅ Loaded ML model AFTER init: {len(ml_features)} features, threshold={ml_threshold}")
 
         logger.info(f"✅ Strategy initialized with {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
-        logger.info(f"🔍 AFTER super().__init__, _normalized_ml_features has {len(self._normalized_ml_features)} features")
-        logger.info(f"🔍 AFTER: First 10 = {self._normalized_ml_features[:10]}")
-
-        # Check what return pipelines were actually built
-        logger.info(f"🔍 return_meta has {len(self.return_meta)} entries: {list(self.return_meta.keys())[:10]}")
-
-    def _get_all_feature_names(self) -> list[str]:
-        """
-        Return ALL possible feature names (for _normalized_ml_features).
-
-        This is used by the parent to determine which cross-asset return pipelines to build.
-        We return all possible cross-asset feature names so pipelines are built for everything.
-        """
-        names = []
-
-        # Cross-asset returns (the critical missing features!)
-        cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
-                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT']
-        for symbol in cross_symbols:
-            names.append(f'{symbol} Hourly Return')
-            names.append(f'{symbol} Daily Return')
-            names.append(f'{symbol} Hourly Return Pipeline')
-            names.append(f'{symbol} Daily Return Pipeline')
-
-        return names
 
     def _derive_ml_feature_param_keys(self) -> set:
         """
         OVERRIDE parent method to return comprehensive set of ALL filter parameters.
 
-        The parent IbsStrategy._derive_ml_feature_param_keys() only returns parameters
-        for the ML model's features (e.g., 30 features). We override this to return
-        ALL 191+ parameters so collect_filter_values() calculates the complete feature set.
+        Since we don't pass ml_model during init, parent won't build ML-specific pipelines.
+        We override this to return ALL 191+ parameters so collect_filter_values()
+        calculates the complete feature set.
 
-        This matches how extract_training_data.py works - complete feature calculation
-        regardless of which features the ML model uses.
+        This is EXACTLY how extract_training_data.py works!
         """
-        logger.info("🔍 TradeLoggingStrategy._derive_ml_feature_param_keys() OVERRIDE called")
         keys = {
             # Calendar filters
             'allowedDOW', 'allowedMon', 'enableDOM', 'domDay',
@@ -210,8 +183,6 @@ class TradeLoggingStrategy(IbsStrategy):
                 # Return filters - use ENABLE params that match return_meta keys!
                 keys.add(f'enable{symbol}Return{tf}')  # e.g. enableESReturnHour, enableESReturnDay
 
-        logger.info(f"🔍 Returning {len(keys)} parameter keys from override")
-        logger.info(f"🔍 Sample cross-asset return keys: {[k for k in keys if 'Return' in k][:10]}")
         return keys
 
     def notify_order(self, order):
