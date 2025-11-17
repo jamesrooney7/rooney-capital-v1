@@ -340,6 +340,13 @@ def phase1_hyperparameter_tuning(
             trial.set_user_attr("Trades", int(res["Trades"]))
             trial.set_user_attr("DSR", float(res.get("DSR", np.nan)))
 
+            # Log progress (trial.number is 0-indexed)
+            logger.info(
+                f"[BO {trial.number + 1:03d}/{bo_trials}] "
+                f"Sharpe={res['Sharpe']:.3f} DSR={res.get('DSR', 0.0):.3f} "
+                f"PF={res['PF']:.3f} Trades={res['Trades']}"
+            )
+
             return float(res["Sharpe"])
 
         study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed))
