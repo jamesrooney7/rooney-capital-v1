@@ -213,6 +213,23 @@ def phase1_hyperparameter_tuning(
         top_n=k_features,
     )
 
+    # Filter out Title Case cross-instrument features (e.g., "ES Hourly Return")
+    # These are duplicates of normalized features and won't work in runtime
+    # Pattern: Contains space and starts with uppercase (e.g., "ES Hourly Return", "6A Daily Return")
+    filtered_feats = []
+    for feat in feats:
+        # Skip features with spaces that look like cross-instrument features
+        if " " in feat and any(feat.startswith(sym + " ") for sym in
+            ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
+             "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]):
+            logger.debug(f"Skipping Title Case duplicate: {feat}")
+            continue
+        filtered_feats.append(feat)
+
+    if len(filtered_feats) < len(feats):
+        logger.info(f"Filtered out {len(feats) - len(filtered_feats)} Title Case duplicates")
+
+    feats = filtered_feats
     X_train_selected = X_train[feats].copy()
     logger.info(f"Selected {len(feats)} features: {', '.join(feats[:10])}{'...' if len(feats) > 10 else ''}")
 
