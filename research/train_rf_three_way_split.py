@@ -223,6 +223,7 @@ def phase1_hyperparameter_tuning(
     filtered_title_case = 0
     filtered_enable_params = 0
     filtered_vix = 0
+    filtered_redundant = 0
 
     cross_symbols = ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
                      "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]
@@ -249,9 +250,16 @@ def phase1_hyperparameter_tuning(
             filtered_vix += 1
             continue
 
+        # Skip redundant features (duplicate information)
+        # enableIBSExit returns the same value as enableIBSEntry and ibs
+        if col == "enableIBSExit":
+            logger.debug(f"Filtering out redundant feature: {col}")
+            filtered_redundant += 1
+            continue
+
         valid_cols.append(col)
 
-    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates, {filtered_enable_params} enable parameter columns, and {filtered_vix} VIX features")
+    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates, {filtered_enable_params} enable parameter columns, {filtered_vix} VIX features, and {filtered_redundant} redundant features")
     logger.info(f"Screening from {len(valid_cols)} valid candidate features")
 
     X_train_filtered = X_train_full[valid_cols].copy()
