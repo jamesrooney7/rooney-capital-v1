@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
-# Feature screening -> Random Search -> Bayesian Optimization (Optuna) tuner for RF under CPCV.
-# Writes best.json (Params + Features + metrics + production threshold) and exports trade selections.
+"""
+RF Optimization Utilities (formerly rf_cpcv_random_then_bo.py)
+
+⚠️  DEPRECATION WARNING:
+This file is now used ONLY for utility functions (sample_rf_params, evaluate_rf_cpcv, etc.).
+DO NOT use this as a training script - it has threshold optimization bias!
+
+For training, use: train_rf_three_way_split.py
+See: THREE_WAY_SPLIT_GUIDE.md for documentation
+
+This file will be refactored to extract only the utility functions in a future update.
+"""
 
 import argparse
 import functools

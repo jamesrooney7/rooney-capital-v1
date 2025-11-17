@@ -54,8 +54,8 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / 'src'))
 
-# Import optimization functions
-from research.rf_cpcv_random_then_bo import (
+# Import optimization utility functions
+from research.rf_optimization_utils import (
     sample_rf_params,
     evaluate_rf_cpcv,
     screen_features,
