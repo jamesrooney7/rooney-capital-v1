@@ -121,16 +121,17 @@ def load_and_split_data(
     logger.info(f"  Trades: {len(df_test)} (HELD OUT - never touched until final eval)")
     logger.info(f"{'='*60}\n")
 
-    # Prepare feature matrices
+    # Prepare feature matrices (normalizes ALL column names to snake_case)
     Xy_train = build_core_features(df_train)
     Xy_threshold = build_core_features(df_threshold)
     Xy_test = build_core_features(df_test)
 
     # Extract feature columns (exclude metadata and targets)
+    # NOTE: build_core_features() normalized column names, so use lowercase
     exclude_cols = {
-        "Date", "Date/Time", "Exit Date/Time", "Entry_Price", "Exit_Price",
+        "date", "date_time", "exit_date_time", "entry_price", "exit_price",
         "y_return", "y_binary", "y_pnl_usd", "y_pnl_gross", "pnl_usd",
-        "Unnamed: 0",
+        "unnamed_0",
     }
 
     feature_cols = [col for col in Xy_train.columns if col not in exclude_cols]
@@ -373,7 +374,7 @@ def phase2_threshold_optimization(
     # Calculate metrics at fixed threshold
     passed = y_threshold_proba >= fixed_threshold
     final_returns = returns_threshold[passed]
-    final_dates = Xy_threshold.loc[passed, "Date"]
+    final_dates = Xy_threshold.loc[passed, "date"]
 
     daily = pd.DataFrame({
         "d": final_dates,
@@ -457,7 +458,7 @@ def phase3_final_evaluation(
     # Calculate metrics on test set
     test_returns = Xy_test.loc[passed, "y_return"].values
     test_pnl = Xy_test.loc[passed, "y_pnl_usd"].values
-    test_dates = Xy_test.loc[passed, "Date"]
+    test_dates = Xy_test.loc[passed, "date"]
     test_binary = Xy_test.loc[passed, "y_binary"].values
 
     # Daily returns for Sharpe
@@ -481,8 +482,8 @@ def phase3_final_evaluation(
         "max_drawdown_pct": float(portfolio.get("Max_Drawdown_Pct", 0.0)),
         "max_drawdown_usd": float(portfolio.get("Max_Drawdown_USD", 0.0)),
         "cagr": float(portfolio.get("CAGR", 0.0)),
-        "start_date": str(Xy_test["Date"].min()),
-        "end_date": str(Xy_test["Date"].max()),
+        "start_date": str(Xy_test["date"].min()),
+        "end_date": str(Xy_test["date"].max()),
     }
 
     logger.info(f"\n{'='*60}")
@@ -600,13 +601,13 @@ def main():
         "params": best_params,
         "features": feature_list,
         "train_period": {
-            "start": str(Xy_train["Date"].min()),
-            "end": str(Xy_train["Date"].max()),
+            "start": str(Xy_train["date"].min()),
+            "end": str(Xy_train["date"].max()),
             "trades": len(Xy_train),
         },
         "threshold_period": {
-            "start": str(Xy_threshold["Date"].min()),
-            "end": str(Xy_threshold["Date"].max()),
+            "start": str(Xy_threshold["date"].min()),
+            "end": str(Xy_threshold["date"].max()),
             "trades": len(Xy_threshold),
         },
         "threshold_optimization": threshold_metrics,
