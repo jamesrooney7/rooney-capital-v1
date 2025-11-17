@@ -204,21 +204,37 @@ def phase1_hyperparameter_tuning(
     logger.info("Filtering features before screening...")
     X_train_full = X_train.copy()
 
-    # Remove Title Case cross-instrument features (e.g., "ES Hourly Return")
-    # These are duplicates of normalized features and won't work at runtime
-    # Pattern: Contains space and starts with symbol name (e.g., "ES Hourly Return", "6A Daily Return")
+    # Remove duplicate cross-instrument feature columns
+    # The training data has 3-4 versions of each cross-instrument feature:
+    #   1. enableESReturnHour (boolean parameter - NOT the actual value)
+    #   2. ES Hourly Return (Title Case - won't match runtime keys)
+    #   3. es_hourly_return (snake_case - KEEP THIS)
+    #   4. es_hourly_return_pipeline (snake_case with suffix - KEEP THIS)
+    # We only want to keep #3 and #4 (snake_case versions with actual values)
+
     valid_cols = []
     filtered_title_case = 0
+    filtered_enable_params = 0
     filtered_vix = 0
 
+    cross_symbols = ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
+                     "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]
+
     for col in X_train_full.columns:
-        # Skip Title Case cross-instrument features
-        if " " in col and any(col.startswith(sym + " ") for sym in
-            ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
-             "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]):
+        # Skip Title Case cross-instrument features (e.g., "ES Hourly Return")
+        if " " in col and any(col.startswith(sym + " ") for sym in cross_symbols):
             logger.debug(f"Filtering out Title Case duplicate: {col}")
             filtered_title_case += 1
             continue
+
+        # Skip enable parameter columns for cross-instrument features
+        # These are boolean/int parameters, not the actual feature values
+        # Pattern: enable{SYMBOL}Return{Hour|Day} or enable{SYMBOL}ZScore{Hour|Day}
+        if col.startswith("enable") and any(sym in col for sym in cross_symbols):
+            if ("Return" in col or "ZScore" in col) and ("Hour" in col or "Day" in col):
+                logger.debug(f"Filtering out enable parameter column: {col}")
+                filtered_enable_params += 1
+                continue
 
         # Skip VIX-related features (all variations: vix, VIX, enable_vix, etc.)
         if "vix" in col.lower():
@@ -228,7 +244,7 @@ def phase1_hyperparameter_tuning(
 
         valid_cols.append(col)
 
-    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates and {filtered_vix} VIX features")
+    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates, {filtered_enable_params} enable parameter columns, and {filtered_vix} VIX features")
     logger.info(f"Screening from {len(valid_cols)} valid candidate features")
 
     X_train_filtered = X_train_full[valid_cols].copy()
