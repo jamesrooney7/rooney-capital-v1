@@ -57,18 +57,28 @@ class TradeLoggingStrategy(IbsStrategy):
         self.all_trades = []  # Store all trades in memory
         self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
-        # CRITICAL: Set _normalized_ml_features BEFORE super().__init__()
-        # The parent uses this to decide which cross-asset return pipelines to build
-        # We want ALL cross-asset features, not just the ML model's 30
-        from strategy.feature_utils import normalize_column_name
+        # CRITICAL: Temporarily expand ml_features to include ALL cross-asset features
+        # The parent will use self.ml_features to set _normalized_ml_features
+        # After that, return pipelines will be built for all features
+        # We'll restore the original ml_features after super().__init__()
+        original_ml_features = kwargs.get('ml_features')
         all_feature_names = self._get_all_feature_names()
-        self._normalized_ml_features = tuple(
-            normalize_column_name(name) for name in all_feature_names
-        )
-        logger.info(f"🔍 Pre-set _normalized_ml_features to {len(self._normalized_ml_features)} features BEFORE parent init")
-        logger.info(f"🔍 First 10 normalized features: {self._normalized_ml_features[:10]}")
+
+        # Combine original ML features with all cross-asset features
+        if original_ml_features:
+            expanded_features = list(original_ml_features) + all_feature_names
+        else:
+            expanded_features = all_feature_names
+
+        kwargs['ml_features'] = tuple(expanded_features)
+        logger.info(f"🔍 Temporarily expanded ml_features to {len(expanded_features)} for pipeline building")
 
         super().__init__(*args, **kwargs)
+
+        # Restore original ml_features so ML scoring uses correct features
+        if original_ml_features:
+            self.ml_features = tuple(original_ml_features)
+            logger.info(f"🔍 Restored ml_features to {len(self.ml_features)} for ML scoring")
 
         logger.info(f"✅ Strategy initialized with {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
         logger.info(f"🔍 AFTER super().__init__, _normalized_ml_features has {len(self._normalized_ml_features)} features")
