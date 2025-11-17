@@ -547,7 +547,7 @@ def screen_features(
         logger.info("Using CLUSTERED feature selection (correlation-based)")
         # Use first fold's data for clustering (or could aggregate, but clustering is deterministic)
         for fold_idx, (tr_mask, _te_mask) in enumerate(
-            embargoed_cpcv_splits(Xy["Date"], n_folds=folds, k_test=k_test, embargo_days=embargo_days),
+            embargoed_cpcv_splits(Xy["date"], n_folds=folds, k_test=k_test, embargo_days=embargo_days),
             start=1,
         ):
             X_tr = X.loc[tr_mask]
@@ -586,7 +586,7 @@ def screen_features(
     splits_used = 0
 
     for fold_idx, (tr_mask, _te_mask) in enumerate(
-        embargoed_cpcv_splits(Xy["Date"], n_folds=folds, k_test=k_test, embargo_days=embargo_days),
+        embargoed_cpcv_splits(Xy["date"], n_folds=folds, k_test=k_test, embargo_days=embargo_days),
         start=1,
     ):
         X_tr = X.loc[tr_mask]
@@ -660,7 +660,7 @@ def _cpcv_evaluate(
         params["max_samples"] = None
 
     for fold_idx, (tr_mask, te_mask) in enumerate(
-        embargoed_cpcv_splits(Xy["Date"], folds, k_test, embargo_days),
+        embargoed_cpcv_splits(Xy["date"], folds, k_test, embargo_days),
         start=1,
     ):
         if tr_mask.sum() < min_train or te_mask.sum() < min_test:
