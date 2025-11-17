@@ -449,8 +449,19 @@ def run_backtest_for_symbol(
     strategy_kwargs = strategy_kwargs_from_bundle(bundle)
 
     # CRITICAL: Set ml_feature_param_keys to tell strategy to calculate ALL features
-    # This matches what extract_training_data.py does
+    # Start with comprehensive base set
     all_param_keys = get_all_filter_param_keys()
+
+    # ALSO add the ACTUAL features from the JSON (both raw and normalized)
+    # This ensures we capture features with Title Case names like "ES Hourly Return"
+    from strategy.feature_utils import normalize_column_name
+    for feature in bundle.features:
+        # Add the raw feature name (e.g., "ES Hourly Return")
+        all_param_keys.add(feature)
+        # Add the normalized version (e.g., "es_hourly_return")
+        all_param_keys.add(normalize_column_name(feature))
+
+    logger.info(f"  - Total param keys for feature calculation: {len(all_param_keys)}")
 
     strategy_kwargs.update({
         "symbol": symbol,
