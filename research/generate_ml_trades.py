@@ -272,9 +272,11 @@ def run_backtest_for_symbol(
     filter_columns = create_filter_columns_from_features(list(bundle.features))
     logger.info(f"  - Filter columns: {len(filter_columns)}")
 
-    # 3. Determine required symbols (primary + cross-instrument + reference)
-    required_symbols = get_required_symbols(list(bundle.features), symbol)
-    logger.info(f"  - Required symbols: {len(required_symbols)}")
+    # 3. Load ALL available symbols (strategy may need them for internal indicators)
+    # IbsStrategy has CROSS_Z_INSTRUMENTS and RETURN_INSTRUMENTS lists that it
+    # always tries to initialize, regardless of ML features
+    required_symbols = set(ALL_INSTRUMENTS) | set(REFERENCE_SYMBOLS)
+    logger.info(f"  - Loading all available symbols: {len(required_symbols)}")
     logger.debug(f"    Symbols: {', '.join(sorted(required_symbols))}")
 
     # 4. Load all data feeds (both hourly and daily for each symbol)
