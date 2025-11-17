@@ -313,7 +313,8 @@ def run_backtest_for_symbol(
     logger.info(f"  - Successfully loaded {len(loaded_feeds)} data feeds ({len(loaded_feeds)//2} symbols)")
 
     # 5. Setup Cerebro
-    cerebro = bt.Cerebro()
+    # Disable runonce mode to handle data feeds with different lengths
+    cerebro = bt.Cerebro(runonce=False)
     cerebro.broker.set_cash(100000)  # Starting capital
     cerebro.broker.setcommission(commission=0.0)  # Commission handled in strategy
 
