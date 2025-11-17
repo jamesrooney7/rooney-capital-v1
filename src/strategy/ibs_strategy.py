@@ -5714,9 +5714,9 @@ class IbsStrategy(bt.Strategy):
             ml_threshold = self.p.ml_threshold
 
             # Count how many features were calculated (non-None values)
-            # FIX: Normalize filter_snapshot keys to match ML feature names
-            if hasattr(self.p, "ml_features") and self.p.ml_features:
-                features = self.p.ml_features
+            # Use normalized feature names to match the snapshot keys
+            if hasattr(self, "_normalized_ml_features") and self._normalized_ml_features:
+                features = self._normalized_ml_features
             else:
                 features = []
             total_features = len(features)
@@ -5747,6 +5747,7 @@ class IbsStrategy(bt.Strategy):
 
             # If many features are missing, log a warning
             if total_features > 0 and calculated_features < total_features * 0.8:
+                # Use normalized features to check what's actually missing
                 missing_features = [
                     feature
                     for feature in features
