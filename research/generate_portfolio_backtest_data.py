@@ -197,12 +197,11 @@ class TradeLoggingStrategy(IbsStrategy):
                 keys.add(f'enable{symbol}ZScore{tf}')
                 keys.add(f'{symbol.lower()}_z_score_{tf.lower()}')
 
-                # Daily return filters
-                keys.add(f'{symbol.lower()}_daily_return')
-                keys.add(f'{symbol.lower()}_hourly_return')
+                # Return filters - use ENABLE params that match return_meta keys!
+                keys.add(f'enable{symbol}Return{tf}')  # e.g. enableESReturnHour, enableESReturnDay
 
         logger.info(f"🔍 Returning {len(keys)} parameter keys from override")
-        logger.info(f"🔍 Sample cross-asset keys: {[k for k in keys if 'hourly_return' in k][:10]}")
+        logger.info(f"🔍 Sample cross-asset return keys: {[k for k in keys if 'Return' in k][:10]}")
         return keys
 
     def notify_order(self, order):
