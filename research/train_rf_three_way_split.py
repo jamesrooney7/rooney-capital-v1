@@ -129,17 +129,18 @@ def load_and_split_data(
     Xy_test = build_core_features(df_test)
 
     # Add back the date column and targets (normalized to lowercase)
-    Xy_train["date"] = pd.to_datetime(df_train["Date/Time"]).dt.date
+    # Keep as datetime (not .dt.date) for pd.Grouper compatibility
+    Xy_train["date"] = pd.to_datetime(df_train["Date/Time"])
     Xy_train["y_binary"] = df_train["y_binary"]
     Xy_train["y_return"] = df_train["y_return"]
     Xy_train["y_pnl_usd"] = df_train["y_pnl_usd"]
 
-    Xy_threshold["date"] = pd.to_datetime(df_threshold["Date/Time"]).dt.date
+    Xy_threshold["date"] = pd.to_datetime(df_threshold["Date/Time"])
     Xy_threshold["y_binary"] = df_threshold["y_binary"]
     Xy_threshold["y_return"] = df_threshold["y_return"]
     Xy_threshold["y_pnl_usd"] = df_threshold["y_pnl_usd"]
 
-    Xy_test["date"] = pd.to_datetime(df_test["Date/Time"]).dt.date
+    Xy_test["date"] = pd.to_datetime(df_test["Date/Time"])
     Xy_test["y_binary"] = df_test["y_binary"]
     Xy_test["y_return"] = df_test["y_return"]
     Xy_test["y_pnl_usd"] = df_test["y_pnl_usd"]
