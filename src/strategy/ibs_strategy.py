@@ -4591,7 +4591,8 @@ class IbsStrategy(bt.Strategy):
             normalize_column_name(key): value for key, value in snapshot.items()
         }
         ordered: list[float] = []
-        for feature in self.ml_features:
+        # Use normalized features for lookup in normalized snapshot
+        for feature in self._normalized_ml_features:
             value = normalized_snapshot.get(feature)
             if isinstance(value, float) and math.isnan(value):
                 value = None
@@ -4605,7 +4606,8 @@ class IbsStrategy(bt.Strategy):
         ml_input: object = [ordered]
         if pd is not None:
             try:
-                ml_input = pd.DataFrame([ordered], columns=self.ml_features)
+                # Use normalized feature names to match training data format
+                ml_input = pd.DataFrame([ordered], columns=self._normalized_ml_features)
             except Exception:  # pragma: no cover - fallback to list input
                 logging.exception("Failed to build DataFrame for ML features")
                 ml_input = [ordered]
