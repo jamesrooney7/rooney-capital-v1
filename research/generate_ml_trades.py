@@ -194,20 +194,39 @@ def get_required_symbols(features: list[str], primary_symbol: str) -> set[str]:
     Returns:
         Set of symbols needed (includes primary + cross-instrument references)
     """
+    import re
+
     required = {primary_symbol}
 
     # Always include reference symbols
     required.update(REFERENCE_SYMBOLS)
 
+    # Define all possible symbols to check for
+    all_possible_symbols = set(ALL_INSTRUMENTS) | set(REFERENCE_SYMBOLS)
+
     # Scan features for cross-instrument references
     for feature in features:
+        # Pattern 1: Snake case format like "6m_daily_z_score", "hg_hourly_return"
         if "_z_score" in feature or "_z_pipeline" in feature or "_return" in feature:
             parts = feature.split("_")
             if len(parts) >= 2:
                 cross_symbol = parts[0].upper()
-                # Add if it's a known symbol
-                if cross_symbol in ALL_INSTRUMENTS or cross_symbol in REFERENCE_SYMBOLS:
+                if cross_symbol in all_possible_symbols:
                     required.add(cross_symbol)
+
+        # Pattern 2: Enable format like "enable6MZScoreDay", "enablePLReturnHour"
+        # Match: enable{SYMBOL}ZScore{TF} or enable{SYMBOL}Return{TF}
+        if feature.startswith("enable"):
+            # Try to extract symbol from enable format
+            for symbol in all_possible_symbols:
+                # Check for ZScore pattern
+                if f"enable{symbol}ZScore" in feature:
+                    required.add(symbol)
+                    break
+                # Check for Return pattern
+                if f"enable{symbol}Return" in feature:
+                    required.add(symbol)
+                    break
 
     return required
 
