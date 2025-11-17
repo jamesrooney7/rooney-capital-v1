@@ -8,8 +8,8 @@ set -e  # Exit on error
 SYMBOL="ES"
 TRAIN_END="2018-12-31"
 THRESHOLD_END="2020-12-31"
-RS_TRIALS=120
-BO_TRIALS=300
+RS_TRIALS=50
+BO_TRIALS=150
 
 echo "=========================================="
 echo "ES Model Configuration Comparison"
