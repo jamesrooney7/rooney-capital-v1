@@ -34,7 +34,6 @@ ALL_INSTRUMENTS = [
     "ES", "NQ", "RTY", "YM",                    # Equity indices
     "GC", "SI", "HG", "CL", "NG", "PL",         # Commodities
     "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S",  # Currencies
-    "ZC", "ZS", "ZW",                           # Grains
 ]
 
 

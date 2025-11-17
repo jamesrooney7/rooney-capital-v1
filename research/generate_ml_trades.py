@@ -50,7 +50,6 @@ ALL_INSTRUMENTS = [
     "ES", "NQ", "RTY", "YM",                    # Equity indices
     "GC", "SI", "HG", "CL", "NG", "PL",         # Commodities
     "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S",  # Currencies
-    "ZC", "ZS", "ZW",                           # Grains
 ]
 
 # Reference symbols (used for filters but not traded)
@@ -63,34 +62,36 @@ TEST_START = datetime(2023, 1, 1)
 TEST_END = datetime(2024, 12, 31)
 
 
-def load_data_feed(
+def load_data_feeds(
     symbol: str,
     data_dir: Path,
     fromdate: datetime = None,
     todate: datetime = None,
-) -> bt.feeds.GenericCSVData | None:
-    """Load OHLCV data for a symbol.
+) -> tuple[bt.feeds.GenericCSVData | None, bt.feeds.GenericCSVData | None]:
+    """Load hourly and daily OHLCV data for a symbol.
 
     Args:
         symbol: Instrument symbol (e.g., "ES", "6M")
-        data_dir: Directory containing CSV files
+        data_dir: Directory containing resampled CSV files
         fromdate: Start date for data loading
         todate: End date for data loading
 
     Returns:
-        Backtrader data feed or None if file not found
+        Tuple of (hourly_feed, daily_feed) or (None, None) if files not found
     """
-    csv_path = data_dir / f"{symbol}_bt.csv"
+    hourly_path = data_dir / f"{symbol}_hourly.csv"
+    daily_path = data_dir / f"{symbol}_daily.csv"
 
-    if not csv_path.exists():
-        logger.warning(f"Data file not found: {csv_path}")
-        return None
+    if not hourly_path.exists() or not daily_path.exists():
+        logger.warning(f"Data files not found for {symbol}: {hourly_path} or {daily_path}")
+        return None, None
 
-    logger.debug(f"Loading {symbol}: {csv_path}")
+    logger.debug(f"Loading {symbol}: {hourly_path} and {daily_path}")
 
     try:
-        data = bt.feeds.GenericCSVData(
-            dataname=str(csv_path),
+        # Load hourly data
+        hourly_data = bt.feeds.GenericCSVData(
+            dataname=str(hourly_path),
             dtformat="%Y-%m-%d %H:%M:%S",
             datetime=0,
             open=1,
@@ -99,15 +100,29 @@ def load_data_feed(
             close=4,
             volume=5,
             openinterest=-1,
-            timeframe=bt.TimeFrame.Minutes,
-            compression=60,  # 60 minutes = hourly
             fromdate=fromdate or WARMUP_START,
             todate=todate or TEST_END,
         )
-        return data
+
+        # Load daily data
+        daily_data = bt.feeds.GenericCSVData(
+            dataname=str(daily_path),
+            dtformat="%Y-%m-%d %H:%M:%S",
+            datetime=0,
+            open=1,
+            high=2,
+            low=3,
+            close=4,
+            volume=5,
+            openinterest=-1,
+            fromdate=fromdate or WARMUP_START,
+            todate=todate or TEST_END,
+        )
+
+        return hourly_data, daily_data
     except Exception as e:
         logger.error(f"Failed to load {symbol}: {e}")
-        return None
+        return None, None
 
 
 def create_filter_columns_from_features(features: list[str]) -> list[FilterColumn]:
@@ -242,36 +257,38 @@ def run_backtest_for_symbol(
     logger.info(f"  - Required symbols: {len(required_symbols)}")
     logger.debug(f"    Symbols: {', '.join(sorted(required_symbols))}")
 
-    # 4. Load all data feeds
+    # 4. Load all data feeds (both hourly and daily for each symbol)
     loaded_feeds = {}
     for feed_symbol in required_symbols:
-        feed = load_data_feed(
+        hourly_feed, daily_feed = load_data_feeds(
             feed_symbol,
             data_dir,
             fromdate=fromdate or WARMUP_START,
             todate=todate or TEST_END
         )
 
-        if feed is None:
+        if hourly_feed is None or daily_feed is None:
             # Primary feed is required, reference feeds are optional
             if feed_symbol == symbol:
-                logger.error(f"✗ Primary data feed not found: {feed_symbol}")
+                logger.error(f"✗ Primary data feeds not found: {feed_symbol}")
                 return False
             elif feed_symbol in REFERENCE_SYMBOLS:
-                logger.warning(f"  ⚠ Reference data feed not found: {feed_symbol} (continuing anyway)")
+                logger.warning(f"  ⚠ Reference data feeds not found: {feed_symbol} (continuing anyway)")
                 continue
             else:
-                logger.warning(f"  ⚠ Cross-instrument feed not found: {feed_symbol}")
+                logger.warning(f"  ⚠ Cross-instrument feeds not found: {feed_symbol}")
                 continue
 
-        loaded_feeds[feed_symbol] = feed
-        logger.debug(f"    ✓ Loaded {feed_symbol}")
+        # Store both hourly and daily feeds
+        loaded_feeds[f"{feed_symbol}_hour"] = hourly_feed
+        loaded_feeds[f"{feed_symbol}_day"] = daily_feed
+        logger.debug(f"    ✓ Loaded {feed_symbol} (hourly + daily)")
 
     if not loaded_feeds:
         logger.error(f"✗ No data feeds loaded for {symbol}")
         return False
 
-    logger.info(f"  - Successfully loaded {len(loaded_feeds)} data feeds")
+    logger.info(f"  - Successfully loaded {len(loaded_feeds)} data feeds ({len(loaded_feeds)//2} symbols)")
 
     # 5. Setup Cerebro
     cerebro = bt.Cerebro()
@@ -280,9 +297,7 @@ def run_backtest_for_symbol(
 
     # 6. Add all data feeds with proper naming convention
     # IbsStrategy expects feeds named: {SYMBOL}_hour and {SYMBOL}_day
-    # Since we're loading hourly data, we'll use _hour suffix
-    for feed_symbol, feed in loaded_feeds.items():
-        feed_name = f"{feed_symbol}_hour"
+    for feed_name, feed in loaded_feeds.items():
         cerebro.adddata(feed, name=feed_name)
         logger.debug(f"    Added feed: {feed_name}")
 
@@ -383,8 +398,8 @@ def main():
     parser.add_argument(
         "--data-dir",
         type=Path,
-        default=Path("data/historical"),
-        help="Directory containing CSV data files (default: data/historical)"
+        default=Path("data/resampled"),
+        help="Directory containing resampled CSV data files (default: data/resampled)"
     )
     parser.add_argument(
         "--models-dir",
