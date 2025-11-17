@@ -683,11 +683,11 @@ def _cpcv_evaluate(
                     continue
                 dr = pd.DataFrame(
                     {
-                        "d": Xy.loc[tr_mask, "Date"],
+                        "d": Xy.loc[tr_mask, "date"],
                         "r": Xy.loc[tr_mask, "y_return"].where(sel, 0.0),
                     }
                 ).groupby(pd.Grouper(key="d", freq="D"))["r"].sum()
-                dr = ensure_daily_index(dr, Xy.loc[tr_mask, "Date"])
+                dr = ensure_daily_index(dr, Xy.loc[tr_mask, "date"])
                 sr = sharpe_ratio_from_daily(dr)
                 if sr > best_sr:
                     best_sr, best_thr = sr, thr
@@ -703,7 +703,7 @@ def _cpcv_evaluate(
         if collect_details:
             sel = p_te >= best_thr
             holdout_returns = Xy.loc[te_mask, "y_return"].astype(float)
-            holdout_dates = Xy.loc[te_mask, "Date"]
+            holdout_dates = Xy.loc[te_mask, "date"]
             daily_fold = (
                 pd.DataFrame({"d": holdout_dates, "r": holdout_returns.where(sel, 0.0)})
                 .groupby(pd.Grouper(key="d", freq="D"))["r"]
@@ -766,12 +766,12 @@ def _cpcv_evaluate(
     selected_valid = pd.Series(selected_mask[valid_idx], index=Xy.index[valid_idx])
     daily = (
         pd.DataFrame(
-            {"d": Xy.loc[valid_idx, "Date"], "r": valid_returns.where(selected_valid, 0.0)}
+            {"d": Xy.loc[valid_idx, "date"], "r": valid_returns.where(selected_valid, 0.0)}
         )
         .groupby(pd.Grouper(key="d", freq="D"))["r"]
         .sum()
     )
-    daily = ensure_daily_index(daily, Xy.loc[valid_idx, "Date"])
+    daily = ensure_daily_index(daily, Xy.loc[valid_idx, "date"])
     trades_usd = Xy.loc[selected_mask, "y_pnl_usd"].astype(float).to_numpy()
 
     bins = ERA_BINS_2010_2024
