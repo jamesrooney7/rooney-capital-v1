@@ -122,12 +122,29 @@ def load_and_split_data(
     logger.info(f"{'='*60}\n")
 
     # Prepare feature matrices (normalizes ALL column names to snake_case)
+    # NOTE: build_core_features() removes admin columns including "date"
+    # We need to preserve "date" for CPCV splits, and target columns for evaluation
     Xy_train = build_core_features(df_train)
     Xy_threshold = build_core_features(df_threshold)
     Xy_test = build_core_features(df_test)
 
+    # Add back the date column and targets (normalized to lowercase)
+    Xy_train["date"] = pd.to_datetime(df_train["Date/Time"]).dt.date
+    Xy_train["y_binary"] = df_train["y_binary"]
+    Xy_train["y_return"] = df_train["y_return"]
+    Xy_train["y_pnl_usd"] = df_train["y_pnl_usd"]
+
+    Xy_threshold["date"] = pd.to_datetime(df_threshold["Date/Time"]).dt.date
+    Xy_threshold["y_binary"] = df_threshold["y_binary"]
+    Xy_threshold["y_return"] = df_threshold["y_return"]
+    Xy_threshold["y_pnl_usd"] = df_threshold["y_pnl_usd"]
+
+    Xy_test["date"] = pd.to_datetime(df_test["Date/Time"]).dt.date
+    Xy_test["y_binary"] = df_test["y_binary"]
+    Xy_test["y_return"] = df_test["y_return"]
+    Xy_test["y_pnl_usd"] = df_test["y_pnl_usd"]
+
     # Extract feature columns (exclude metadata and targets)
-    # NOTE: build_core_features() normalized column names, so use lowercase
     exclude_cols = {
         "date", "date_time", "exit_date_time", "entry_price", "exit_price",
         "y_return", "y_binary", "y_pnl_usd", "y_pnl_gross", "pnl_usd",
