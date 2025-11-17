@@ -250,8 +250,23 @@ def deflated_sharpe_ratio(sr: float, n: int, kurt_excess: float = 0.0, m: int = 
     sr_star = _norm_ppf(1 - 1.0/m) / np.sqrt(max(n - 1, 1)) if m>1 else 0.0
     return _psr(sr, n, kurt_excess, sr_star)
 
-def build_core_features(Xy: pd.DataFrame) -> pd.DataFrame:
-    return build_normalised_feature_matrix(Xy)
+def build_core_features(
+    Xy: pd.DataFrame,
+    scaler=None,
+    fit_scaler: bool = True
+):
+    """
+    Build normalized feature matrix.
+
+    Args:
+        Xy: DataFrame with features and targets
+        scaler: Optional pre-fitted StandardScaler
+        fit_scaler: Whether to fit the scaler on this data
+
+    Returns:
+        Tuple of (normalized_features_df, fitted_scaler)
+    """
+    return build_normalised_feature_matrix(Xy, scaler=scaler, fit_scaler=fit_scaler)
 
 def add_engineered(X: pd.DataFrame) -> pd.DataFrame:
     Xn = X.copy()

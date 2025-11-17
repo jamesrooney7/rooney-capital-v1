@@ -122,11 +122,18 @@ def load_and_split_data(
     logger.info(f"{'='*60}\n")
 
     # Prepare feature matrices (normalizes ALL column names to snake_case)
-    # NOTE: build_core_features() removes admin columns including "date"
-    # We need to preserve "date" for CPCV splits, and target columns for evaluation
-    Xy_train = build_core_features(df_train)
-    Xy_threshold = build_core_features(df_threshold)
-    Xy_test = build_core_features(df_test)
+    # CRITICAL: Fit scaler on TRAINING data only, then transform all periods with same scaler
+    # This prevents lookahead bias from using future data statistics
+    logger.info("Normalizing features (fitting scaler on training data only)...")
+
+    # FIT scaler on training data
+    Xy_train, fitted_scaler = build_core_features(df_train, scaler=None, fit_scaler=True)
+
+    # TRANSFORM threshold and test data with the SAME fitted scaler
+    Xy_threshold, _ = build_core_features(df_threshold, scaler=fitted_scaler, fit_scaler=False)
+    Xy_test, _ = build_core_features(df_test, scaler=fitted_scaler, fit_scaler=False)
+
+    logger.info(f"✅ All periods normalized with same scaler (fit on training data only)")
 
     # Add back the date column and targets (normalized to lowercase)
     # Keep as datetime (not .dt.date) for pd.Grouper compatibility
