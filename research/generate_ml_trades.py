@@ -126,6 +126,127 @@ def load_data_feeds(
         return None, None
 
 
+def get_all_filter_param_keys() -> set[str]:
+    """
+    Return comprehensive set of all filter parameter keys.
+
+    This ensures collect_filter_values() calculates ALL possible features,
+    not just the ones explicitly enabled in the strategy config.
+
+    Mimics the logic from extract_training_data.py's _get_all_filter_param_keys()
+    """
+    keys = {
+        # Calendar filters
+        'allowedDOW', 'allowedMon', 'enableDOM', 'domDay',
+        'enableBegWeek', 'enableEvenOdd',
+
+        # Price/return filters
+        'enablePrevDayPct', 'prev_day_pct', 'prev_day_pctxvalue',
+        'enablePrevBarPct', 'prev_bar_pct', 'prev_bar_pct_pct',
+
+        # IBS filters
+        'enableIBSEntry', 'enableIBSExit', 'ibs', 'ibs_pct', 'ibs_percentile',
+        'enableDailyIBS', 'daily_ibs', 'daily_ibs_pct', 'daily_ibs_percentile',
+        'enablePrevIBS', 'prev_ibs', 'prev_ibs_pct',
+        'enablePrevIBSDaily', 'prev_daily_ibs',
+
+        # Pair filters
+        'enablePairIBS', 'pair_ibs', 'pair_ibs_daily', 'pair_ibs_pct', 'pair_ibs_percentile',
+        'enablePairZ', 'pair_z', 'pair_z_pct', 'pair_z_score_daily',
+
+        # RSI filters
+        'enableRSIEntry', 'rsi_entry', 'rsi', 'rsi_pct',
+        'enableRSIEntry2Len', 'rsi_entry2_len', 'rsi_len_2_percentile',
+        'enableRSIEntry14Len', 'rsi_entry14_len', 'rsi_len14',
+        'enableRSIEntry2', 'rsi2_entry', 'rsi2', 'rsi2_pct',
+        'enableDailyRSI', 'daily_rsi', 'daily_rsi_pct', 'secondary_rsi_entry_daily', 'secondary_rsi_percentile',
+        'enableDailyRSI2Len', 'daily_rsi2_len', 'daily_rsi2',
+        'enableDailyRSI14Len', 'daily_rsi14_len', 'daily_rsi14',
+
+        # Bollinger Bands
+        'enableBBHigh', 'bb_high',
+        'enableBBHighD', 'bb_high_d',
+
+        # EMA filters
+        'enableEMA8', 'ema8',
+        'enableEMA20', 'ema20',
+
+        # ATR filters
+        'enableATRZ', 'atrz', 'atrz_pct', 'atr_z_percentile',
+        'enableHourlyATRPercentile', 'hourly_atr_percentile',
+
+        # Volume filters
+        'enableVolZ', 'volz', 'volz_pct', 'volume_z_percentile',
+
+        # Momentum/distance filters
+        'enableDistZ', 'distz', 'dist_z', 'dist_z_pct', 'distance_z_entry_daily',
+        'enableMom3Z', 'mom3z',
+        'enablePriceZ', 'pricez',
+
+        # Daily ATR/volume
+        'enableDATRZ', 'datrz', 'datrz_pct', 'daily_atr_z_percentile',
+        'enableDVolZ', 'dvolz', 'dvolz_pct', 'daily_volume_z_percentile',
+
+        # Trend/ratio filters
+        'enableTRATRRatio', 'tratr_ratio',
+
+        # Supply zone
+        'use_supply_zone', 'supply_zone',
+
+        # N7 bar
+        'enableN7Bar', 'n7_bar',
+
+        # Inside bar
+        'enableInsideBar', 'inside_bar',
+
+        # Bear count
+        'enableBearCount', 'bear_count',
+
+        # Spiral ER
+        'enableSER', 'ser',
+
+        # TWRC
+        'enableTWRC', 'twrc',
+
+        # VIX regime
+        'enableVIXReg', 'vix_reg',
+
+        # Fractal pivot
+        'fractalPivot',
+
+        # VIX median
+        'vix_med',
+
+        # Price
+        'price_usd',
+    }
+
+    # Add cross-asset z-score and return keys for ALL symbols
+    cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
+                     '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT', 'VIX']
+    timeframes = ['Hour', 'Day']
+
+    for symbol in cross_symbols:
+        for tf in timeframes:
+            # Enable parameters
+            keys.add(f'enable{symbol}ZScore{tf}')
+            keys.add(f'enable{symbol}Return{tf}')
+
+            # Snake_case variants
+            tf_lower = 'hourly' if tf == 'Hour' else 'daily'
+            symbol_lower = symbol.lower()
+            keys.add(f'{symbol_lower}_{tf_lower}_z_score')
+            keys.add(f'{symbol_lower}_{tf_lower}_z_pipeline')
+            keys.add(f'{symbol_lower}_{tf_lower}_return')
+            keys.add(f'{symbol_lower}_{tf_lower}_return_pipeline')
+
+            # Alternate snake_case format
+            tf_suffix = 'hour' if tf == 'Hour' else 'day'
+            keys.add(f'{symbol_lower}_z_score_{tf_suffix}')
+
+    return keys
+
+
 def create_filter_columns_from_features(features: list[str]) -> list[FilterColumn]:
     """Create FilterColumn objects from ML feature names.
 
@@ -326,10 +447,16 @@ def run_backtest_for_symbol(
 
     # 7. Prepare strategy kwargs
     strategy_kwargs = strategy_kwargs_from_bundle(bundle)
+
+    # CRITICAL: Set ml_feature_param_keys to tell strategy to calculate ALL features
+    # This matches what extract_training_data.py does
+    all_param_keys = get_all_filter_param_keys()
+
     strategy_kwargs.update({
         "symbol": symbol,
         "filter_columns": filter_columns,
         "trade_start": TEST_START.date() if fromdate is None else fromdate.date(),  # Only trade after warmup
+        "ml_feature_param_keys": all_param_keys,  # ← This is the key fix!
     })
 
     logger.info(f"  - ML threshold: {strategy_kwargs.get('ml_threshold')}")
