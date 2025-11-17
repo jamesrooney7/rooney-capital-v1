@@ -57,9 +57,39 @@ class TradeLoggingStrategy(IbsStrategy):
         self.all_trades = []  # Store all trades in memory
         self.warmup_trades_filtered = 0  # Count trades filtered during warmup
 
+        # CRITICAL: Set _normalized_ml_features BEFORE super().__init__()
+        # The parent uses this to decide which cross-asset return pipelines to build
+        # We want ALL cross-asset features, not just the ML model's 30
+        from strategy.feature_utils import normalize_column_name
+        all_feature_names = self._get_all_feature_names()
+        self._normalized_ml_features = tuple(
+            normalize_column_name(name) for name in all_feature_names
+        )
+        logger.info(f"🔍 Pre-set _normalized_ml_features to {len(self._normalized_ml_features)} features BEFORE parent init")
+
         super().__init__(*args, **kwargs)
 
         logger.info(f"✅ Strategy initialized with {len(self.ml_feature_param_keys)} filter parameters for complete feature set")
+
+    def _get_all_feature_names(self) -> list[str]:
+        """
+        Return ALL possible feature names (for _normalized_ml_features).
+
+        This is used by the parent to determine which cross-asset return pipelines to build.
+        We return all possible cross-asset feature names so pipelines are built for everything.
+        """
+        names = []
+
+        # Cross-asset returns (the critical missing features!)
+        cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
+                         '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT']
+        for symbol in cross_symbols:
+            names.append(f'{symbol} Hourly Return')
+            names.append(f'{symbol} Daily Return')
+            names.append(f'{symbol} Hourly Return Pipeline')
+            names.append(f'{symbol} Daily Return Pipeline')
+
+        return names
 
     def _derive_ml_feature_param_keys(self) -> set:
         """
