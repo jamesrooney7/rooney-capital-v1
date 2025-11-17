@@ -72,6 +72,7 @@ class TradeLoggingStrategy(IbsStrategy):
         This matches how extract_training_data.py works - complete feature calculation
         regardless of which features the ML model uses.
         """
+        logger.info("🔍 TradeLoggingStrategy._derive_ml_feature_param_keys() OVERRIDE called")
         keys = {
             # Calendar filters
             'allowedDOW', 'allowedMon', 'enableDOM', 'domDay',
@@ -164,6 +165,8 @@ class TradeLoggingStrategy(IbsStrategy):
                 keys.add(f'{symbol.lower()}_daily_return')
                 keys.add(f'{symbol.lower()}_hourly_return')
 
+        logger.info(f"🔍 Returning {len(keys)} parameter keys from override")
+        logger.info(f"🔍 Sample cross-asset keys: {[k for k in keys if 'hourly_return' in k][:10]}")
         return keys
 
     def notify_order(self, order):
