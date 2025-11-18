@@ -267,12 +267,15 @@ def main():
         print(f"Error: Log directory not found: {log_dir}", file=sys.stderr)
         return 1
 
-    # Find all log files (MODEL_*.log or similar)
+    # Find all log files (MODEL_*.log or model_*.log patterns)
     log_files = sorted(log_dir.glob("MODEL_*.log"))
+    if not log_files:
+        # Try lowercase pattern
+        log_files = sorted(log_dir.glob("model_*.log"))
 
     if not log_files:
         print(f"Error: No log files found in {log_dir}", file=sys.stderr)
-        print("Expected files like: MODEL_A.log, MODEL_B.log, etc.", file=sys.stderr)
+        print("Expected files like: MODEL_A.log, model_a_*.log, etc.", file=sys.stderr)
         return 1
 
     print(f"Found {len(log_files)} model log files")
