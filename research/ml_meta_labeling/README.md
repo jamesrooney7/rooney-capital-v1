@@ -66,7 +66,7 @@ All results are saved to `research/ml_meta_labeling/results/{SYMBOL}/`:
 - 5-fold temporal splits
 - 60-day embargo period to prevent label leakage
 - Respects temporal ordering
-- Combinatorial cross-validation (k_test=2)
+- Standard k-fold (k_test=1) for hyperparameter optimization
 
 ### Component 4: LightGBM Model Training
 - Balanced class weights
