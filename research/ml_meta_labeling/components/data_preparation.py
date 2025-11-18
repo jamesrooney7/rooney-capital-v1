@@ -286,15 +286,19 @@ class DataPreparation:
         if self.filtered_df is None:
             raise ValueError("Must call load_and_prepare() first")
 
+        # Convert numpy types to Python types for JSON serialization
+        class_dist = self.filtered_df['y_binary'].value_counts()
+        class_distribution = {int(k): int(v) for k, v in class_dist.items()}
+
         return {
             'symbol': self.symbol,
-            'total_samples': len(self.filtered_df),
-            'n_features': len(self.feature_columns),
+            'total_samples': int(len(self.filtered_df)),
+            'n_features': int(len(self.feature_columns)),
             'date_range': {
                 'start': str(self.filtered_df['Date'].min()),
                 'end': str(self.filtered_df['Date'].max())
             },
-            'class_distribution': dict(self.filtered_df['y_binary'].value_counts()),
-            'columns_removed': len(self.removed_columns),
-            'columns_kept': len(self.filtered_df.columns)
+            'class_distribution': class_distribution,
+            'columns_removed': int(len(self.removed_columns)),
+            'columns_kept': int(len(self.filtered_df.columns))
         }
