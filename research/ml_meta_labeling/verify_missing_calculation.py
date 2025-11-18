@@ -3,9 +3,14 @@
 Verify missing value calculation is correct by showing actual data.
 """
 
+import sys
+from pathlib import Path
+
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
 import pandas as pd
 import numpy as np
-from pathlib import Path
 
 # Load ES data
 csv_path = Path('data/training/ES_transformed_features.csv')
