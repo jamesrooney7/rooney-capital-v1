@@ -7,12 +7,22 @@ import sys
 from pathlib import Path
 
 # Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
 import pandas as pd
 
 # Import the feature key generator
-from research.extract_training_data import FeatureLoggingStrategy
+# Need to import from the file directly since it's a script
+import importlib.util
+spec = importlib.util.spec_from_file_location(
+    "extract_training_data",
+    project_root / "research" / "extract_training_data.py"
+)
+extract_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(extract_module)
+
+FeatureLoggingStrategy = extract_module.FeatureLoggingStrategy
 
 # Get all requested features
 requested_features = FeatureLoggingStrategy._get_all_filter_param_keys()
