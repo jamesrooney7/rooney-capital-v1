@@ -547,11 +547,27 @@ def extract_training_data(
     ml_features = list(FeatureLoggingStrategy._get_all_filter_param_keys())
     logger.info(f"Requesting {len(ml_features)} features for calculation")
 
+    # Build enable parameters dict - set all enable* params to True
+    # This forces the strategy to create ALL indicators
+    enable_params = {}
+    for key in ml_features:
+        if key.lower().startswith('enable'):
+            enable_params[key] = True
+
+    # Also enable key indicator parameters
+    enable_params.update({
+        'use_supply_zone': True,
+        'use_val_filter': False,  # Keep disabled - not needed
+    })
+
+    logger.info(f"Enabling {len(enable_params)} indicator parameters")
+
     # Add feature-logging strategy with incremental CSV writing
     strat_params = {
         'symbol': symbol,
         'output_csv_path': str(output_path),
         'ml_features': ml_features,  # Trigger indicator creation
+        **enable_params,  # Enable all indicators
     }
     if filter_year is not None:
         strat_params['filter_year'] = filter_year
