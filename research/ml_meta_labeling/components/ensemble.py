@@ -68,7 +68,8 @@ class EnsembleModel:
         logger.info("Training ensemble model...")
 
         # Setup Purged K-Fold for out-of-fold predictions
-        pkf = PurgedKFold(n_splits=cv_folds, embargo_days=embargo_days, k_test=2)
+        # Use k_test=1 (standard k-fold) to avoid empty folds with small datasets
+        pkf = PurgedKFold(n_splits=cv_folds, embargo_days=embargo_days, k_test=1)
 
         # Store out-of-fold predictions from each model
         oof_predictions = {
@@ -79,6 +80,18 @@ class EnsembleModel:
 
         # Train base models and generate OOF predictions
         for fold_idx, (train_idx, test_idx) in enumerate(pkf.split(X), 1):
+            # Validate fold has sufficient data
+            min_train_samples = 100
+            if len(train_idx) < min_train_samples:
+                logger.warning(
+                    f"Fold {fold_idx} has only {len(train_idx)} training samples. Skipping."
+                )
+                continue
+
+            if len(test_idx) == 0:
+                logger.warning(f"Fold {fold_idx} has no test samples. Skipping.")
+                continue
+
             logger.info(f"Training base models on fold {fold_idx}/{pkf.get_n_splits()}...")
 
             X_train_fold = X.iloc[train_idx].drop(columns=['Date'])

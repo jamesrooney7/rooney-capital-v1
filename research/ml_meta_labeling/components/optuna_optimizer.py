@@ -150,16 +150,32 @@ class OptunaOptimizer:
         trainer = create_lightgbm_from_trial(trial, self.random_state)
 
         # Setup Purged K-Fold CV
+        # Use k_test=1 (standard k-fold) for hyperparameter optimization
+        # to reduce computational cost and avoid empty folds with small datasets
         pkf = PurgedKFold(
             n_splits=self.cv_folds,
             embargo_days=self.embargo_days,
-            k_test=2
+            k_test=1
         )
 
         # Evaluate across folds
         fold_scores = []
 
         for fold_idx, (train_idx, test_idx) in enumerate(pkf.split(X), 1):
+            # Validate fold has sufficient training samples
+            min_train_samples = 100
+            if len(train_idx) < min_train_samples:
+                logger.warning(
+                    f"Fold {fold_idx} has only {len(train_idx)} training samples "
+                    f"(minimum: {min_train_samples}). Skipping this fold."
+                )
+                continue
+
+            # Validate fold has test samples
+            if len(test_idx) == 0:
+                logger.warning(f"Fold {fold_idx} has no test samples. Skipping this fold.")
+                continue
+
             # Get fold data
             X_train_fold = X.iloc[train_idx].drop(columns=['Date'])
             X_test_fold = X.iloc[test_idx].drop(columns=['Date'])
@@ -190,8 +206,18 @@ class OptunaOptimizer:
             if trial.should_prune():
                 raise optuna.TrialPruned()
 
+        # Validate we have at least some fold scores
+        if len(fold_scores) == 0:
+            logger.warning(
+                "All CV folds were skipped due to insufficient data. "
+                "This can happen with small datasets and large embargo periods."
+            )
+            # Return a poor score to discourage this hyperparameter combination
+            return 0.5  # Random baseline for binary classification
+
         # Return mean score across folds
         mean_score = np.mean(fold_scores)
+        logger.debug(f"Trial CV score: {mean_score:.4f} (from {len(fold_scores)} folds)")
         return mean_score
 
     def _default_scoring(self, y_true: pd.Series, y_pred_proba: np.ndarray) -> float:
