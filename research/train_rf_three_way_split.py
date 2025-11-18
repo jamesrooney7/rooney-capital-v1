@@ -224,31 +224,23 @@ def phase1_hyperparameter_tuning(
     filtered_enable_params = 0
     filtered_vix = 0
     filtered_redundant = 0
-    filtered_unstable = 0
+    filtered_regime_dependent = 0
 
     cross_symbols = ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
                      "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]
 
-    # Unstable features identified from stability analysis (2010-2018 rolling window analysis)
-    # These features show high coefficient of variation (CV) in importance across time periods,
-    # or are inconsistently selected, indicating regime-dependence
-    unstable_features = {
-        # High CV + low selection (CV>0.5, selection<50%)
-        'ibs',                          # CV=0.77, selection=33.3% - redundant with strategy logic
-        'enableHourlyATRPercentile',    # CV=0.56, selection=33.3%
-        'si_daily_z_score',             # CV=0.55, selection=50%
-        '6c_daily_z_pipeline',          # CV=0.56, selection=100% but importance varies wildly
+    # AGGRESSIVE FILTERING: Remove ALL currency and metal/commodity features
+    # Previous round with conservative filtering still showed negative performance
+    # Trying full removal of regime-dependent asset classes
 
-        # Rarely selected currencies (selection<25%) - regime-dependent
-        '6a_hourly_return', '6b_hourly_return', '6c_hourly_return',
-        '6e_hourly_return', '6e_hourly_return_pipeline', '6e_daily_return_pipeline',
-        '6j_hourly_return', '6j_daily_return_pipeline',
-        '6n_hourly_z_score', '6b_hourly_return_pipeline',
+    # Currency symbols (all FX pairs)
+    currency_symbols = ['6a', '6b', '6c', '6e', '6j', '6m', '6n', '6s']
 
-        # Inconsistent currencies (selection<60%)
-        '6m_hourly_z_score', '6b_daily_z_pipeline', '6m_daily_z_pipeline',
-        '6e_hourly_z_score',
-    }
+    # Metals and commodities
+    metal_commodity_symbols = ['gc', 'si', 'hg', 'pl', 'ng', 'cl']
+
+    # Always filter these (from stability analysis)
+    always_filter = {'ibs', 'enableHourlyATRPercentile'}
 
     for col in X_train_full.columns:
         # Skip Title Case cross-instrument features (e.g., "ES Hourly Return")
@@ -279,10 +271,22 @@ def phase1_hyperparameter_tuning(
             filtered_redundant += 1
             continue
 
-        # Skip unstable features (identified from stability analysis)
-        if col in unstable_features:
-            logger.debug(f"Filtering out unstable feature: {col}")
-            filtered_unstable += 1
+        # Skip features from always_filter list
+        if col in always_filter:
+            logger.debug(f"Filtering out always-filter feature: {col}")
+            filtered_regime_dependent += 1
+            continue
+
+        # Skip ALL currency features (regime-dependent)
+        if any(curr in col.lower() for curr in currency_symbols):
+            logger.debug(f"Filtering out currency feature: {col}")
+            filtered_regime_dependent += 1
+            continue
+
+        # Skip ALL metal/commodity features (regime-dependent)
+        if any(metal in col.lower() for metal in metal_commodity_symbols):
+            logger.debug(f"Filtering out metal/commodity feature: {col}")
+            filtered_regime_dependent += 1
             continue
 
         valid_cols.append(col)
@@ -292,7 +296,7 @@ def phase1_hyperparameter_tuning(
         f"{filtered_enable_params} enable parameter columns, "
         f"{filtered_vix} VIX features, "
         f"{filtered_redundant} redundant features, "
-        f"and {filtered_unstable} unstable features"
+        f"and {filtered_regime_dependent} regime-dependent features (ALL currencies/metals/commodities)"
     )
     logger.info(f"Screening from {len(valid_cols)} valid candidate features")
 
@@ -637,8 +641,8 @@ def main():
                        help='End date for training period (hyperparameter tuning)')
     parser.add_argument('--threshold-end', type=str, default='2020-12-31',
                        help='End date for threshold period (threshold optimization)')
-    parser.add_argument('--rs-trials', type=int, default=25, help='Random search trials (reduced from 120 for meta-labeling)')
-    parser.add_argument('--bo-trials', type=int, default=65, help='Bayesian optimization trials (reduced from 300 for meta-labeling)')
+    parser.add_argument('--rs-trials', type=int, default=30, help='Random search trials (lightweight for quick iteration)')
+    parser.add_argument('--bo-trials', type=int, default=50, help='Bayesian optimization trials (lightweight for quick iteration)')
     parser.add_argument('--folds', type=int, default=5, help='Number of CPCV folds')
     parser.add_argument('--k-test', type=int, default=2, help='Number of test folds in CPCV')
     parser.add_argument('--embargo-days', type=int, default=2, help='Embargo days for CPCV (reduced from 5 to 2 for meta-labeling, 1-day hold + 1-day buffer)')
