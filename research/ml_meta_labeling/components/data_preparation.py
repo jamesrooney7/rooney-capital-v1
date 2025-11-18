@@ -205,7 +205,7 @@ class DataPreparation:
             # Fill remaining missing values with 0 (after normalization will be mean)
             for col in self.feature_columns:
                 if self.filtered_df[col].isna().any():
-                    self.filtered_df[col].fillna(0, inplace=True)
+                    self.filtered_df.loc[:, col] = self.filtered_df[col].fillna(0)
 
             logger.info(f"Missing value handling complete. {len(self.feature_columns)} features remain.")
 

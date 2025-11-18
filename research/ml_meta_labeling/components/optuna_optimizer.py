@@ -97,12 +97,21 @@ class OptunaOptimizer:
             return self._objective(trial, X, y, sample_weight, scoring_fn)
 
         # Optimize
-        self.study.optimize(
-            objective,
-            n_trials=self.n_trials,
-            n_jobs=self.n_jobs if self.n_jobs != -1 else None,
-            show_progress_bar=False
-        )
+        if self.n_jobs == -1:
+            # Use all cores - don't pass n_jobs parameter
+            self.study.optimize(
+                objective,
+                n_trials=self.n_trials,
+                show_progress_bar=False
+            )
+        else:
+            # Use specific number of jobs
+            self.study.optimize(
+                objective,
+                n_trials=self.n_trials,
+                n_jobs=self.n_jobs,
+                show_progress_bar=False
+            )
 
         # Extract best results
         self.best_params = self.study.best_params
