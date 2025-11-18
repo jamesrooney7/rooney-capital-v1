@@ -157,6 +157,7 @@ class FeatureLoggingStrategy(IbsStrategy):
         }
 
         # Add cross-asset z-score and return keys dynamically
+        # Note: VIX excluded - we filter VIX features in output CSV and don't load VIX data
         cross_symbols = ['ES', 'NQ', 'RTY', 'YM', 'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
                          '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S', 'TLT']
         timeframes = ['Hour', 'Day']
@@ -165,11 +166,16 @@ class FeatureLoggingStrategy(IbsStrategy):
             for tf in timeframes:
                 # Z-score filters
                 keys.add(f'enable{symbol}ZScore{tf}')
-                keys.add(f'{symbol.lower()}_z_score_{tf.lower()}')
+                # Feature keys must match ibs_strategy.py _metadata_feature_key() format:
+                # "Hour" -> "hourly", "Day" -> "daily"
+                tf_label = 'hourly' if tf == 'Hour' else 'daily'
+                keys.add(f'{symbol.lower()}_{tf_label}_z_score')
+                keys.add(f'{symbol.lower()}_{tf_label}_z_pipeline')
 
-                # Daily return filters
-                keys.add(f'{symbol.lower()}_daily_return')
-                keys.add(f'{symbol.lower()}_hourly_return')
+                # Return filters (one per symbol, not per timeframe)
+                if tf == 'Hour':  # Only add once to avoid duplicates
+                    keys.add(f'{symbol.lower()}_daily_return')
+                    keys.add(f'{symbol.lower()}_hourly_return')
 
         return keys
 
@@ -179,8 +185,13 @@ class FeatureLoggingStrategy(IbsStrategy):
 
         Filters out:
         1. Title case columns (columns with spaces) - these are duplicates
-        2. Enable* parameters - these are config flags, not features
+        2. Cross-asset enable* parameters - these have friendly-named alternatives
         3. VIX features - excluded per user requirement
+
+        Keeps:
+        - Core columns (dates, prices, labels)
+        - All feature values including enable* params that don't have friendly alternatives
+          (e.g., enableEMA8, enableRSIEntry are kept because they don't have ema8/rsi_entry columns)
 
         Args:
             col_name: Column name to check
@@ -201,13 +212,20 @@ class FeatureLoggingStrategy(IbsStrategy):
         if ' ' in col_name:
             return False
 
-        # Filter out enable* parameters
-        if col_name.lower().startswith('enable'):
-            return False
-
         # Filter out VIX features (case-insensitive)
         if 'vix' in col_name.lower():
             return False
+
+        # Filter out ONLY cross-asset enable* params (these have corresponding feature_key columns)
+        # e.g., enableESZScoreHour is filtered because we have es_hourly_z_score
+        # But keep other enable* params like enableEMA8 (no friendly alternative exists)
+        if col_name.lower().startswith('enable'):
+            import re
+            # Pattern: enableXXZScore(Hour|Day) or enableXXReturn(Hour|Day)
+            if re.match(r'enable[A-Z0-9]+ZScore(Hour|Day)', col_name):
+                return False  # Has corresponding _z_score column
+            if re.match(r'enable[A-Z0-9]+Return(Hour|Day)', col_name):
+                return False  # Has corresponding _return column
 
         # Keep everything else
         return True
