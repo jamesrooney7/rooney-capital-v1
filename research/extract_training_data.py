@@ -69,9 +69,10 @@ class FeatureLoggingStrategy(IbsStrategy):
 
         # Populate comprehensive list of all possible filter parameter keys
         # This tells collect_filter_values() to calculate ALL features
-        self.ml_feature_param_keys = self._get_all_filter_param_keys()
+        self.ml_feature_param_keys = FeatureLoggingStrategy._get_all_filter_param_keys()
 
-    def _get_all_filter_param_keys(self) -> set:
+    @staticmethod
+    def _get_all_filter_param_keys() -> set:
         """
         Return comprehensive set of all filter parameter keys.
 
@@ -540,8 +541,18 @@ def extract_training_data(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{symbol}_transformed_features.csv"
 
+    # Build ml_features list to trigger indicator creation
+    # Even though we're not using ML during extraction, passing ml_features
+    # tells the strategy which indicators to create
+    ml_features = list(FeatureLoggingStrategy._get_all_filter_param_keys())
+    logger.info(f"Requesting {len(ml_features)} features for calculation")
+
     # Add feature-logging strategy with incremental CSV writing
-    strat_params = {'symbol': symbol, 'output_csv_path': str(output_path)}
+    strat_params = {
+        'symbol': symbol,
+        'output_csv_path': str(output_path),
+        'ml_features': ml_features,  # Trigger indicator creation
+    }
     if filter_year is not None:
         strat_params['filter_year'] = filter_year
         logger.info(f"Filtering output to trades from year {filter_year} only")
