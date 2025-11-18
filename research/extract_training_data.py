@@ -60,6 +60,11 @@ class FeatureLoggingStrategy(IbsStrategy):
         self.trade_count = 0
         self.filtered_count = 0
 
+        # Track column filtering stats
+        self.filtered_columns = set()
+        self.kept_columns = set()
+        self.column_filter_logged = False
+
         super().__init__(*args, **kwargs)
 
         # Populate comprehensive list of all possible filter parameter keys
@@ -167,6 +172,66 @@ class FeatureLoggingStrategy(IbsStrategy):
 
         return keys
 
+    def _should_keep_column(self, col_name: str) -> bool:
+        """
+        Determine if a column should be kept in the output CSV.
+
+        Filters out:
+        1. Title case columns (columns with spaces) - these are duplicates
+        2. Enable* parameters - these are config flags, not features
+        3. VIX features - excluded per user requirement
+
+        Args:
+            col_name: Column name to check
+
+        Returns:
+            True if column should be kept, False if it should be filtered
+        """
+        # Always keep core columns
+        core_columns = {
+            'Date/Time', 'Exit Date/Time', 'Date', 'Exit_Date',
+            'Entry_Price', 'Exit_Price', 'Symbol', 'Trade_ID',
+            'y_return', 'y_binary', 'y_pnl_usd', 'y_pnl_gross'
+        }
+        if col_name in core_columns:
+            return True
+
+        # Filter out title case columns (have spaces)
+        if ' ' in col_name:
+            return False
+
+        # Filter out enable* parameters
+        if col_name.lower().startswith('enable'):
+            return False
+
+        # Filter out VIX features (case-insensitive)
+        if 'vix' in col_name.lower():
+            return False
+
+        # Keep everything else
+        return True
+
+    def _filter_record_columns(self, record: dict) -> dict:
+        """
+        Filter record columns to remove unwanted features.
+
+        Args:
+            record: Dictionary of column name -> value
+
+        Returns:
+            Filtered dictionary with only kept columns
+        """
+        filtered_record = {}
+
+        for col_name, value in record.items():
+            if self._should_keep_column(col_name):
+                filtered_record[col_name] = value
+                self.kept_columns.add(col_name)
+            else:
+                self.filtered_columns.add(col_name)
+
+        return filtered_record
+
     def _write_trade_to_csv(self, record: dict):
         """Write a single trade record to CSV immediately."""
         import csv
@@ -186,21 +251,36 @@ class FeatureLoggingStrategy(IbsStrategy):
                     return  # Skip trades not in the target year (warmup data)
 
         try:
+            # Filter columns to remove title case, enable*, and VIX features
+            filtered_record = self._filter_record_columns(record)
+
+            # Log column filtering on first trade
+            if not self.column_filter_logged:
+                original_count = len(record)
+                filtered_count = len(filtered_record)
+                removed_count = original_count - filtered_count
+                logger.info(f"Column filtering: {original_count} total → {filtered_count} kept, {removed_count} removed")
+                logger.info(f"  Removed: title case ({sum(1 for c in self.filtered_columns if ' ' in c)}), "
+                           f"enable* ({sum(1 for c in self.filtered_columns if c.lower().startswith('enable'))}), "
+                           f"VIX ({sum(1 for c in self.filtered_columns if 'vix' in c.lower())})")
+                self.column_filter_logged = True
+
             # Open file on first trade
             if self.csv_file is None:
                 output_path = Path(self.output_csv_path)
                 output_path.parent.mkdir(parents=True, exist_ok=True)
 
                 self.csv_file = open(output_path, 'w', newline='')
-                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=record.keys())
+                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=filtered_record.keys())
                 self.csv_writer.writeheader()
                 self.csv_headers_written = True
                 logger.info(f"Opened CSV file for incremental writing: {output_path}")
+                logger.info(f"Writing {len(filtered_record)} columns per trade")
                 if self.filter_year:
                     logger.info(f"Filtering trades to year {self.filter_year} only (warmup year discarded)")
 
-            # Write the trade
-            self.csv_writer.writerow(record)
+            # Write the filtered trade
+            self.csv_writer.writerow(filtered_record)
             self.csv_file.flush()  # Ensure it's written to disk
             self.trade_count += 1
 
@@ -212,6 +292,7 @@ class FeatureLoggingStrategy(IbsStrategy):
         if self.csv_file is not None:
             self.csv_file.close()
             logger.info(f"Closed CSV file after writing {self.trade_count} trades")
+            logger.info(f"Final column summary: {len(self.kept_columns)} columns kept, {len(self.filtered_columns)} columns filtered")
             if self.filter_year and self.filtered_count > 0:
                 logger.info(f"Filtered out {self.filtered_count} warmup trades (not in year {self.filter_year})")
         super().stop()
@@ -407,8 +488,9 @@ def extract_training_data(
     # Load data for symbol + reference symbols
     # Try to load common reference symbols, but skip gracefully if data is missing/incomplete
     # The strategy will return None for cross-asset features if feeds aren't available
+    # Note: VIX removed since we filter out VIX features in output CSV
     primary_symbol = symbol
-    reference_symbols = ['TLT', 'VIX', 'ES', 'NQ', 'RTY', 'YM',
+    reference_symbols = ['TLT', 'ES', 'NQ', 'RTY', 'YM',
                          'GC', 'SI', 'HG', 'CL', 'NG', 'PL',
                          '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S']
 
@@ -478,8 +560,39 @@ def extract_training_data(
 
     # Read the CSV to verify and return
     df = pd.read_csv(output_path)
-    logger.info(f"Extraction complete! Saved training data to: {output_path}")
-    logger.info(f"Shape: {df.shape} (rows={len(df)}, columns={len(df.columns)})")
+    logger.info("=" * 80)
+    logger.info("EXTRACTION COMPLETE!")
+    logger.info("=" * 80)
+    logger.info(f"Output file: {output_path}")
+    logger.info(f"Shape: {df.shape} (rows={len(df):,}, columns={len(df.columns)})")
+
+    # Show date range
+    if 'Date/Time' in df.columns:
+        df['Date/Time'] = pd.to_datetime(df['Date/Time'])
+        logger.info(f"Date range: {df['Date/Time'].min()} to {df['Date/Time'].max()}")
+
+    # Show target distribution
+    if 'y_binary' in df.columns:
+        wins = (df['y_binary'] == 1).sum()
+        losses = (df['y_binary'] == 0).sum()
+        win_rate = (wins / len(df)) * 100 if len(df) > 0 else 0
+        logger.info(f"Target distribution: {wins:,} wins ({win_rate:.1f}%), {losses:,} losses")
+
+    # Show missing value summary
+    missing_counts = df.isna().sum()
+    cols_with_missing = (missing_counts > 0).sum()
+    if cols_with_missing > 0:
+        logger.info(f"Missing values: {cols_with_missing} columns have some missing data")
+        # Show worst offenders
+        worst = missing_counts.nlargest(5)
+        for col, count in worst.items():
+            pct = (count / len(df)) * 100
+            if pct > 0:
+                logger.info(f"  {col}: {count:,} missing ({pct:.1f}%)")
+    else:
+        logger.info("Missing values: None - all columns fully populated!")
+
+    logger.info("=" * 80)
 
     if len(df) == 0:
         logger.warning("CSV has no trades! Check strategy parameters.")
