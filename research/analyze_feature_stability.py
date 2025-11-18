@@ -557,7 +557,7 @@ def generate_report(
 def main():
     parser = argparse.ArgumentParser(description="Analyze feature stability across time periods")
     parser.add_argument("--symbol", type=str, default="ES", help="Trading symbol")
-    parser.add_argument("--data-dir", type=str, default="research/training_data", help="Training data directory")
+    parser.add_argument("--data-dir", type=str, default="data/training", help="Training data directory")
     parser.add_argument("--k-features", type=int, default=30, help="Number of features to select per window")
     parser.add_argument("--screen-method", type=str, default="importance",
                        choices=["importance", "permutation", "l1"],
