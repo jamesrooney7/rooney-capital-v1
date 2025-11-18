@@ -224,9 +224,31 @@ def phase1_hyperparameter_tuning(
     filtered_enable_params = 0
     filtered_vix = 0
     filtered_redundant = 0
+    filtered_unstable = 0
 
     cross_symbols = ["ES", "NQ", "RTY", "YM", "GC", "SI", "HG", "CL", "NG", "PL",
                      "6A", "6B", "6C", "6E", "6J", "6M", "6N", "6S", "TLT", "VIX"]
+
+    # Unstable features identified from stability analysis (2010-2018 rolling window analysis)
+    # These features show high coefficient of variation (CV) in importance across time periods,
+    # or are inconsistently selected, indicating regime-dependence
+    unstable_features = {
+        # High CV + low selection (CV>0.5, selection<50%)
+        'ibs',                          # CV=0.77, selection=33.3% - redundant with strategy logic
+        'enableHourlyATRPercentile',    # CV=0.56, selection=33.3%
+        'si_daily_z_score',             # CV=0.55, selection=50%
+        '6c_daily_z_pipeline',          # CV=0.56, selection=100% but importance varies wildly
+
+        # Rarely selected currencies (selection<25%) - regime-dependent
+        '6a_hourly_return', '6b_hourly_return', '6c_hourly_return',
+        '6e_hourly_return', '6e_hourly_return_pipeline', '6e_daily_return_pipeline',
+        '6j_hourly_return', '6j_daily_return_pipeline',
+        '6n_hourly_z_score', '6b_hourly_return_pipeline',
+
+        # Inconsistent currencies (selection<60%)
+        '6m_hourly_z_score', '6b_daily_z_pipeline', '6m_daily_z_pipeline',
+        '6e_hourly_z_score',
+    }
 
     for col in X_train_full.columns:
         # Skip Title Case cross-instrument features (e.g., "ES Hourly Return")
@@ -257,9 +279,21 @@ def phase1_hyperparameter_tuning(
             filtered_redundant += 1
             continue
 
+        # Skip unstable features (identified from stability analysis)
+        if col in unstable_features:
+            logger.debug(f"Filtering out unstable feature: {col}")
+            filtered_unstable += 1
+            continue
+
         valid_cols.append(col)
 
-    logger.info(f"Filtered out {filtered_title_case} Title Case duplicates, {filtered_enable_params} enable parameter columns, {filtered_vix} VIX features, and {filtered_redundant} redundant features")
+    logger.info(
+        f"Filtered out {filtered_title_case} Title Case duplicates, "
+        f"{filtered_enable_params} enable parameter columns, "
+        f"{filtered_vix} VIX features, "
+        f"{filtered_redundant} redundant features, "
+        f"and {filtered_unstable} unstable features"
+    )
     logger.info(f"Screening from {len(valid_cols)} valid candidate features")
 
     X_train_filtered = X_train_full[valid_cols].copy()
