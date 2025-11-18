@@ -8,7 +8,7 @@ to select diverse, representative features.
 import logging
 import numpy as np
 import pandas as pd
-from typing import Tuple, List, Dict
+from typing import Tuple, List, Dict, Optional
 from sklearn.ensemble import RandomForestClassifier
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
