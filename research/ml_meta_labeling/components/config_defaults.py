@@ -214,7 +214,7 @@ OPTUNA_DEFAULTS = {
 DATA_DEFAULTS = {
     'lambda_decay': 0.10,  # Exponential recency weighting
     'min_samples_per_class': 500,
-    'missing_value_threshold': 0.05,
+    'missing_value_threshold': 0.25,  # 25% - features with >25% missing values removed
     'portfolio_size': 1_000_000_000  # $1B for context
 }
 

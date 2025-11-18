@@ -77,7 +77,8 @@ def main(args):
         remove_enable_params=args.remove_enable_params,
         remove_vix=args.remove_vix,
         lambda_decay=args.lambda_decay,
-        min_samples_per_class=args.min_samples_per_class
+        min_samples_per_class=args.min_samples_per_class,
+        missing_value_threshold=args.missing_value_threshold
     )
 
     df, feature_columns = data_prep.load_and_prepare()
@@ -354,6 +355,7 @@ if __name__ == "__main__":
     # Data preparation
     parser.add_argument("--lambda-decay", type=float, default=0.10, help="Exponential decay for sample weights")
     parser.add_argument("--min-samples-per-class", type=int, default=500, help="Min samples per class")
+    parser.add_argument("--missing-value-threshold", type=float, default=0.25, help="Max allowed missing value fraction")
 
     # Other
     parser.add_argument("--seed", type=int, default=42, help="Random seed")

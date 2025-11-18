@@ -196,9 +196,10 @@ class DataPreparation:
             ]
             if high_missing:
                 logger.warning(
-                    f"Removing {len(high_missing)} features with >{self.missing_value_threshold*100:.0f}% "
-                    f"missing values: {high_missing}"
+                    f"Removing {len(high_missing)} features with >{self.missing_value_threshold*100:.1f}% "
+                    f"missing values"
                 )
+                logger.debug(f"Removed features: {high_missing}")
                 self.feature_columns = [col for col in self.feature_columns if col not in high_missing]
 
             # Fill remaining missing values with 0 (after normalization will be mean)
