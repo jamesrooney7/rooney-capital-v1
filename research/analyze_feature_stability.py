@@ -180,7 +180,7 @@ def analyze_window(
 
     # Train simple RF to get importance
     X_selected = X[selected_features].copy()
-    y = Xy['target'].values
+    y = Xy['y_binary'].values
 
     rf = RandomForestClassifier(
         n_estimators=300,
@@ -600,11 +600,18 @@ def main():
     logger.info(f"Using training period: {len(df)} samples (2010-2018)")
 
     # Build core features (normalize)
+    # NOTE: build_core_features returns ONLY normalized features (no targets)
     logger.info("Building core features...")
-    Xy_train, fitted_scaler = build_core_features(df, scaler=None, fit_scaler=True)
+    X_normalized, fitted_scaler = build_core_features(df, scaler=None, fit_scaler=True)
+
+    # Add back date and target from original DataFrame
+    Xy_train = X_normalized.copy()
+    Xy_train["date"] = pd.to_datetime(df["Date/Time"].values)
+    Xy_train["y_binary"] = df["y_binary"].values
+    Xy_train["y_return"] = df["y_return"].values
 
     # Separate features from target
-    X_train = Xy_train.drop(columns=['target', 'trade_return'])
+    X_train = X_normalized.copy()
     logger.info(f"Feature matrix: {X_train.shape}")
 
     # Create rolling windows
@@ -617,7 +624,7 @@ def main():
 
     for window_name, window_df in windows:
         # Separate features from target for this window
-        X_window = window_df.drop(columns=['target', 'trade_return', 'date'])
+        X_window = window_df.drop(columns=['y_binary', 'y_return', 'date'])
 
         selected_features, importance_dict = analyze_window(
             window_name,
