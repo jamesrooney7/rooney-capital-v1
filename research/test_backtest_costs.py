@@ -54,13 +54,13 @@ def run_cost_comparison():
 
     # Test 2: Commission only
     print("\n" + "="*80)
-    print("TEST 2: COMMISSION ONLY ($9/round trip)")
+    print("TEST 2: COMMISSION ONLY ($2/round trip)")
     print("="*80)
     results_commission = run_backtest(
         data,
         TEST_PARAMS,
         symbol='ES',
-        commission_per_side=4.50,
+        commission_per_side=1.00,
         slippage_entry=0.0,
         slippage_exit=0.0
     )
@@ -74,7 +74,7 @@ def run_cost_comparison():
         data,
         TEST_PARAMS,
         symbol='ES',
-        commission_per_side=4.50,
+        commission_per_side=1.00,
         slippage_entry=0.0,
         slippage_exit=0.25
     )
@@ -88,7 +88,7 @@ def run_cost_comparison():
         data,
         TEST_PARAMS,
         symbol='ES',
-        commission_per_side=4.50,
+        commission_per_side=1.00,
         slippage_entry=0.25,
         slippage_exit=0.25
     )
@@ -102,7 +102,7 @@ def run_cost_comparison():
         data,
         TEST_PARAMS,
         symbol='ES',
-        commission_per_side=4.50,
+        commission_per_side=1.00,
         slippage_entry=0.0,
         slippage_exit=0.25
     )

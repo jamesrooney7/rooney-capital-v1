@@ -127,7 +127,7 @@ def run_backtest(
     params: Dict,
     symbol: str = 'ES',  # Symbol for point_value lookup
     warmup_bars: int = 365,  # 365 hours for ATR warmup
-    commission_per_side: float = 4.50,  # ES commission per side ($)
+    commission_per_side: float = 1.00,  # Commission per side ($)
     slippage_entry: float = 0.0,  # Entry slippage (limit orders)
     slippage_exit: float = 0.25  # Exit slippage (market orders, 1 tick)
 ) -> Dict:
@@ -135,9 +135,9 @@ def run_backtest(
     Run vectorized backtest with given parameters.
 
     Includes realistic execution:
-    - Commissions: $4.50 per side (default for ES)
+    - Commissions: $1.00 per side ($2 round trip)
     - Entry slippage: 0.0 points (limit orders at target price)
-    - Exit slippage: 0.50 points (market orders, 2 ticks)
+    - Exit slippage: 0.25 points (market orders, 1 tick)
     - Entry at OPEN of bar following signal (no look-ahead bias)
     - ATR from signal bar used for stops/targets (not entry bar)
     - Stops/targets checked at bar close (not intrabar)
@@ -156,9 +156,9 @@ def run_backtest(
             - auto_close_hour: Auto-close hour in 24-hour format (default: 15)
         symbol: Symbol name for point_value lookup (default: 'ES')
         warmup_bars: Number of bars to use for warmup (default: 365)
-        commission_per_side: Commission per side in dollars (default: 4.50 for ES)
+        commission_per_side: Commission per side in dollars (default: 1.00)
         slippage_entry: Entry slippage in points (default: 0.0 for limit orders)
-        slippage_exit: Exit slippage in points (default: 0.50 = 2 ticks for market orders)
+        slippage_exit: Exit slippage in points (default: 0.25 = 1 tick for market orders)
 
     Returns:
         Dictionary with performance metrics:
