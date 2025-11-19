@@ -246,16 +246,17 @@ def run_backtest(
 
             # Check exit conditions (in priority order)
             # Check stops/targets at bar close only (not intrabar)
+            # If triggered, exit at the close price (not the stop/target level)
 
             # 1. Stop loss hit (check Close)
             if current_price <= stop_loss:
                 exit_reason = 'stop_loss'
-                exit_price = stop_loss - slippage_points  # Slippage on stop
+                exit_price = current_price - slippage_points  # Exit at actual close, not stop level
 
             # 2. Take profit hit (check Close)
             elif current_price >= take_profit:
                 exit_reason = 'take_profit'
-                exit_price = take_profit - slippage_points  # Slippage on exit
+                exit_price = current_price - slippage_points  # Exit at actual close, not target level
 
             # 3. IBS exit threshold (same bar, since we can check IBS at close)
             elif current_ibs >= ibs_exit_low:
