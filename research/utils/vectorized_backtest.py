@@ -5,8 +5,9 @@ This is a lightweight, pure pandas/numpy implementation optimized for
 parameter search. ~100x faster than Backtrader for optimization workflows.
 
 Strategy Logic:
-- Entry: IBS between ibs_entry_low and ibs_entry_high
+- Entry: IBS between ibs_entry_low and ibs_entry_high (signal at bar i close, enter at bar i+1 open)
 - Exit: IBS >= ibs_exit_low OR ATR-based stop/target OR max holding bars OR EOD close
+- Stops/Targets: Based on ATR from signal bar, checked at bar close (not intrabar)
 - No volume/price/ML filters (pure base strategy optimization)
 """
 
@@ -129,10 +130,12 @@ def run_backtest(
     Includes realistic execution:
     - Commissions: $4.50 per side (default for ES)
     - Slippage: 0.25 points (1 tick) on all fills
-    - Intrabar stop/target execution using High/Low
+    - Entry at OPEN of bar following signal (no look-ahead bias)
+    - ATR from signal bar used for stops/targets (not entry bar)
+    - Stops/targets checked at bar close (not intrabar)
 
     Args:
-        df: DataFrame with OHLCV data (datetime index) - MUST include High and Low
+        df: DataFrame with OHLCV data (datetime index) - MUST include Open, High, Low, Close
         params: Dictionary with strategy parameters:
             - ibs_entry_low: IBS entry low threshold (default: 0.0)
             - ibs_entry_high: IBS entry high threshold
@@ -193,10 +196,12 @@ def run_backtest(
     entry_atr = None
     entry_time = None
     signal_pending = False  # Track if we have an entry signal
+    pending_entry_atr = None  # Store ATR from signal bar for stop/target calculation
 
     # Simulate bar-by-bar
     for i in range(len(df)):
         current_time = df.index[i]
+        current_open = df.iloc[i]['Open']
         current_price = df.iloc[i]['Close']
         current_ibs = df.iloc[i]['IBS']
         current_atr = df.iloc[i]['ATR']
@@ -207,19 +212,21 @@ def run_backtest(
             continue
 
         if not in_position:
-            # If we have a pending signal from previous bar, enter now
+            # If we have a pending signal from previous bar, enter now at OPEN
             if signal_pending:
                 in_position = True
                 entry_idx = i
-                entry_price = current_price + slippage_points  # Slippage on entry
+                entry_price = current_open + slippage_points  # Enter at OPEN of bar i+1
                 entry_ibs = current_ibs
-                entry_atr = current_atr
+                entry_atr = pending_entry_atr  # Use ATR from signal bar (bar i), not entry bar
                 entry_time = current_time
                 signal_pending = False
+                pending_entry_atr = None
 
             # Check for new entry signal (for next bar)
             elif ibs_entry_low <= current_ibs <= ibs_entry_high:
                 signal_pending = True  # Signal generated, will enter on NEXT bar
+                pending_entry_atr = current_atr  # Store ATR from signal bar for stop/target calc
 
         else:
             # In position - check exit conditions
