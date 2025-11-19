@@ -65,7 +65,7 @@ echo -e "${GREEN}[1/4] Running Walk-Forward Optimization...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-python research/optimize_base_strategy_params.py \
+python3 research/optimize_base_strategy_params.py \
     --symbol "$SYMBOL" \
     --data-dir "$DATA_DIR"
 
@@ -87,7 +87,7 @@ echo -e "${GREEN}[2/4] Running Parameter Stability Analysis...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-python research/analyze_strategy_stability.py \
+python3 research/analyze_strategy_stability.py \
     --symbol "$SYMBOL"
 
 if [ $? -ne 0 ]; then
@@ -106,7 +106,7 @@ echo -e "${GREEN}[3/4] Running Held-Out Validation (2021-2024)...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-python research/validate_strategy_heldout.py \
+python3 research/validate_strategy_heldout.py \
     --symbol "$SYMBOL" \
     --data-dir "$DATA_DIR"
 
@@ -126,7 +126,7 @@ echo -e "${GREEN}[4/4] Making Final Approval Decision...${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-python research/finalize_strategy_decision.py \
+python3 research/finalize_strategy_decision.py \
     --symbol "$SYMBOL"
 
 if [ $? -ne 0 ]; then
@@ -159,8 +159,8 @@ echo -e "${YELLOW}Next steps:${NC}"
 echo -e "  ${BLUE}1.${NC} Review final decision: ${GREEN}optimization_results/$SYMBOL/reports/final_approval_decision.json${NC}"
 echo -e "  ${BLUE}2.${NC} Check config file: ${GREEN}config/strategy_params.json${NC}"
 echo -e "  ${BLUE}3.${NC} If approved, run data extraction:"
-echo -e "     ${GREEN}python research/extract_training_data.py --symbol $SYMBOL${NC}"
+echo -e "     ${GREEN}python3 research/extract_training_data.py --symbol $SYMBOL${NC}"
 echo -e "  ${BLUE}4.${NC} Train ML model:"
-echo -e "     ${GREEN}python research/train_rf_three_way_split.py --symbol $SYMBOL${NC}"
+echo -e "     ${GREEN}python3 research/train_rf_three_way_split.py --symbol $SYMBOL${NC}"
 echo ""
 echo -e "${BLUE}════════════════════════════════════════════════════════════════════════════${NC}"
