@@ -144,6 +144,8 @@ def main(args):
         n_trials_per_window=args.n_trials,
         cv_folds=args.cv_folds,
         embargo_days=args.embargo_days,
+        optimization_metric=args.optimization_metric,
+        precision_threshold=args.precision_threshold,
         random_state=args.seed,
         output_dir=output_dir
     )
@@ -408,6 +410,18 @@ if __name__ == "__main__":
 
     # Optuna
     parser.add_argument("--n-trials", type=int, default=100, help="Optuna trials per window")
+    parser.add_argument(
+        "--optimization-metric",
+        default="precision",
+        choices=["auc", "f1", "precision"],
+        help="Metric to optimize during hyperparameter search (default: precision per López de Prado)"
+    )
+    parser.add_argument(
+        "--precision-threshold",
+        type=float,
+        default=0.60,
+        help="Threshold for precision metric (default: 0.60 - only take trades with >60%% confidence)"
+    )
 
     # Ensemble
     parser.add_argument("--use-ensemble", action="store_true", default=True, help="Use ensemble model")

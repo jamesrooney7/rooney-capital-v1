@@ -30,6 +30,8 @@ class WalkForwardValidator:
         n_trials_per_window: int = 100,
         cv_folds: int = 5,
         embargo_days: int = 60,
+        optimization_metric: str = 'precision',
+        precision_threshold: float = 0.60,
         random_state: int = 42,
         output_dir: Optional[Path] = None
     ):
@@ -42,6 +44,8 @@ class WalkForwardValidator:
             n_trials_per_window: Optuna trials per walk-forward window
             cv_folds: Number of CV folds within each window
             embargo_days: Embargo period for Purged K-Fold
+            optimization_metric: Metric to optimize ('auc', 'f1', 'precision')
+            precision_threshold: Threshold for precision metric (default: 0.60)
             random_state: Random seed
             output_dir: Directory to save intermediate results
         """
@@ -50,6 +54,8 @@ class WalkForwardValidator:
         self.n_trials_per_window = n_trials_per_window
         self.cv_folds = cv_folds
         self.embargo_days = embargo_days
+        self.optimization_metric = optimization_metric
+        self.precision_threshold = precision_threshold
         self.random_state = random_state
         self.output_dir = output_dir
 
@@ -149,11 +155,15 @@ class WalkForwardValidator:
 
         # Step 1: Hyperparameter optimization on training window
         logger.info(f"Running Optuna optimization ({self.n_trials_per_window} trials)...")
+        logger.info(f"Optimization metric: {self.optimization_metric}")
+        if self.optimization_metric == 'precision':
+            logger.info(f"Precision threshold: {self.precision_threshold}")
 
         optimizer = OptunaOptimizer(
             n_trials=self.n_trials_per_window,
             n_jobs=-1,
-            optimization_metric='auc',
+            optimization_metric=self.optimization_metric,
+            precision_threshold=self.precision_threshold,
             cv_folds=self.cv_folds,
             embargo_days=self.embargo_days,
             random_state=self.random_state
@@ -165,7 +175,7 @@ class WalkForwardValidator:
             sw_train
         )
 
-        logger.info(f"Best CV AUC: {best_score:.4f}")
+        logger.info(f"Best CV {self.optimization_metric.upper()}: {best_score:.4f}")
 
         # Step 2: Train final model on full training window
         logger.info("Training final model on full training window...")

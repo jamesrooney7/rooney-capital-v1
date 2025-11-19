@@ -27,6 +27,7 @@ class OptunaOptimizer:
         n_trials: int = 100,
         n_jobs: int = -1,
         optimization_metric: str = 'auc',
+        precision_threshold: float = 0.60,
         pruning_patience: int = 25,
         cv_folds: int = 5,
         embargo_days: int = 60,
@@ -38,7 +39,8 @@ class OptunaOptimizer:
         Args:
             n_trials: Number of optimization trials
             n_jobs: Number of parallel jobs (-1 for all cores)
-            optimization_metric: Metric to optimize ('auc', 'sharpe', 'f1')
+            optimization_metric: Metric to optimize ('auc', 'f1', 'precision')
+            precision_threshold: Threshold for precision metric (default: 0.60)
             pruning_patience: Patience for pruning unpromising trials
             cv_folds: Number of CV folds
             embargo_days: Embargo period for Purged K-Fold
@@ -47,6 +49,7 @@ class OptunaOptimizer:
         self.n_trials = n_trials
         self.n_jobs = n_jobs
         self.optimization_metric = optimization_metric
+        self.precision_threshold = precision_threshold
         self.pruning_patience = pruning_patience
         self.cv_folds = cv_folds
         self.embargo_days = embargo_days
@@ -229,16 +232,19 @@ class OptunaOptimizer:
             y_pred_proba: Predicted probabilities
 
         Returns:
-            Score (AUC-ROC by default)
+            Score (metric depends on optimization_metric setting)
         """
-        from sklearn.metrics import roc_auc_score
+        from sklearn.metrics import roc_auc_score, precision_score, f1_score
 
         if self.optimization_metric == 'auc':
             return roc_auc_score(y_true, y_pred_proba)
         elif self.optimization_metric == 'f1':
-            from sklearn.metrics import f1_score
             y_pred = (y_pred_proba >= 0.5).astype(int)
-            return f1_score(y_true, y_pred)
+            return f1_score(y_true, y_pred, zero_division=0)
+        elif self.optimization_metric == 'precision':
+            # Use configurable threshold (López de Prado approach)
+            y_pred = (y_pred_proba >= self.precision_threshold).astype(int)
+            return precision_score(y_true, y_pred, zero_division=0)
         else:
             # Default to AUC
             return roc_auc_score(y_true, y_pred_proba)
