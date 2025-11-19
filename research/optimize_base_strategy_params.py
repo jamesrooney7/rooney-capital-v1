@@ -194,7 +194,7 @@ OPTUNA_CONFIG = {
 # OBJECTIVE FUNCTION
 # =============================================================================
 
-def objective_function(trial: optuna.Trial, train_data: pd.DataFrame) -> float:
+def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: str) -> float:
     """
     Objective function that prioritizes trade volume generation.
 
@@ -203,6 +203,7 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame) -> float:
     Args:
         trial: Optuna trial object
         train_data: Training DataFrame
+        symbol: Symbol name for point_value lookup
 
     Returns:
         Score to maximize (higher is better)
@@ -227,7 +228,7 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame) -> float:
     )
 
     # 2. RUN BACKTEST
-    results = run_backtest(train_data, params)
+    results = run_backtest(train_data, params, symbol=symbol)
 
     # 3. APPLY HARD CONSTRAINTS (MUST PASS)
 
@@ -433,7 +434,8 @@ def optimize_window(
     window: Dict,
     train_data: pd.DataFrame,
     test_data: pd.DataFrame,
-    output_dir: Path
+    output_dir: Path,
+    symbol: str
 ) -> Dict:
     """
     Optimize parameters for a single walk-forward window.
@@ -443,6 +445,7 @@ def optimize_window(
         train_data: Training DataFrame
         test_data: Testing DataFrame
         output_dir: Output directory for this window
+        symbol: Symbol name for point_value lookup
 
     Returns:
         Dict with window results
@@ -470,7 +473,7 @@ def optimize_window(
     logger.info(f"Starting Bayesian optimization: {OPTUNA_CONFIG['n_trials']} trials")
 
     study.optimize(
-        lambda trial: objective_function(trial, train_data),
+        lambda trial: objective_function(trial, train_data, symbol),
         n_trials=OPTUNA_CONFIG['n_trials'],
         show_progress_bar=True
     )
@@ -483,7 +486,7 @@ def optimize_window(
 
     # Train final model on all training data with best params
     logger.info(f"\nRunning final backtest on training data...")
-    train_metrics = run_backtest(train_data, best_params)
+    train_metrics = run_backtest(train_data, best_params, symbol=symbol)
 
     logger.info(f"Training Results:")
     logger.info(f"  Trades: {train_metrics['num_trades']:,}")
@@ -506,7 +509,7 @@ def optimize_window(
 
     # Test on out-of-sample data
     logger.info(f"\nRunning backtest on test data...")
-    test_metrics = run_backtest(test_data, best_params)
+    test_metrics = run_backtest(test_data, best_params, symbol=symbol)
 
     logger.info(f"Test Results:")
     logger.info(f"  Trades: {test_metrics['num_trades']:,}")
@@ -629,7 +632,8 @@ def main():
             window,
             train_data,
             test_data,
-            windows_dir
+            windows_dir,
+            args.symbol
         )
 
         all_results.append(window_results)

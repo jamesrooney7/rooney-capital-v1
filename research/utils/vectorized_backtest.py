@@ -16,6 +16,11 @@ import numpy as np
 from pathlib import Path
 from typing import Dict, Tuple, Optional
 import logging
+import sys
+
+# Add src to path for contract_specs import
+sys.path.insert(0, str(Path(__file__).parent.parent.parent / 'src'))
+from strategy.contract_specs import point_value as get_point_value
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +125,7 @@ def load_data(
 def run_backtest(
     df: pd.DataFrame,
     params: Dict,
+    symbol: str = 'ES',  # Symbol for point_value lookup
     warmup_bars: int = 365,  # 365 hours for ATR warmup
     commission_per_side: float = 4.50,  # ES commission per side ($)
     slippage_points: float = 0.25  # ES slippage in points (1 tick)
@@ -146,6 +152,7 @@ def run_backtest(
             - max_holding_bars: Maximum holding period (hours)
             - atr_period: ATR period (default: 14)
             - auto_close_hour: Auto-close hour in 24-hour format (default: 15)
+        symbol: Symbol name for point_value lookup (default: 'ES')
         warmup_bars: Number of bars to use for warmup (default: 365)
         commission_per_side: Commission per side in dollars (default: 4.50 for ES)
         slippage_points: Slippage in points on all fills (default: 0.25 = 1 tick)
@@ -270,9 +277,9 @@ def run_backtest(
                 # Calculate trade P&L (in points)
                 pnl_points = exit_price - entry_price
 
-                # Convert to dollars for ES (multiply by point value)
-                # ES point value = $50 per point
-                point_value = 50.0
+                # Convert to dollars using symbol-specific point value
+                # Point value = tick_value / tick_size (e.g., ES: $12.50 / 0.25 = $50/point)
+                point_value = get_point_value(symbol)
                 pnl_gross = pnl_points * point_value
 
                 # Subtract commissions (round trip)
@@ -380,6 +387,7 @@ def run_backtest(
 def run_backtest_with_weights(
     df: pd.DataFrame,
     params: Dict,
+    symbol: str = 'ES',
     weights: Optional[np.ndarray] = None,
     warmup_bars: int = 365
 ) -> Dict:
@@ -392,6 +400,7 @@ def run_backtest_with_weights(
     Args:
         df: DataFrame with OHLCV data
         params: Strategy parameters
+        symbol: Symbol name for point_value lookup (default: 'ES')
         weights: Optional array of weights (same length as df)
         warmup_bars: Number of bars for warmup
 
@@ -399,7 +408,7 @@ def run_backtest_with_weights(
         Dictionary with weighted performance metrics
     """
     # Run standard backtest
-    results = run_backtest(df, params, warmup_bars=warmup_bars)
+    results = run_backtest(df, params, symbol=symbol, warmup_bars=warmup_bars)
 
     # If no weights or no trades, return as-is
     if weights is None or results['num_trades'] == 0:

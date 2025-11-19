@@ -246,7 +246,7 @@ def main():
 
     # Run backtest on held-out period
     logger.info(f"\nRunning backtest on held-out data...")
-    heldout_metrics = run_backtest(heldout_data, final_params)
+    heldout_metrics = run_backtest(heldout_data, final_params, symbol=args.symbol)
 
     logger.info(f"\nHeld-Out Results:")
     logger.info(f"{'='*80}")
