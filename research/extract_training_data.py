@@ -102,15 +102,16 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enablePairZ', 'pair_z',
 
             # RSI filters
-            'enableRSIEntry', 'rsi_entry',
-            'enableRSIEntry2Len', 'rsi_entry2_len',
-            'enableRSIEntry14Len', 'rsi_entry14_len',
+            # Note: Some RSI features only populate enable* version, not friendly name
+            'enableRSIEntry',  # Only enable* has data
+            'enableRSIEntry2Len',  # Only enable* has data
+            'enableRSIEntry14Len',  # Only enable* has data
             'enableRSIEntry2', 'rsi2_entry',
-            'enableDailyRSI', 'daily_rsi',
-            'enableDailyRSI2Len', 'daily_rsi2_len',
-            'enableDailyRSI14Len', 'daily_rsi14_len',
+            'enableDailyRSI', 'daily_rsi',  # Both versions populated
+            'enableDailyRSI2Len', 'daily_rsi2_len',  # Both versions populated
+            'enableDailyRSI14Len',  # Only enable* has data
 
-            # Bollinger Bands
+            # Bollinger Bands (both versions populated)
             'enableBBHigh', 'bb_high',
             'enableBBHighD', 'bb_high_d',
 
@@ -120,7 +121,7 @@ class FeatureLoggingStrategy(IbsStrategy):
 
             # ATR filters
             'enableATRZ', 'atrz',
-            'enableHourlyATRPercentile', 'hourly_atr_percentile',
+            'enableHourlyATRPercentile',  # Only enable* has data
 
             # Volume filters
             'enableVolZ', 'volz',
@@ -135,7 +136,7 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enableDVolZ', 'dvolz',
 
             # Trend/ratio filters
-            'enableTRATRRatio', 'tratr_ratio',
+            # Note: TRATR feature not implemented - both enable* and friendly have no data
 
             # Supply zone
             'use_supply_zone', 'supply_zone',
@@ -146,8 +147,8 @@ class FeatureLoggingStrategy(IbsStrategy):
             # Inside bar
             'enableInsideBar', 'inside_bar',
 
-            # Bear count
-            'enableBearCount', 'bear_count',
+            # Bear count (only enable* has data)
+            'enableBearCount',
 
             # Spiral ER
             'enableSER', 'ser',
@@ -219,9 +220,9 @@ class FeatureLoggingStrategy(IbsStrategy):
         if 'vix' in col_name.lower():
             return False
 
-        # Filter out ONLY cross-asset enable* params (these have corresponding feature_key columns)
-        # e.g., enableESZScoreHour is filtered because we have es_hourly_z_score
-        # But keep other enable* params like enableEMA8 (no friendly alternative exists)
+        # Filter out enable* params that have friendly name alternatives with data
+        # Cross-asset patterns: enableXXZScore(Hour|Day), enableXXReturn(Hour|Day)
+        # Specific duplicates: enableBBHigh, enableBBHighD, enableDailyRSI, etc.
         if col_name.lower().startswith('enable'):
             import re
             # Pattern: enableXXZScore(Hour|Day) or enableXXReturn(Hour|Day)
@@ -229,6 +230,19 @@ class FeatureLoggingStrategy(IbsStrategy):
                 return False  # Has corresponding _z_score column
             if re.match(r'enable[A-Z0-9]+Return(Hour|Day)', col_name):
                 return False  # Has corresponding _return column
+
+            # Filter specific enable* params that have friendly alternatives with data
+            # (keep bb_high instead of enableBBHigh, daily_rsi instead of enableDailyRSI, etc.)
+            duplicates_to_filter = {
+                'enableBBHigh',  # Keep bb_high
+                'enableBBHighD',  # Keep bb_high_d
+                'enableDailyRSI',  # Keep daily_rsi
+                'enableDailyRSI2Len',  # Keep daily_rsi2_len
+                'enablePrevDayPct',  # Keep prev_day_pct
+                'enablePrevBarPct',  # Keep prev_bar_pct
+            }
+            if col_name in duplicates_to_filter:
+                return False
 
         # Keep everything else
         return True
