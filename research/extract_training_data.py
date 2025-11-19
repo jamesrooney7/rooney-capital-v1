@@ -84,31 +84,31 @@ class FeatureLoggingStrategy(IbsStrategy):
         """
         keys = {
             # Calendar filters
-            'allowedDOW', 'allowedMon', 'enableDOM', 'domDay',
+            'allowedDOW', 'allowedMon', 'domDay',  # Removed enableDOM duplicate
             'enableBegWeek', 'enableEvenOdd',
 
-            # Price/return filters
-            'enablePrevDayPct', 'prev_day_pct',
-            'enablePrevBarPct', 'prev_bar_pct',
+            # Price/return filters (friendly names only - enable* are duplicates)
+            'prev_day_pct',  # Removed enablePrevDayPct duplicate
+            'prev_bar_pct',  # Removed enablePrevBarPct duplicate
 
-            # IBS filters
-            'enableIBSEntry', 'enableIBSExit', 'ibs',
-            'enableDailyIBS', 'daily_ibs',
+            # IBS filters (friendly names only - enable* are duplicates)
+            'ibs',  # Removed enableIBSEntry/enableIBSExit duplicates
+            'daily_ibs',  # Removed enableDailyIBS duplicate
             'enablePrevIBS', 'prev_ibs',
             'enablePrevIBSDaily', 'prev_daily_ibs',
 
-            # Pair filters
-            'enablePairIBS', 'pair_ibs',
-            'enablePairZ', 'pair_z',
+            # Pair filters (friendly names only - enable* are duplicates)
+            'pair_ibs',  # Removed enablePairIBS duplicate
+            'pair_z',  # Removed enablePairZ duplicate
 
             # RSI filters
             # Note: Some RSI features only populate enable* version, not friendly name
             'enableRSIEntry',  # Only enable* has data
             'enableRSIEntry2Len',  # Only enable* has data
             'enableRSIEntry14Len',  # Only enable* has data
-            'enableRSIEntry2',  # Only enable* has data (rsi2_entry is empty)
-            'enableDailyRSI', 'daily_rsi',  # Both versions populated
-            'enableDailyRSI2Len',  # Only enable* has data (daily_rsi2_len is empty)
+            'enableRSIEntry2',  # Only enable* has data
+            'daily_rsi',  # Removed enableDailyRSI duplicate
+            # enableDailyRSI2Len removed - daily_rsi2_len is empty
             'enableDailyRSI14Len',  # Only enable* has data
 
             # Bollinger Bands (only enable* has data - friendly names empty)
@@ -119,21 +119,21 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enableEMA8',
             'enableEMA20',
 
-            # ATR filters
-            'enableATRZ', 'atrz',
+            # ATR filters (friendly names only - enable* are duplicates)
+            'atrz',  # Removed enableATRZ duplicate
             'enableHourlyATRPercentile',  # Only enable* has data
 
-            # Volume filters
-            'enableVolZ', 'volz',
+            # Volume filters (friendly name only - enable* is duplicate)
+            'volz',  # Removed enableVolZ duplicate
 
-            # Momentum/distance/price z-score filters
-            'enableDistZ', 'dist_z',  # Distance from high/low z-score
+            # Momentum/distance/price z-score filters (friendly names only)
+            'dist_z',  # Removed enableDistZ duplicate
             'enableMom3', 'mom3_z',   # 3-period momentum z-score
             'enableZScore', 'z_score', # Generic price z-score
 
-            # Daily ATR/volume
-            'enableDATRZ', 'datrz',
-            'enableDVolZ', 'dvolz',
+            # Daily ATR/volume (friendly names only - enable* are duplicates)
+            'datrz',  # Removed enableDATRZ duplicate
+            'dvolz',  # Removed enableDVolZ duplicate
 
             # Trend/ratio filters
             # Note: TRATR feature not implemented - excluded
@@ -173,11 +173,10 @@ class FeatureLoggingStrategy(IbsStrategy):
                 keys.add(f'{symbol.lower()}_{tf_label}_z_pipeline')
 
                 # Return feature keys (one per symbol, not per timeframe)
+                # Note: *_return_pipeline removed - perfect duplicates of *_return
                 if tf == 'Hour':  # Only add once to avoid duplicates
                     keys.add(f'{symbol.lower()}_daily_return')
-                    keys.add(f'{symbol.lower()}_daily_return_pipeline')
                     keys.add(f'{symbol.lower()}_hourly_return')
-                    keys.add(f'{symbol.lower()}_hourly_return_pipeline')
 
         return keys
 
@@ -218,9 +217,14 @@ class FeatureLoggingStrategy(IbsStrategy):
         if 'vix' in col_name.lower():
             return False
 
+        # Filter out *_return_pipeline columns (perfect duplicates of *_return)
+        # Keep z_pipeline columns as they may differ from z_score
+        if col_name.endswith('_return_pipeline'):
+            return False
+
         # Filter out enable* params that have friendly name alternatives with data
         # Cross-asset patterns: enableXXZScore(Hour|Day), enableXXReturn(Hour|Day)
-        # Specific duplicates: enableBBHigh, enableBBHighD, enableDailyRSI, etc.
+        # Specific duplicates confirmed by correlation analysis (r=1.0)
         if col_name.lower().startswith('enable'):
             import re
             # Pattern: enableXXZScore(Hour|Day) or enableXXReturn(Hour|Day)
@@ -229,14 +233,25 @@ class FeatureLoggingStrategy(IbsStrategy):
             if re.match(r'enable[A-Z0-9]+Return(Hour|Day)', col_name):
                 return False  # Has corresponding _return column
 
-            # Filter specific enable* params that have friendly alternatives with data
-            # (keep daily_rsi instead of enableDailyRSI, prev_day_pct instead of enablePrevDayPct, etc.)
+            # Filter specific enable* params that are perfect duplicates (r=1.0)
             duplicates_to_filter = {
-                # Note: enableBBHigh/enableBBHighD NOT filtered - bb_high/bb_high_d are empty (0%)
-                'enableDailyRSI',  # Keep daily_rsi (has data)
-                'enableDailyRSI2Len',  # Keep daily_rsi2_len (has data)
-                'enablePrevDayPct',  # Keep prev_day_pct (has data)
-                'enablePrevBarPct',  # Keep prev_bar_pct (has data)
+                # Friendly names that have data (keep these instead of enable*)
+                'enableDailyRSI',  # Keep daily_rsi
+                'enableDailyRSI2Len',  # Keep daily_rsi2_len
+                'enablePrevDayPct',  # Keep prev_day_pct
+                'enablePrevBarPct',  # Keep prev_bar_pct
+                # Perfect duplicates found by correlation analysis
+                'enableATRZ',  # Keep atrz
+                'enableVolZ',  # Keep volz
+                'enableDATRZ',  # Keep datrz
+                'enableDVolZ',  # Keep dvolz
+                'enableDistZ',  # Keep dist_z
+                'enableDOM',  # Keep domDay
+                'enableDailyIBS',  # Keep daily_ibs
+                'enablePairIBS',  # Keep pair_ibs
+                'enablePairZ',  # Keep pair_z
+                'enableIBSEntry',  # Keep ibs (IBS entry/exit/ibs are identical)
+                'enableIBSExit',  # Keep ibs
             }
             if col_name in duplicates_to_filter:
                 return False
