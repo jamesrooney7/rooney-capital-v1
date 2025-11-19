@@ -94,8 +94,8 @@ class FeatureLoggingStrategy(IbsStrategy):
             # IBS filters (friendly names only - enable* are duplicates)
             'ibs',  # Removed enableIBSEntry/enableIBSExit duplicates
             'daily_ibs',  # Removed enableDailyIBS duplicate
-            'enablePrevIBS', 'prev_ibs',
-            'enablePrevIBSDaily', 'prev_daily_ibs',
+            'prev_ibs',  # Removed enablePrevIBS duplicate (r=1.0)
+            'prev_daily_ibs',  # Removed enablePrevIBSDaily duplicate (r=1.0)
 
             # Pair filters (friendly names only - enable* are duplicates)
             'pair_ibs',  # Removed enablePairIBS duplicate
@@ -112,7 +112,7 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enableDailyRSI14Len',  # Only enable* has data
 
             # Bollinger Bands (only enable* has data - friendly names empty)
-            'enableBBHigh',
+            # Note: enableBBHigh removed - it's actually duplicate of z_score (r=1.0), not BB high
             'enableBBHighD',
 
             # EMA filters (only enable* has data)
@@ -128,8 +128,8 @@ class FeatureLoggingStrategy(IbsStrategy):
 
             # Momentum/distance/price z-score filters (friendly names only)
             'dist_z',  # Removed enableDistZ duplicate
-            'enableMom3', 'mom3_z',   # 3-period momentum z-score
-            'enableZScore', 'z_score', # Generic price z-score
+            'mom3_z',  # Removed enableMom3 duplicate (r=1.0)
+            'z_score',  # Removed enableZScore duplicate (r=1.0) - Generic price z-score
 
             # Daily ATR/volume (friendly names only - enable* are duplicates)
             'datrz',  # Removed enableDATRZ duplicate
@@ -174,8 +174,10 @@ class FeatureLoggingStrategy(IbsStrategy):
 
                 # Return feature keys (one per symbol, not per timeframe)
                 # Note: *_return_pipeline removed - perfect duplicates of *_return
+                # Note: es_daily_return removed - duplicate of prev_day_pct (r=1.0)
                 if tf == 'Hour':  # Only add once to avoid duplicates
-                    keys.add(f'{symbol.lower()}_daily_return')
+                    if symbol.lower() != 'es':  # Skip es_daily_return
+                        keys.add(f'{symbol.lower()}_daily_return')
                     keys.add(f'{symbol.lower()}_hourly_return')
 
         return keys
@@ -240,7 +242,7 @@ class FeatureLoggingStrategy(IbsStrategy):
                 'enableDailyRSI2Len',  # Keep daily_rsi2_len
                 'enablePrevDayPct',  # Keep prev_day_pct
                 'enablePrevBarPct',  # Keep prev_bar_pct
-                # Perfect duplicates found by correlation analysis
+                # Perfect duplicates found by correlation analysis (round 1)
                 'enableATRZ',  # Keep atrz
                 'enableVolZ',  # Keep volz
                 'enableDATRZ',  # Keep datrz
@@ -252,9 +254,19 @@ class FeatureLoggingStrategy(IbsStrategy):
                 'enablePairZ',  # Keep pair_z
                 'enableIBSEntry',  # Keep ibs (IBS entry/exit/ibs are identical)
                 'enableIBSExit',  # Keep ibs
+                # Additional duplicates found by correlation analysis (round 2)
+                'enableMom3',  # Keep mom3_z (r=1.0)
+                'enablePrevIBS',  # Keep prev_ibs (r=1.0)
+                'enablePrevIBSDaily',  # Keep prev_daily_ibs (r=1.0)
+                'enableBBHigh',  # Keep z_score (enableBBHigh=enableZScore=z_score, all r=1.0)
+                'enableZScore',  # Keep z_score (r=1.0)
             }
             if col_name in duplicates_to_filter:
                 return False
+
+        # Filter es_daily_return (duplicate of prev_day_pct with r=1.0)
+        if col_name == 'es_daily_return':
+            return False
 
         # Keep everything else
         return True
