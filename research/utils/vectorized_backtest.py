@@ -119,13 +119,20 @@ def load_data(
 def run_backtest(
     df: pd.DataFrame,
     params: Dict,
-    warmup_bars: int = 365  # 365 hours for ATR warmup
+    warmup_bars: int = 365,  # 365 hours for ATR warmup
+    commission_per_side: float = 4.50,  # ES commission per side ($)
+    slippage_points: float = 0.25  # ES slippage in points (1 tick)
 ) -> Dict:
     """
     Run vectorized backtest with given parameters.
 
+    Includes realistic execution:
+    - Commissions: $4.50 per side (default for ES)
+    - Slippage: 0.25 points (1 tick) on all fills
+    - Intrabar stop/target execution using High/Low
+
     Args:
-        df: DataFrame with OHLCV data (datetime index)
+        df: DataFrame with OHLCV data (datetime index) - MUST include High and Low
         params: Dictionary with strategy parameters:
             - ibs_entry_low: IBS entry low threshold (default: 0.0)
             - ibs_entry_high: IBS entry high threshold
@@ -137,6 +144,8 @@ def run_backtest(
             - atr_period: ATR period (default: 14)
             - auto_close_hour: Auto-close hour in 24-hour format (default: 15)
         warmup_bars: Number of bars to use for warmup (default: 365)
+        commission_per_side: Commission per side in dollars (default: 4.50 for ES)
+        slippage_points: Slippage in points on all fills (default: 0.25 = 1 tick)
 
     Returns:
         Dictionary with performance metrics:
@@ -169,6 +178,10 @@ def run_backtest(
     df['ATR'] = calculate_atr(df, period=atr_period)
     df['Hour'] = df.index.hour
 
+    # Ensure we have High/Low for intrabar stop/target checks
+    if 'High' not in df.columns or 'Low' not in df.columns:
+        raise ValueError("DataFrame must have 'High' and 'Low' columns for realistic stop/target execution")
+
     # Skip warmup period
     df = df.iloc[warmup_bars:].copy()
 
@@ -186,6 +199,8 @@ def run_backtest(
     for i in range(len(df)):
         current_time = df.index[i]
         current_price = df.iloc[i]['Close']
+        current_high = df.iloc[i]['High']
+        current_low = df.iloc[i]['Low']
         current_ibs = df.iloc[i]['IBS']
         current_atr = df.iloc[i]['ATR']
         current_hour = df.iloc[i]['Hour']
@@ -199,7 +214,7 @@ def run_backtest(
             if signal_pending:
                 in_position = True
                 entry_idx = i
-                entry_price = current_price  # Enter at current bar's close (next bar after signal)
+                entry_price = current_price + slippage_points  # Slippage on entry
                 entry_ibs = current_ibs
                 entry_atr = current_atr
                 entry_time = current_time
@@ -219,33 +234,50 @@ def run_backtest(
             take_profit = entry_price + (target_atr_mult * entry_atr)
 
             # Check exit conditions (in priority order)
+            # Use intrabar High/Low for realistic stop/target execution
 
-            # 1. Stop loss hit
-            if current_price <= stop_loss:
+            # 1. Stop loss hit (check if Low touched stop)
+            if current_low <= stop_loss:
                 exit_reason = 'stop_loss'
-                exit_price = stop_loss
+                exit_price = stop_loss - slippage_points  # Slippage on stop
 
-            # 2. Take profit hit
-            elif current_price >= take_profit:
+            # 2. Take profit hit (check if High touched target)
+            elif current_high >= take_profit:
                 exit_reason = 'take_profit'
-                exit_price = take_profit
+                exit_price = take_profit - slippage_points  # Slippage on exit
 
-            # 3. IBS exit threshold
+            # 3. IBS exit threshold (same bar, since we can check IBS at close)
             elif current_ibs >= ibs_exit_low:
                 exit_reason = 'ibs_exit'
+                exit_price = current_price - slippage_points  # Slippage on exit
 
             # 4. Maximum holding bars
             elif (i - entry_idx) >= max_holding_bars:
                 exit_reason = 'max_bars'
+                exit_price = current_price - slippage_points  # Slippage on exit
 
             # 5. Auto-close at EOD
             elif current_hour >= auto_close_hour:
                 exit_reason = 'eod_close'
+                exit_price = current_price - slippage_points  # Slippage on exit
 
             # Exit if any condition met
             if exit_reason:
                 # Calculate trade P&L (in points)
-                pnl = exit_price - entry_price
+                pnl_points = exit_price - entry_price
+
+                # Convert to dollars for ES (multiply by point value)
+                # ES point value = $50 per point
+                point_value = 50.0
+                pnl_gross = pnl_points * point_value
+
+                # Subtract commissions (round trip)
+                commission_roundtrip = commission_per_side * 2
+                pnl_net = pnl_gross - commission_roundtrip
+
+                # Convert back to points for consistency
+                pnl = pnl_net / point_value
+
                 duration_bars = i - entry_idx
 
                 trades.append({
