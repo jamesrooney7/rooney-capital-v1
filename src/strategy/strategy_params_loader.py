@@ -54,13 +54,31 @@ def load_strategy_params(
             logger.warning(f"Parameters for {symbol} not marked as optimized. Using defaults.")
             return {}
 
+        # Check approval status and warn user
+        approved_for_ml = symbol_params.get('_approved_for_ml', True)  # Default True for backwards compatibility
+        decision = symbol_params.get('_decision', 'UNKNOWN')
+
+        if not approved_for_ml:
+            logger.warning(f"\n{'='*80}")
+            logger.warning(f"⚠️  WARNING: Strategy parameters for {symbol} did NOT pass all automated checks")
+            logger.warning(f"Decision: {decision}")
+            logger.warning(f"Message: {symbol_params.get('_message', 'N/A')}")
+            logger.warning(f"")
+            logger.warning(f"Metrics:")
+            logger.warning(f"  Walk-Forward Sharpe: {symbol_params.get('_walk_forward_sharpe', 'N/A')}")
+            logger.warning(f"  Held-Out Sharpe: {symbol_params.get('_heldout_sharpe', 'N/A')}")
+            logger.warning(f"  Total OOS Trades: {symbol_params.get('_total_oos_trades', 'N/A')}")
+            logger.warning(f"")
+            logger.warning(f"You are proceeding at your own discretion. Review results carefully!")
+            logger.warning(f"{'='*80}\n")
+
         # Extract only the parameter values (filter out metadata fields starting with _)
         params = {
             k: v for k, v in symbol_params.items()
             if not k.startswith('_')
         }
 
-        logger.info(f"Loaded optimized parameters for {symbol}:")
+        logger.info(f"Loaded optimized parameters for {symbol} (Decision: {decision}):")
         for k, v in params.items():
             logger.info(f"  {k}: {v}")
 
