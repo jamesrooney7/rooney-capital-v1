@@ -111,9 +111,9 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enableDailyRSI2Len', 'daily_rsi2_len',  # Both versions populated
             'enableDailyRSI14Len',  # Only enable* has data
 
-            # Bollinger Bands (both versions populated)
-            'enableBBHigh', 'bb_high',
-            'enableBBHighD', 'bb_high_d',
+            # Bollinger Bands (only enable* has data - friendly names empty)
+            'enableBBHigh',
+            'enableBBHighD',
 
             # EMA filters
             'enableEMA8', 'ema8',
@@ -126,17 +126,16 @@ class FeatureLoggingStrategy(IbsStrategy):
             # Volume filters
             'enableVolZ', 'volz',
 
-            # Momentum/distance filters
+            # Momentum/distance filters (only distz has data)
             'enableDistZ', 'distz',
-            'enableMom3Z', 'mom3z',
-            'enablePriceZ', 'pricez',
+            # Note: mom3z, pricez, enableMom3Z, enablePriceZ have 0% data - excluded
 
             # Daily ATR/volume
             'enableDATRZ', 'datrz',
             'enableDVolZ', 'dvolz',
 
             # Trend/ratio filters
-            # Note: TRATR feature not implemented - both enable* and friendly have no data
+            # Note: TRATR feature not implemented - excluded
 
             # Supply zone
             'use_supply_zone', 'supply_zone',
@@ -150,8 +149,7 @@ class FeatureLoggingStrategy(IbsStrategy):
             # Bear count (only enable* has data)
             'enableBearCount',
 
-            # Spiral ER
-            'enableSER', 'ser',
+            # Spiral ER - Note: enableSER has 0% data - excluded
 
             # TWRC
             'enableTWRC', 'twrc',
@@ -232,14 +230,13 @@ class FeatureLoggingStrategy(IbsStrategy):
                 return False  # Has corresponding _return column
 
             # Filter specific enable* params that have friendly alternatives with data
-            # (keep bb_high instead of enableBBHigh, daily_rsi instead of enableDailyRSI, etc.)
+            # (keep daily_rsi instead of enableDailyRSI, prev_day_pct instead of enablePrevDayPct, etc.)
             duplicates_to_filter = {
-                'enableBBHigh',  # Keep bb_high
-                'enableBBHighD',  # Keep bb_high_d
-                'enableDailyRSI',  # Keep daily_rsi
-                'enableDailyRSI2Len',  # Keep daily_rsi2_len
-                'enablePrevDayPct',  # Keep prev_day_pct
-                'enablePrevBarPct',  # Keep prev_bar_pct
+                # Note: enableBBHigh/enableBBHighD NOT filtered - bb_high/bb_high_d are empty (0%)
+                'enableDailyRSI',  # Keep daily_rsi (has data)
+                'enableDailyRSI2Len',  # Keep daily_rsi2_len (has data)
+                'enablePrevDayPct',  # Keep prev_day_pct (has data)
+                'enablePrevBarPct',  # Keep prev_bar_pct (has data)
             }
             if col_name in duplicates_to_filter:
                 return False
