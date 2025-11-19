@@ -194,11 +194,106 @@ OPTUNA_CONFIG = {
 # OBJECTIVE FUNCTION
 # =============================================================================
 
+def calculate_robust_performance(
+    train_data: pd.DataFrame,
+    params: Dict,
+    symbol: str
+) -> Dict:
+    """
+    Calculate robust performance metrics across yearly sub-periods.
+
+    Instead of optimizing aggregate performance, this splits the training data
+    into yearly chunks and calculates performance for each year. Returns the
+    worst-case (minimum) profit factor, mean, and standard deviation.
+
+    This ensures the strategy works consistently across different market regimes,
+    not just in aggregate or during favorable periods.
+
+    Args:
+        train_data: Full training DataFrame
+        params: Strategy parameters to test
+        symbol: Symbol name for point_value lookup
+
+    Returns:
+        Dict with:
+            - min_pf: Minimum profit factor across all years
+            - mean_pf: Average profit factor across all years
+            - std_pf: Standard deviation of profit factor across years
+            - total_trades: Total number of trades across all years
+            - year_results: List of per-year results
+    """
+    # Split data by year
+    train_data = train_data.copy()
+    train_data['year'] = pd.to_datetime(train_data['Date']).dt.year
+    years = sorted(train_data['year'].unique())
+
+    year_results = []
+    profit_factors = []
+    total_trades = 0
+
+    for year in years:
+        year_data = train_data[train_data['year'] == year].copy()
+
+        # Skip years with insufficient data
+        if len(year_data) < 100:
+            continue
+
+        # Run backtest for this year
+        results = run_backtest(year_data, params, symbol=symbol)
+
+        # Skip if no trades
+        if results['num_trades'] == 0:
+            continue
+
+        pf = results['profit_factor']
+
+        # Handle None (no losses - treat as very profitable)
+        if pf is None:
+            pf = 2.0  # Conservative estimate for no-loss scenario
+
+        year_results.append({
+            'year': year,
+            'profit_factor': pf,
+            'num_trades': results['num_trades'],
+            'win_rate': results['win_rate'],
+            'sharpe_ratio': results['sharpe_ratio']
+        })
+
+        profit_factors.append(pf)
+        total_trades += results['num_trades']
+
+    # Calculate robust metrics
+    if len(profit_factors) == 0:
+        return {
+            'min_pf': 0.0,
+            'mean_pf': 0.0,
+            'std_pf': 0.0,
+            'total_trades': 0,
+            'year_results': []
+        }
+
+    return {
+        'min_pf': np.min(profit_factors),
+        'mean_pf': np.mean(profit_factors),
+        'std_pf': np.std(profit_factors),
+        'total_trades': total_trades,
+        'year_results': year_results
+    }
+
+
 def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: str) -> float:
     """
-    Objective function that prioritizes trade volume generation.
+    Robust objective function that optimizes for consistency across market regimes.
 
-    Returns score to maximize: 70% volume + 30% Sharpe ratio
+    Instead of optimizing aggregate performance, this function:
+    1. Splits training data into yearly sub-periods
+    2. Calculates profit factor for each year
+    3. Optimizes for WORST-CASE performance (min profit factor across all years)
+    4. Penalizes high variance (inconsistent performance)
+
+    This ensures the strategy works in ALL market conditions, not just favorable ones.
+
+    Returns score to maximize: 60% volume + 40% robust performance
 
     Args:
         trial: Optuna trial object
@@ -227,49 +322,57 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
         'max_holding_bars', OPTIMIZATION_PARAMS['max_holding_bars']['values']
     )
 
-    # 2. RUN BACKTEST
-    results = run_backtest(train_data, params, symbol=symbol)
+    # 2. RUN ROBUST BACKTEST (calculate performance for each year)
+    robust_results = calculate_robust_performance(train_data, params, symbol=symbol)
 
     # 3. APPLY HARD CONSTRAINTS (MUST PASS)
 
-    # Constraint 1: Minimum trade volume
-    if results['num_trades'] < 1000:
+    # Constraint 1: Minimum trade volume (total across all years)
+    if robust_results['total_trades'] < 1000:
         return -999999.0  # Severe penalty - reject trial
 
-    # Constraint 2: Minimum win rate
-    if results['win_rate'] < 0.42:
+    # Constraint 2: NO sub-period can lose more than 15%
+    # This is the KEY constraint for regime consistency
+    # min_pf >= 0.85 means worst year still has PF > 0.85 (max 15% loss)
+    if robust_results['min_pf'] < 0.85:
         return -999999.0  # Severe penalty - reject trial
 
-    # Constraint 3: Minimum Sharpe (very permissive - just avoid catastrophic strategies)
-    if results['sharpe_ratio'] < -2.0:
+    # Constraint 3: Mean profit factor must be positive
+    # Not enough to just avoid disaster - average must be profitable
+    if robust_results['mean_pf'] < 1.0:
         return -999999.0  # Severe penalty - reject trial
 
     # 4. CALCULATE OBJECTIVE SCORE
-    # Weighted combination: 70% volume, 30% performance
+    # Weighted combination: 60% volume, 40% robust performance
 
     # Volume component (normalize to ~1.0 at 2500 trades)
-    volume_score = results['num_trades'] / 2500.0
+    volume_score = robust_results['total_trades'] / 2500.0
 
-    # Performance component (Profit Factor - 1.0 to center at zero)
-    # PF = 1.0 → performance_score = 0.0 (breakeven)
-    # PF = 1.1 → performance_score = +0.1 (10% more profit than loss)
-    # PF = 0.9 → performance_score = -0.1 (10% more loss than profit)
-    profit_factor = results['profit_factor']
-    if profit_factor is None:
-        # No losses (rare) - treat as very profitable
-        performance_score = 1.0
-    else:
-        performance_score = profit_factor - 1.0
+    # Performance component: Optimize for worst-case + penalize variance
+    # worst_case_pf: How bad does it get in the worst year?
+    #   min_pf = 0.85 → worst_case_score = -0.15 (lost 15%)
+    #   min_pf = 1.00 → worst_case_score = 0.00 (break even)
+    #   min_pf = 1.10 → worst_case_score = +0.10 (gained 10%)
+    worst_case_score = robust_results['min_pf'] - 1.0
 
-    # Combined score with volume priority
-    score = 0.70 * volume_score + 0.30 * performance_score
+    # Consistency penalty: Penalize high variance across years
+    # We want strategies that work consistently, not boom-bust
+    # std_pf = 0.0 → no penalty (perfectly consistent)
+    # std_pf = 0.5 → penalty of -0.25 (very inconsistent)
+    consistency_penalty = robust_results['std_pf'] * 0.5
+
+    # Combined performance score
+    performance_score = worst_case_score - consistency_penalty
+
+    # Combined score: 60% volume, 40% robust performance
+    score = 0.60 * volume_score + 0.40 * performance_score
 
     # 5. BONUS FOR HIGH VOLUME
-    if results['num_trades'] >= 3000:
+    if robust_results['total_trades'] >= 3000:
         score *= 1.3  # 30% bonus
-    elif results['num_trades'] >= 2500:
+    elif robust_results['total_trades'] >= 2500:
         score *= 1.15  # 15% bonus
-    elif results['num_trades'] >= 2000:
+    elif robust_results['total_trades'] >= 2000:
         score *= 1.05  # 5% bonus
 
     return score
