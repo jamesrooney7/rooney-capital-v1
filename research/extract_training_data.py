@@ -152,8 +152,7 @@ class FeatureLoggingStrategy(IbsStrategy):
             # TWRC
             'enableTWRC', 'twrc',
 
-            # VIX regime
-            'enableVIXReg', 'vix_reg',
+            # Note: VIX regime excluded - VIX data not loaded, features filtered anyway
         }
 
         # Add cross-asset z-score and return keys dynamically
@@ -164,18 +163,19 @@ class FeatureLoggingStrategy(IbsStrategy):
 
         for symbol in cross_symbols:
             for tf in timeframes:
-                # Z-score filters
-                keys.add(f'enable{symbol}ZScore{tf}')
+                # Z-score feature keys (not enable params - those get filtered out)
                 # Feature keys must match ibs_strategy.py _metadata_feature_key() format:
                 # "Hour" -> "hourly", "Day" -> "daily"
                 tf_label = 'hourly' if tf == 'Hour' else 'daily'
                 keys.add(f'{symbol.lower()}_{tf_label}_z_score')
                 keys.add(f'{symbol.lower()}_{tf_label}_z_pipeline')
 
-                # Return filters (one per symbol, not per timeframe)
+                # Return feature keys (one per symbol, not per timeframe)
                 if tf == 'Hour':  # Only add once to avoid duplicates
                     keys.add(f'{symbol.lower()}_daily_return')
+                    keys.add(f'{symbol.lower()}_daily_return_pipeline')
                     keys.add(f'{symbol.lower()}_hourly_return')
+                    keys.add(f'{symbol.lower()}_hourly_return_pipeline')
 
         return keys
 
