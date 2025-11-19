@@ -106,18 +106,18 @@ class FeatureLoggingStrategy(IbsStrategy):
             'enableRSIEntry',  # Only enable* has data
             'enableRSIEntry2Len',  # Only enable* has data
             'enableRSIEntry14Len',  # Only enable* has data
-            'enableRSIEntry2', 'rsi2_entry',
+            'enableRSIEntry2',  # Only enable* has data (rsi2_entry is empty)
             'enableDailyRSI', 'daily_rsi',  # Both versions populated
-            'enableDailyRSI2Len', 'daily_rsi2_len',  # Both versions populated
+            'enableDailyRSI2Len',  # Only enable* has data (daily_rsi2_len is empty)
             'enableDailyRSI14Len',  # Only enable* has data
 
             # Bollinger Bands (only enable* has data - friendly names empty)
             'enableBBHigh',
             'enableBBHighD',
 
-            # EMA filters
-            'enableEMA8', 'ema8',
-            'enableEMA20', 'ema20',
+            # EMA filters (only enable* has data)
+            'enableEMA8',
+            'enableEMA20',
 
             # ATR filters
             'enableATRZ', 'atrz',
@@ -137,24 +137,22 @@ class FeatureLoggingStrategy(IbsStrategy):
 
             # Trend/ratio filters
             # Note: TRATR feature not implemented - excluded
+            # Note: supply_zone/use_supply_zone not implemented - excluded
 
-            # Supply zone
-            'use_supply_zone', 'supply_zone',
+            # N7 bar (only enable* has data)
+            'enableN7Bar',
 
-            # N7 bar
-            'enableN7Bar', 'n7_bar',
-
-            # Inside bar
-            'enableInsideBar', 'inside_bar',
+            # Inside bar (only enable* has data)
+            'enableInsideBar',
 
             # Bear count (only enable* has data)
             'enableBearCount',
 
-            # Spiral Efficiency Ratio
-            'enableSpiralER', 'spiral_efficiency_ratio',
+            # Spiral Efficiency Ratio (only enable* has data)
+            'enableSpiralER',
 
-            # TWRC
-            'enableTWRC', 'twrc',
+            # TWRC (only enable* has data)
+            'enableTWRC',
 
             # Note: VIX regime excluded - VIX data not loaded, features filtered anyway
         }
