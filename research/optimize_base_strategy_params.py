@@ -222,9 +222,9 @@ def calculate_robust_performance(
             - total_trades: Total number of trades across all years
             - year_results: List of per-year results
     """
-    # Split data by year
+    # Split data by year (using datetime index)
     train_data = train_data.copy()
-    train_data['year'] = pd.to_datetime(train_data['Date']).dt.year
+    train_data['year'] = train_data.index.year
     years = sorted(train_data['year'].unique())
 
     year_results = []
@@ -283,17 +283,19 @@ def calculate_robust_performance(
 
 def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: str) -> float:
     """
-    Robust objective function that optimizes for consistency across market regimes.
+    Objective function that prioritizes volume with light consistency preference.
 
-    Instead of optimizing aggregate performance, this function:
+    Philosophy:
+    - Base strategy does NOT need to be profitable (ML filter adds profitability)
+    - Primary goal: Maximum trade volume for ML training
+    - Secondary goal: Light consistency across years (avoid boom-bust)
+
+    This function:
     1. Splits training data into yearly sub-periods
-    2. Calculates profit factor for each year
-    3. Optimizes for WORST-CASE performance (min profit factor across all years)
-    4. Penalizes high variance (inconsistent performance)
+    2. Calculates profit factor variance across years
+    3. Optimizes for: (80% volume) + (20% consistency bonus)
 
-    This ensures the strategy works in ALL market conditions, not just favorable ones.
-
-    Returns score to maximize: 60% volume + 40% robust performance
+    Returns score to maximize: 80% volume + 20% consistency
 
     Args:
         trial: Optuna trial object
@@ -331,41 +333,27 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
     if robust_results['total_trades'] < 1000:
         return -999999.0  # Severe penalty - reject trial
 
-    # Constraint 2: NO sub-period can lose more than 15%
-    # This is the KEY constraint for regime consistency
-    # min_pf >= 0.85 means worst year still has PF > 0.85 (max 15% loss)
-    if robust_results['min_pf'] < 0.85:
-        return -999999.0  # Severe penalty - reject trial
-
-    # Constraint 3: Mean profit factor must be positive
-    # Not enough to just avoid disaster - average must be profitable
-    if robust_results['mean_pf'] < 1.0:
-        return -999999.0  # Severe penalty - reject trial
+    # NOTE: We do NOT require profitability at this stage!
+    # Base strategy was slightly unprofitable (mean -$0.13/trade)
+    # ML filter is what makes it profitable
+    # We just want: (1) volume, (2) light consistency
 
     # 4. CALCULATE OBJECTIVE SCORE
-    # Weighted combination: 60% volume, 40% robust performance
+    # Weighted combination: 80% volume, 20% consistency bonus
 
     # Volume component (normalize to ~1.0 at 2500 trades)
     volume_score = robust_results['total_trades'] / 2500.0
 
-    # Performance component: Optimize for worst-case + penalize variance
-    # worst_case_pf: How bad does it get in the worst year?
-    #   min_pf = 0.85 → worst_case_score = -0.15 (lost 15%)
-    #   min_pf = 1.00 → worst_case_score = 0.00 (break even)
-    #   min_pf = 1.10 → worst_case_score = +0.10 (gained 10%)
-    worst_case_score = robust_results['min_pf'] - 1.0
+    # Consistency bonus: Reward low variance across years (very light)
+    # We don't want boom-bust strategies, but we're not strict about it
+    # std_pf = 0.0 → bonus of +0.20 (perfectly consistent)
+    # std_pf = 0.5 → bonus of +0.10 (moderate variance)
+    # std_pf = 1.0 → bonus of 0.00 (high variance, no bonus)
+    consistency_bonus = max(0.0, 0.20 - robust_results['std_pf'] * 0.20)
 
-    # Consistency penalty: Penalize high variance across years
-    # We want strategies that work consistently, not boom-bust
-    # std_pf = 0.0 → no penalty (perfectly consistent)
-    # std_pf = 0.5 → penalty of -0.25 (very inconsistent)
-    consistency_penalty = robust_results['std_pf'] * 0.5
-
-    # Combined performance score
-    performance_score = worst_case_score - consistency_penalty
-
-    # Combined score: 60% volume, 40% robust performance
-    score = 0.60 * volume_score + 0.40 * performance_score
+    # Combined score: 80% volume, 20% consistency
+    # This prioritizes volume generation while gently favoring consistency
+    score = 0.80 * volume_score + 0.20 * consistency_bonus
 
     # 5. BONUS FOR HIGH VOLUME
     if robust_results['total_trades'] >= 3000:
