@@ -129,7 +129,7 @@ def run_backtest(
     warmup_bars: int = 365,  # 365 hours for ATR warmup
     commission_per_side: float = 4.50,  # ES commission per side ($)
     slippage_entry: float = 0.0,  # Entry slippage (limit orders)
-    slippage_exit: float = 0.50  # Exit slippage (market orders)
+    slippage_exit: float = 0.25  # Exit slippage (market orders, 1 tick)
 ) -> Dict:
     """
     Run vectorized backtest with given parameters.

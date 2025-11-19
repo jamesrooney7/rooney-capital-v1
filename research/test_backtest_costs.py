@@ -68,7 +68,7 @@ def run_cost_comparison():
 
     # Test 3: Realistic execution (limit entry, market exit)
     print("\n" + "="*80)
-    print("TEST 3: REALISTIC EXECUTION (Entry: limit 0 pts, Exit: market 0.50 pts)")
+    print("TEST 3: REALISTIC EXECUTION (Entry: limit 0 pts, Exit: market 0.25 pts)")
     print("="*80)
     results_realistic = run_backtest(
         data,
@@ -76,7 +76,7 @@ def run_cost_comparison():
         symbol='ES',
         commission_per_side=4.50,
         slippage_entry=0.0,
-        slippage_exit=0.50
+        slippage_exit=0.25
     )
     print_results(results_realistic)
 
@@ -119,7 +119,7 @@ def run_cost_comparison():
     configs = [
         ("No costs", results_no_costs),
         ("Commission only", results_commission),
-        ("Realistic (0/0.50)", results_realistic),
+        ("Realistic (0/0.25)", results_realistic),
         ("Conservative (0.25/0.25)", results_conservative),
         ("Optimistic (0/0.25)", results_optimistic),
     ]
