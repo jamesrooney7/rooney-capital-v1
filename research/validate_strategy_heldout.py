@@ -54,6 +54,26 @@ HELDOUT_THRESHOLDS = {
 }
 
 
+def convert_numpy_types(obj):
+    """
+    Recursively convert numpy types to native Python types for JSON serialization.
+    """
+    if isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    else:
+        return obj
+
+
 # =============================================================================
 # VALIDATION FUNCTIONS
 # =============================================================================
@@ -314,23 +334,23 @@ def main():
             value_str = str(value)
         logger.info(f"  {status_icon} {criterion_name}: {value_str} (threshold: {criterion['threshold']})")
 
-    # Save results
+    # Save results (convert numpy types to native Python types)
     heldout_metrics_file = heldout_dir / 'heldout_validation_metrics.json'
     with open(heldout_metrics_file, 'w') as f:
-        json.dump(heldout_metrics, f, indent=2)
+        json.dump(convert_numpy_types(heldout_metrics), f, indent=2)
 
     logger.info(f"\nSaved held-out metrics to: {heldout_metrics_file}")
 
     heldout_eval_file = heldout_dir / 'heldout_evaluation.json'
     with open(heldout_eval_file, 'w') as f:
-        json.dump({
+        json.dump(convert_numpy_types({
             'symbol': args.symbol,
             'heldout_period': HELDOUT_PERIOD,
             'final_params': final_params,
             'heldout_metrics': heldout_metrics,
             'walkforward_mean_metrics': wf_mean_metrics,
             'evaluation': heldout_eval,
-        }, f, indent=2)
+        }), f, indent=2)
 
     logger.info(f"Saved held-out evaluation to: {heldout_eval_file}")
 
