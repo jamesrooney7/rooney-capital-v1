@@ -250,8 +250,16 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
     # Volume component (normalize to ~1.0 at 2500 trades)
     volume_score = results['num_trades'] / 2500.0
 
-    # Performance component (Sharpe ratio)
-    performance_score = results['sharpe_ratio']
+    # Performance component (Profit Factor - 1.0 to center at zero)
+    # PF = 1.0 → performance_score = 0.0 (breakeven)
+    # PF = 1.1 → performance_score = +0.1 (10% more profit than loss)
+    # PF = 0.9 → performance_score = -0.1 (10% more loss than profit)
+    profit_factor = results['profit_factor']
+    if profit_factor is None:
+        # No losses (rare) - treat as very profitable
+        performance_score = 1.0
+    else:
+        performance_score = profit_factor - 1.0
 
     # Combined score with volume priority
     score = 0.70 * volume_score + 0.30 * performance_score
