@@ -1,0 +1,44 @@
+{
+  "symbol": "ES",
+  "test_metrics": {
+    "trades": 2372,
+    "sharpe": 3.3452013432701198,
+    "sortino": 2.911540920614239,
+    "profit_factor": 2.078775659451718,
+    "win_rate": 0.7280775716694773,
+    "total_pnl_usd": 531043.5,
+    "max_drawdown_pct": 0.04224358005008006,
+    "max_drawdown_usd": 32272.16850079014,
+    "cagr": 0.7279773087268195,
+    "start_date": "2020-12-31 01:00:00",
+    "end_date": "2024-12-30 15:00:00",
+    "yearly_breakdown": {
+      "2020": {
+        "trades": 1,
+        "pnl_usd": 523.0,
+        "win_rate": 1.0
+      },
+      "2021": {
+        "trades": 692,
+        "pnl_usd": 148166.0,
+        "win_rate": 0.7427745664739884
+      },
+      "2022": {
+        "trades": 658,
+        "pnl_usd": 167509.0,
+        "win_rate": 0.7066869300911854
+      },
+      "2023": {
+        "trades": 682,
+        "pnl_usd": 139723.5,
+        "win_rate": 0.7302052785923754
+      },
+      "2024": {
+        "trades": 339,
+        "pnl_usd": 75122.0,
+        "win_rate": 0.7345132743362832
+      }
+    }
+  },
+  "note": "This is TRUE out-of-sample performance on data never seen during training or threshold optimization"
+}

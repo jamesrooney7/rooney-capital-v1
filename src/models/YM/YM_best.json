@@ -1,0 +1,72 @@
+{
+  "symbol": "YM",
+  "threshold": 0.5,
+  "params": {
+    "n_estimators": 1200,
+    "max_depth": 7,
+    "min_samples_leaf": 50,
+    "max_features": 0.5,
+    "bootstrap": true,
+    "class_weight": null,
+    "max_samples": 0.772809490661849,
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "features": [
+    "YM Hourly Return",
+    "ES Hourly Return",
+    "NQ Hourly Return",
+    "RTY Hourly Return",
+    "6A Hourly Return",
+    "6M Hourly Return",
+    "6J Hourly Return",
+    "6C Hourly Return",
+    "enable6CZScoreHour",
+    "6e_z_score_day",
+    "bb_high",
+    "6s_hourly_return",
+    "6c_hourly_return",
+    "enableVolZ",
+    "rty_z_score_hour",
+    "6n_hourly_z_pipeline",
+    "enablePairIBS",
+    "enableIBSExit",
+    "ng_hourly_z_pipeline",
+    "6B Hourly Return",
+    "ibs",
+    "CL Hourly Z Score",
+    "ym_z_score_hour",
+    "6E Hourly Return",
+    "secondary_rsi_percentile",
+    "es_z_score_hour",
+    "si_z_score_hour",
+    "si_hourly_z_pipeline",
+    "enable6SZScoreHour",
+    "pl_daily_z_score"
+  ],
+  "train_period": {
+    "start": "2010-01-18 23:00:00",
+    "end": "2018-12-30 22:00:00",
+    "trades": 10250
+  },
+  "threshold_period": {
+    "start": "2018-12-31 08:00:00",
+    "end": "2020-12-30 21:00:00",
+    "trades": 2357
+  },
+  "threshold_optimization": {
+    "threshold": 0.5,
+    "trades": 1386,
+    "sharpe": 4.748938830448059,
+    "profit_factor": 2.523292865564159,
+    "win_rate": 0.7229437229437229,
+    "note": "Fixed threshold (0.50) used - no optimization to avoid bias"
+  },
+  "model_metadata": {
+    "rs_trials": 25,
+    "bo_trials": 50,
+    "embargo_days": 2,
+    "screen_method": "importance",
+    "seed": 42
+  }
+}

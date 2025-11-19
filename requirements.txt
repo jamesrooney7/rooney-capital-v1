@@ -11,3 +11,6 @@ pyyaml
 optuna
 scipy
 numpy
+lightgbm
+catboost
+xgboost
