@@ -126,9 +126,10 @@ class FeatureLoggingStrategy(IbsStrategy):
             # Volume filters
             'enableVolZ', 'volz',
 
-            # Momentum/distance filters (only distz has data)
-            'enableDistZ', 'distz',
-            # Note: mom3z, pricez, enableMom3Z, enablePriceZ have 0% data - excluded
+            # Momentum/distance/price z-score filters
+            'enableDistZ', 'dist_z',  # Distance from high/low z-score
+            'enableMom3', 'mom3_z',   # 3-period momentum z-score
+            'enableZScore', 'z_score', # Generic price z-score
 
             # Daily ATR/volume
             'enableDATRZ', 'datrz',
@@ -149,7 +150,8 @@ class FeatureLoggingStrategy(IbsStrategy):
             # Bear count (only enable* has data)
             'enableBearCount',
 
-            # Spiral ER - Note: enableSER has 0% data - excluded
+            # Spiral Efficiency Ratio
+            'enableSpiralER', 'spiral_efficiency_ratio',
 
             # TWRC
             'enableTWRC', 'twrc',
