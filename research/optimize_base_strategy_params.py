@@ -241,7 +241,7 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
         return -999999.0  # Severe penalty - reject trial
 
     # Constraint 3: Minimum Sharpe (very permissive - just avoid catastrophic strategies)
-    if results['sharpe_ratio'] < -1.0:
+    if results['sharpe_ratio'] < -2.0:
         return -999999.0  # Severe penalty - reject trial
 
     # 4. CALCULATE OBJECTIVE SCORE
