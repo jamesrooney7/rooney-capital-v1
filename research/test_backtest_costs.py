@@ -47,7 +47,8 @@ def run_cost_comparison():
         TEST_PARAMS,
         symbol='ES',
         commission_per_side=0.0,
-        slippage_points=0.0
+        slippage_entry=0.0,
+        slippage_exit=0.0
     )
     print_results(results_no_costs)
 
@@ -60,48 +61,52 @@ def run_cost_comparison():
         TEST_PARAMS,
         symbol='ES',
         commission_per_side=4.50,
-        slippage_points=0.0
+        slippage_entry=0.0,
+        slippage_exit=0.0
     )
     print_results(results_commission)
 
-    # Test 3: Slippage only (0.25 points)
+    # Test 3: Realistic execution (limit entry, market exit)
     print("\n" + "="*80)
-    print("TEST 3: SLIPPAGE ONLY (0.25 pts = 1 tick per fill)")
+    print("TEST 3: REALISTIC EXECUTION (Entry: limit 0 pts, Exit: market 0.50 pts)")
     print("="*80)
-    results_slippage = run_backtest(
-        data,
-        TEST_PARAMS,
-        symbol='ES',
-        commission_per_side=0.0,
-        slippage_points=0.25
-    )
-    print_results(results_slippage)
-
-    # Test 4: Both (current setup)
-    print("\n" + "="*80)
-    print("TEST 4: COMMISSION + SLIPPAGE (Current Setup)")
-    print("="*80)
-    results_both = run_backtest(
+    results_realistic = run_backtest(
         data,
         TEST_PARAMS,
         symbol='ES',
         commission_per_side=4.50,
-        slippage_points=0.25
+        slippage_entry=0.0,
+        slippage_exit=0.50
     )
-    print_results(results_both)
+    print_results(results_realistic)
 
-    # Test 5: Reduced slippage (0.125 points = 0.5 tick)
+    # Test 4: Conservative market orders both ways
     print("\n" + "="*80)
-    print("TEST 5: COMMISSION + REDUCED SLIPPAGE (0.125 pts)")
+    print("TEST 4: CONSERVATIVE (0.25 pts each way = 0.50 pts total)")
     print("="*80)
-    results_reduced = run_backtest(
+    results_conservative = run_backtest(
         data,
         TEST_PARAMS,
         symbol='ES',
         commission_per_side=4.50,
-        slippage_points=0.125
+        slippage_entry=0.25,
+        slippage_exit=0.25
     )
-    print_results(results_reduced)
+    print_results(results_conservative)
+
+    # Test 5: Optimistic execution (better exit fills)
+    print("\n" + "="*80)
+    print("TEST 5: OPTIMISTIC (Entry: limit 0 pts, Exit: market 0.25 pts)")
+    print("="*80)
+    results_optimistic = run_backtest(
+        data,
+        TEST_PARAMS,
+        symbol='ES',
+        commission_per_side=4.50,
+        slippage_entry=0.0,
+        slippage_exit=0.25
+    )
+    print_results(results_optimistic)
 
     # Summary comparison
     print("\n" + "="*80)
@@ -114,9 +119,9 @@ def run_cost_comparison():
     configs = [
         ("No costs", results_no_costs),
         ("Commission only", results_commission),
-        ("Slippage only", results_slippage),
-        ("Both (0.25 slip)", results_both),
-        ("Both (0.125 slip)", results_reduced),
+        ("Realistic (0/0.50)", results_realistic),
+        ("Conservative (0.25/0.25)", results_conservative),
+        ("Optimistic (0/0.25)", results_optimistic),
     ]
 
     print(f"\n{'Config':<25} {'Sharpe':>8} {'Δ Sharpe':>10} {'Avg P&L':>10} {'Δ P&L':>10}")
@@ -130,10 +135,10 @@ def run_cost_comparison():
 
     # Check constraints
     print("\n" + "="*80)
-    print("OPTIMIZATION CONSTRAINT CHECK (Current Setup)")
+    print("OPTIMIZATION CONSTRAINT CHECK (Realistic Execution)")
     print("="*80)
 
-    r = results_both
+    r = results_realistic
     print(f"\nTrades:    {r['num_trades']:>6,}  (need ≥ 1,500) {'✓' if r['num_trades'] >= 1500 else '✗ FAIL'}")
     print(f"Win Rate:  {r['win_rate']:>6.1%}  (need ≥ 48%)   {'✓' if r['win_rate'] >= 0.48 else '✗ FAIL'}")
     print(f"Sharpe:    {r['sharpe_ratio']:>6.3f}  (need ≥ 0.20)  {'✓' if r['sharpe_ratio'] >= 0.20 else '✗ FAIL'}")

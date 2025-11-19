@@ -128,14 +128,16 @@ def run_backtest(
     symbol: str = 'ES',  # Symbol for point_value lookup
     warmup_bars: int = 365,  # 365 hours for ATR warmup
     commission_per_side: float = 4.50,  # ES commission per side ($)
-    slippage_points: float = 0.25  # ES slippage in points (1 tick)
+    slippage_entry: float = 0.0,  # Entry slippage (limit orders)
+    slippage_exit: float = 0.50  # Exit slippage (market orders)
 ) -> Dict:
     """
     Run vectorized backtest with given parameters.
 
     Includes realistic execution:
     - Commissions: $4.50 per side (default for ES)
-    - Slippage: 0.25 points (1 tick) on all fills
+    - Entry slippage: 0.0 points (limit orders at target price)
+    - Exit slippage: 0.50 points (market orders, 2 ticks)
     - Entry at OPEN of bar following signal (no look-ahead bias)
     - ATR from signal bar used for stops/targets (not entry bar)
     - Stops/targets checked at bar close (not intrabar)
@@ -155,7 +157,8 @@ def run_backtest(
         symbol: Symbol name for point_value lookup (default: 'ES')
         warmup_bars: Number of bars to use for warmup (default: 365)
         commission_per_side: Commission per side in dollars (default: 4.50 for ES)
-        slippage_points: Slippage in points on all fills (default: 0.25 = 1 tick)
+        slippage_entry: Entry slippage in points (default: 0.0 for limit orders)
+        slippage_exit: Exit slippage in points (default: 0.50 = 2 ticks for market orders)
 
     Returns:
         Dictionary with performance metrics:
@@ -223,7 +226,7 @@ def run_backtest(
             if signal_pending:
                 in_position = True
                 entry_idx = i
-                entry_price = current_open + slippage_points  # Enter at OPEN of bar i+1
+                entry_price = current_open + slippage_entry  # Limit order: 0 slippage
                 entry_ibs = current_ibs
                 entry_atr = pending_entry_atr  # Use ATR from signal bar (bar i), not entry bar
                 entry_time = current_time
@@ -251,27 +254,27 @@ def run_backtest(
             # 1. Stop loss hit (check Close)
             if current_price <= stop_loss:
                 exit_reason = 'stop_loss'
-                exit_price = current_price - slippage_points  # Exit at actual close, not stop level
+                exit_price = current_price - slippage_exit  # Market order exit
 
             # 2. Take profit hit (check Close)
             elif current_price >= take_profit:
                 exit_reason = 'take_profit'
-                exit_price = current_price - slippage_points  # Exit at actual close, not target level
+                exit_price = current_price - slippage_exit  # Market order exit
 
             # 3. IBS exit threshold (same bar, since we can check IBS at close)
             elif current_ibs >= ibs_exit_low:
                 exit_reason = 'ibs_exit'
-                exit_price = current_price - slippage_points  # Slippage on exit
+                exit_price = current_price - slippage_exit  # Market order exit
 
             # 4. Maximum holding bars
             elif (i - entry_idx) >= max_holding_bars:
                 exit_reason = 'max_bars'
-                exit_price = current_price - slippage_points  # Slippage on exit
+                exit_price = current_price - slippage_exit  # Market order exit
 
             # 5. Auto-close at EOD
             elif current_hour >= auto_close_hour:
                 exit_reason = 'eod_close'
-                exit_price = current_price - slippage_points  # Slippage on exit
+                exit_price = current_price - slippage_exit  # Market order exit
 
             # Exit if any condition met
             if exit_reason:
