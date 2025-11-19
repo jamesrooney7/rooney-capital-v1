@@ -29,6 +29,7 @@ sys.path.insert(0, str(project_root / 'src'))
 
 from research.utils.data_loader import setup_cerebro_with_data
 from strategy.ibs_strategy import IbsStrategy
+from strategy.strategy_params_loader import get_strategy_params_for_backtrader
 from models.loader import load_model_bundle
 
 # Configure logging - keep at INFO to ensure all loggers work properly
@@ -458,11 +459,24 @@ def extract_training_data(
         output_dir.mkdir(parents=True, exist_ok=True)
         output_path = output_dir / f"{symbol}_transformed_features.csv"
 
+    # Load optimized strategy parameters from config (if available)
+    optimized_params = get_strategy_params_for_backtrader(symbol)
+
     # Add feature-logging strategy with incremental CSV writing
     strat_params = {'symbol': symbol, 'output_csv_path': str(output_path)}
+
+    # Merge in optimized parameters
+    strat_params.update(optimized_params)
+
     if filter_year is not None:
         strat_params['filter_year'] = filter_year
         logger.info(f"Filtering output to trades from year {filter_year} only")
+
+    if optimized_params:
+        logger.info(f"Using optimized parameters from config/strategy_params.json")
+    else:
+        logger.info(f"Using default parameters (no optimized config found)")
+
     logger.info(f"Adding FeatureLoggingStrategy with incremental CSV writing to: {output_path}")
     cerebro.addstrategy(FeatureLoggingStrategy, **strat_params)
 
