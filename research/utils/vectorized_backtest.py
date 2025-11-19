@@ -180,6 +180,7 @@ def run_backtest(
     entry_ibs = None
     entry_atr = None
     entry_time = None
+    signal_pending = False  # Track if we have an entry signal
 
     # Simulate bar-by-bar
     for i in range(len(df)):
@@ -194,15 +195,19 @@ def run_backtest(
             continue
 
         if not in_position:
-            # Check entry conditions
-            if ibs_entry_low <= current_ibs <= ibs_entry_high:
-                # Enter long
+            # If we have a pending signal from previous bar, enter now
+            if signal_pending:
                 in_position = True
                 entry_idx = i
-                entry_price = current_price
+                entry_price = current_price  # Enter at current bar's close (next bar after signal)
                 entry_ibs = current_ibs
                 entry_atr = current_atr
                 entry_time = current_time
+                signal_pending = False
+
+            # Check for new entry signal (for next bar)
+            elif ibs_entry_low <= current_ibs <= ibs_entry_high:
+                signal_pending = True  # Signal generated, will enter on NEXT bar
 
         else:
             # In position - check exit conditions
@@ -298,10 +303,18 @@ def run_backtest(
     gross_loss = abs(trades_df[trades_df['pnl'] < 0]['pnl'].sum())
     profit_factor = gross_profit / gross_loss if gross_loss > 0 else None
 
-    # Sharpe ratio (assuming each trade is independent)
+    # Sharpe ratio (annualized based on trade frequency)
     mean_pnl = trades_df['pnl'].mean()
     std_pnl = trades_df['pnl'].std()
-    sharpe_ratio = (mean_pnl / std_pnl) * np.sqrt(num_trades) if std_pnl > 0 else 0
+
+    # Calculate years of data from trade timestamps
+    if len(trades_df) > 0:
+        days_elapsed = (trades_df['exit_time'].max() - trades_df['entry_time'].min()).days
+        years_elapsed = max(days_elapsed / 365.25, 0.1)  # Minimum 0.1 years to avoid division by zero
+        trades_per_year = num_trades / years_elapsed
+        sharpe_ratio = (mean_pnl / std_pnl) * np.sqrt(trades_per_year) if std_pnl > 0 else 0
+    else:
+        sharpe_ratio = 0
 
     # Drawdown
     cumulative_pnl = trades_df['pnl'].cumsum()
