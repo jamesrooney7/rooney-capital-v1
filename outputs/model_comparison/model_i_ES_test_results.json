@@ -1,0 +1,17 @@
+{
+  "symbol": "ES",
+  "test_metrics": {
+    "trades": 3214,
+    "sharpe": -0.16421721183689966,
+    "sortino": -0.15790211572343893,
+    "profit_factor": 0.9629575022932145,
+    "win_rate": 0.5815183571873055,
+    "total_pnl_usd": -38565.5,
+    "max_drawdown_pct": 0.3718575638593707,
+    "max_drawdown_usd": 43762.362719417215,
+    "cagr": -0.04217035407383252,
+    "start_date": "2020-12-31 01:00:00",
+    "end_date": "2024-12-30 15:00:00"
+  },
+  "note": "This is TRUE out-of-sample performance on data never seen during training or threshold optimization"
+}

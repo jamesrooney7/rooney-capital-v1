@@ -196,7 +196,7 @@ FEATURE_SELECTION_DEFAULTS = {
 # Cross-Validation Defaults
 CV_DEFAULTS = {
     'n_splits': 5,
-    'embargo_days': 60,  # 2 months
+    'embargo_days': 2,  # Conservative: 1 day label evaluation + 1 day buffer
     'holding_period': 8  # Maximum days
 }
 

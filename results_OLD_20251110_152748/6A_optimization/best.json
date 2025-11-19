@@ -1,0 +1,161 @@
+{
+  "Symbol": "6A",
+  "Sharpe": 5.66389947100396,
+  "Deflated_Sharpe": null,
+  "Profit_Factor": 5.0248100778922495,
+  "Trades": 353,
+  "Prod_Threshold": 0.675,
+  "Guardrails": {
+    "Trades": 500,
+    "Era_Positive_Count": 4,
+    "Era_Count": 5
+  },
+  "Params": {
+    "n_estimators": 1200,
+    "min_samples_leaf": 50,
+    "max_depth": 7,
+    "max_features": 0.5,
+    "bootstrap": true,
+    "max_samples": 0.6146050157979474,
+    "class_weight": null,
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "Features": [
+    "enable6AReturnHour",
+    "6n_hourly_z_pipeline",
+    "si_hourly_z_pipeline",
+    "6n_daily_z_score",
+    "enable6JReturnDay",
+    "enableDOM",
+    "CL Daily Return",
+    "cl_hourly_return",
+    "NG Hourly Z Score",
+    "enableN7Bar",
+    "enablePrevIBS",
+    "prev_ibs_pct",
+    "ng_daily_z_score",
+    "ibs_pct",
+    "enableTLTReturnHour",
+    "allowedDOW",
+    "enableInsideBar",
+    "enableEvenOdd"
+  ],
+  "Score_Metric": "Sharpe",
+  "Holdout": {
+    "Sharpe": 2.9828257038179755,
+    "DSR": 1.0,
+    "PF": 2.5113853807884237,
+    "Trades": 274.0,
+    "Thr": 0.65,
+    "Total_PnL_USD": 15797.000000000455,
+    "Era_Positive": 1.0,
+    "Era_Positive_Count": 1.0,
+    "Era_Count": 1.0,
+    "Sortino": 1.8012927581336837,
+    "Max_Drawdown_USD": 2115.494707749167,
+    "Max_Drawdown_Pct": 0.016418579717835242
+  },
+  "Holdout_Folds": [
+    {
+      "Fold": 1,
+      "Sharpe": 2.8938578040218204,
+      "Sortino": 2.362715817305895,
+      "Max_Drawdown_Pct": 0.01893280316204542,
+      "Max_Drawdown_USD": 1990.713661380316,
+      "Trades": 187,
+      "Threshold": 0.65,
+      "Rows": 535
+    },
+    {
+      "Fold": 2,
+      "Sharpe": 2.8277541756577556,
+      "Sortino": 1.6413619091419576,
+      "Max_Drawdown_Pct": 0.020245941797243514,
+      "Max_Drawdown_USD": 2175.129853121165,
+      "Trades": 125,
+      "Threshold": 0.65,
+      "Rows": 515
+    },
+    {
+      "Fold": 3,
+      "Sharpe": 1.8967183687936577,
+      "Sortino": 0.9765588396177356,
+      "Max_Drawdown_Pct": 0.01893280316204577,
+      "Max_Drawdown_USD": 2011.0199777236994,
+      "Trades": 166,
+      "Threshold": 0.65,
+      "Rows": 522
+    },
+    {
+      "Fold": 4,
+      "Sharpe": 1.3873349849685246,
+      "Sortino": 0.6902816952311087,
+      "Max_Drawdown_Pct": 0.020369382224838535,
+      "Max_Drawdown_USD": 2165.405882542458,
+      "Trades": 172,
+      "Threshold": 0.65,
+      "Rows": 506
+    },
+    {
+      "Fold": 5,
+      "Sharpe": 5.944571816526755,
+      "Sortino": 5.607467536764168,
+      "Max_Drawdown_Pct": 0.006644518272425291,
+      "Max_Drawdown_USD": 733.217072298241,
+      "Trades": 135,
+      "Threshold": 0.6,
+      "Rows": 548
+    },
+    {
+      "Fold": 6,
+      "Sharpe": 3.59104326789921,
+      "Sortino": 4.099572743081376,
+      "Max_Drawdown_Pct": 0.003355141583150496,
+      "Max_Drawdown_USD": 364.5756941722211,
+      "Trades": 70,
+      "Threshold": 0.65,
+      "Rows": 555
+    },
+    {
+      "Fold": 7,
+      "Sharpe": 2.397223576310021,
+      "Sortino": 1.567768309800042,
+      "Max_Drawdown_Pct": 0.015820251053165105,
+      "Max_Drawdown_USD": 1798.704629459171,
+      "Trades": 181,
+      "Threshold": 0.6,
+      "Rows": 539
+    },
+    {
+      "Fold": 8,
+      "Sharpe": 3.7115588424164154,
+      "Sortino": 1.8369903928209956,
+      "Max_Drawdown_Pct": 0.008036470162695875,
+      "Max_Drawdown_USD": 832.3785667602933,
+      "Trades": 63,
+      "Threshold": 0.65,
+      "Rows": 535
+    },
+    {
+      "Fold": 9,
+      "Sharpe": 2.8673291020420897,
+      "Sortino": 1.7102328550103532,
+      "Max_Drawdown_Pct": 0.016930884814238104,
+      "Max_Drawdown_USD": 1897.9364144845022,
+      "Trades": 154,
+      "Threshold": 0.6,
+      "Rows": 519
+    },
+    {
+      "Fold": 10,
+      "Sharpe": 3.130351201433069,
+      "Sortino": 1.9889035056583566,
+      "Max_Drawdown_Pct": 0.01752853827296562,
+      "Max_Drawdown_USD": 1917.9602609994618,
+      "Trades": 145,
+      "Threshold": 0.65,
+      "Rows": 526
+    }
+  ]
+}

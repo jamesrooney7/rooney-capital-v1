@@ -263,28 +263,88 @@ def main(args):
     # Calculate held-out metrics
     from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
-    held_out_results = {
-        'auc': roc_auc_score(y_test, y_pred_proba),
-        'precision': precision_score(y_test, (y_pred_proba >= 0.5).astype(int), zero_division=0),
-        'recall': recall_score(y_test, (y_pred_proba >= 0.5).astype(int), zero_division=0),
-        'f1': f1_score(y_test, (y_pred_proba >= 0.5).astype(int), zero_division=0),
+    # Save held-out predictions to CSV
+    held_out_pred_df = pd.DataFrame({
+        'Date': test_df['Date'].values,
+        'y_true': y_test,
+        'y_pred_proba': y_pred_proba,
+        'y_pred_binary': (y_pred_proba >= 0.5).astype(int)
+    })
+    if 'y_return' in test_df.columns:
+        held_out_pred_df['y_return'] = test_df['y_return'].values
+
+    held_out_pred_df.to_csv(
+        output_dir / f"{args.symbol}_ml_meta_labeling_held_out_predictions.csv",
+        index=False
+    )
+    logger.info(f"Saved held-out predictions to CSV")
+
+    # Filter trades based on ML threshold (0.50)
+    threshold = 0.5
+    filter_mask = y_pred_proba >= threshold
+
+    # Unfiltered metrics (for comparison)
+    unfiltered_metrics = {
+        'n_trades': len(y_test),
         'win_rate': y_test.mean(),
-        'n_trades': len(y_test)
     }
 
-    # Calculate financial metrics if available
     if 'y_return' in test_df.columns:
-        returns = test_df['y_return'].values
+        returns_unfiltered = test_df['y_return'].values
+        from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
+        unfiltered_perf = calculate_performance_metrics(returns_unfiltered)
+        unfiltered_metrics['sharpe_ratio'] = unfiltered_perf['sharpe_ratio']
+        unfiltered_metrics['profit_factor'] = unfiltered_perf['profit_factor']
+
+    # Filtered metrics (actual ML meta-labeling performance)
+    y_test_filtered = y_test[filter_mask]
+
+    held_out_results = {
+        'threshold': threshold,
+        'auc': roc_auc_score(y_test, y_pred_proba),
+        'precision': precision_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
+        'recall': recall_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
+        'f1': f1_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
+        'n_trades_unfiltered': unfiltered_metrics['n_trades'],
+        'n_trades_filtered': int(filter_mask.sum()),
+        'filter_rate': float(1 - filter_mask.mean()),
+        'win_rate_unfiltered': float(unfiltered_metrics['win_rate']),
+        'win_rate_filtered': float(y_test_filtered.mean()) if len(y_test_filtered) > 0 else 0.0,
+    }
+
+    # Calculate financial metrics on FILTERED trades
+    if 'y_return' in test_df.columns and filter_mask.sum() > 0:
+        returns_filtered = test_df['y_return'].values[filter_mask]
         from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
 
-        perf_metrics = calculate_performance_metrics(returns)
-        held_out_results.update(perf_metrics)
+        perf_metrics = calculate_performance_metrics(returns_filtered)
+        held_out_results.update({
+            'sharpe_ratio_unfiltered': unfiltered_metrics['sharpe_ratio'],
+            'sharpe_ratio_filtered': perf_metrics['sharpe_ratio'],
+            'profit_factor_unfiltered': unfiltered_metrics['profit_factor'],
+            'profit_factor_filtered': perf_metrics['profit_factor'],
+            'sortino_ratio': perf_metrics['sortino_ratio'],
+            'calmar_ratio': perf_metrics['calmar_ratio'],
+            'max_drawdown': perf_metrics['max_drawdown'],
+            'total_return': perf_metrics['total_return'],
+        })
 
     logger.info("Held-Out Test Results (2021-2024):")
-    logger.info(f"  AUC:          {held_out_results['auc']:.4f}")
-    logger.info(f"  Sharpe:       {held_out_results.get('sharpe_ratio', 0):.3f}")
-    logger.info(f"  Win Rate:     {held_out_results['win_rate']:.2%}")
-    logger.info(f"  Total Trades: {held_out_results['n_trades']}")
+    logger.info(f"  AUC:                    {held_out_results['auc']:.4f}")
+    logger.info(f"  Threshold:              {threshold:.2f}")
+    logger.info("")
+    logger.info("  UNFILTERED (Primary Strategy):")
+    logger.info(f"    Trades:               {held_out_results['n_trades_unfiltered']}")
+    logger.info(f"    Win Rate:             {held_out_results['win_rate_unfiltered']:.2%}")
+    logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_unfiltered', 0):.3f}")
+    logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_unfiltered', 0):.2f}")
+    logger.info("")
+    logger.info("  FILTERED (ML Meta-Labeling):")
+    logger.info(f"    Trades:               {held_out_results['n_trades_filtered']}")
+    logger.info(f"    Filter Rate:          {held_out_results['filter_rate']:.1%}")
+    logger.info(f"    Win Rate:             {held_out_results['win_rate_filtered']:.2%}")
+    logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_filtered', 0):.3f}")
+    logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_filtered', 0):.2f}")
 
     # Save held-out results
     with open(output_dir / OUTPUT_TEMPLATES['held_out_results'].format(symbol=args.symbol), 'w') as f:
@@ -344,7 +404,7 @@ if __name__ == "__main__":
 
     # Cross-validation
     parser.add_argument("--cv-folds", type=int, default=5, help="Number of CV folds")
-    parser.add_argument("--embargo-days", type=int, default=60, help="Embargo period (days)")
+    parser.add_argument("--embargo-days", type=int, default=2, help="Embargo period (days)")
 
     # Optuna
     parser.add_argument("--n-trials", type=int, default=100, help="Optuna trials per window")

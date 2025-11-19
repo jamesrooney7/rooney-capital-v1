@@ -1,0 +1,38 @@
+{
+  "train_period": {
+    "start": "2023-01-01",
+    "end": "2023-12-31"
+  },
+  "test_period": {
+    "start": "2024-01-01",
+    "end": "2024-12-31"
+  },
+  "constraint": "Max DD < $5,000",
+  "optimal_config": {
+    "max_positions": 2,
+    "instruments": [
+      "6A",
+      "6B",
+      "6C",
+      "6M",
+      "6N",
+      "6S",
+      "CL",
+      "HG",
+      "SI"
+    ],
+    "n_instruments": 9
+  },
+  "train_metrics": {
+    "sharpe": 11.55752464555824,
+    "max_dd": 3248.9842000000062,
+    "cagr": 0.9486988488926114
+  },
+  "test_metrics": {
+    "sharpe": 10.482955843597072,
+    "max_dd": 6295.776450000034,
+    "cagr": 0.9073834614948673
+  },
+  "generalization": 0.9070243123059968,
+  "timestamp": "20251105_053115"
+}
