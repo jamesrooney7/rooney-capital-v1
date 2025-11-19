@@ -71,6 +71,9 @@ class FeatureLoggingStrategy(IbsStrategy):
         # This tells collect_filter_values() to calculate ALL features
         self.ml_feature_param_keys = FeatureLoggingStrategy._get_all_filter_param_keys()
 
+        # Pre-build all possible CSV fieldnames (core + features, filtered)
+        self.csv_fieldnames = self._build_csv_fieldnames()
+
     @staticmethod
     def _get_all_filter_param_keys() -> set:
         """
@@ -230,6 +233,37 @@ class FeatureLoggingStrategy(IbsStrategy):
         # Keep everything else
         return True
 
+    def _build_csv_fieldnames(self) -> list:
+        """
+        Build complete list of CSV fieldnames upfront.
+
+        This prevents errors when later trades have features not in the first trade.
+        Includes core columns + all possible features (filtered).
+
+        Returns:
+            Sorted list of column names for CSV header
+        """
+        # Core columns that always appear
+        core_columns = [
+            'Date/Time', 'Exit Date/Time', 'Date', 'Exit_Date',
+            'Entry_Price', 'Exit_Price', 'Symbol', 'Trade_ID',
+            'y_return', 'y_binary', 'y_pnl_usd', 'y_pnl_gross'
+        ]
+
+        # Get all possible feature keys
+        all_features = self._get_all_filter_param_keys()
+
+        # Combine and filter
+        all_columns = set(core_columns) | all_features
+        kept_columns = [col for col in all_columns if self._should_keep_column(col)]
+
+        # Sort for consistent column order
+        # Put core columns first, then alphabetical
+        core_first = [col for col in core_columns if col in kept_columns]
+        features_sorted = sorted([col for col in kept_columns if col not in core_columns])
+
+        return core_first + features_sorted
+
     def _filter_record_columns(self, record: dict) -> dict:
         """
         Filter record columns to remove unwanted features.
@@ -290,11 +324,16 @@ class FeatureLoggingStrategy(IbsStrategy):
                 output_path.parent.mkdir(parents=True, exist_ok=True)
 
                 self.csv_file = open(output_path, 'w', newline='')
-                self.csv_writer = csv.DictWriter(self.csv_file, fieldnames=filtered_record.keys())
+                # Use pre-built fieldnames to handle all possible columns
+                self.csv_writer = csv.DictWriter(
+                    self.csv_file,
+                    fieldnames=self.csv_fieldnames,
+                    extrasaction='ignore'  # Ignore any extra fields not in header
+                )
                 self.csv_writer.writeheader()
                 self.csv_headers_written = True
                 logger.info(f"Opened CSV file for incremental writing: {output_path}")
-                logger.info(f"Writing {len(filtered_record)} columns per trade")
+                logger.info(f"CSV header has {len(self.csv_fieldnames)} columns")
                 if self.filter_year:
                     logger.info(f"Filtering trades to year {self.filter_year} only (warmup year discarded)")
 
