@@ -34,13 +34,14 @@ def load_data(symbol: str):
     # Load original training data to get P&L
     training_file = Path(f"data/training/{symbol}_transformed_features.csv")
     training_df = pd.read_csv(training_file)
-    training_df['Entry_Date'] = pd.to_datetime(training_df['Entry_Date'])
+    training_df['Date'] = pd.to_datetime(training_df['Date'])
 
     # Merge to get P&L information
+    # Use correct column names: Date, y_pnl_usd, y_pnl_gross, y_return
     merged = oos_df.merge(
-        training_df[['Entry_Date', 'Trade_PnL_Points', 'Trade_PnL_Pct']],
+        training_df[['Date', 'y_pnl_usd', 'y_pnl_gross', 'y_return']],
         left_on='Date',
-        right_on='Entry_Date',
+        right_on='Date',
         how='left'
     )
 
@@ -85,11 +86,11 @@ def analyze_period(df: pd.DataFrame, period_name: str, start_date: str, end_date
     print(f"  Improvement: {(filtered_win_rate - unfiltered_win_rate):.2%}")
 
     # P&L Analysis
-    if 'Trade_PnL_Points' in period_df.columns:
-        unfiltered_pnl = period_df['Trade_PnL_Points'].dropna()
-        filtered_pnl = filtered_df['Trade_PnL_Points'].dropna()
+    if 'y_pnl_gross' in period_df.columns:
+        unfiltered_pnl = period_df['y_pnl_gross'].dropna()
+        filtered_pnl = filtered_df['y_pnl_gross'].dropna()
 
-        print(f"\n💰 P&L DISTRIBUTION (Points):")
+        print(f"\n💰 P&L DISTRIBUTION (USD):")
         print(f"  Unfiltered:")
         print(f"    Mean:   {unfiltered_pnl.mean():.3f}")
         print(f"    Median: {unfiltered_pnl.median():.3f}")
@@ -110,8 +111,8 @@ def analyze_period(df: pd.DataFrame, period_name: str, start_date: str, end_date
 
             print(f"\n🎰 CONCENTRATION RISK:")
             print(f"  Top 10 winners contribute: {top_10_contribution:.1%} of total P&L")
-            print(f"  Top 10 winners: {top_10_winners.mean():.2f} pts avg")
-            print(f"  Top 10 losers:  {top_10_losers.mean():.2f} pts avg")
+            print(f"  Top 10 winners: ${top_10_winners.mean():.2f} avg")
+            print(f"  Top 10 losers:  ${top_10_losers.mean():.2f} avg")
 
             if top_10_contribution > 0.5:
                 print(f"  ⚠️  WARNING: Results highly concentrated in few trades!")
