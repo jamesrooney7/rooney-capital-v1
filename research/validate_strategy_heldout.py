@@ -305,7 +305,14 @@ def main():
     logger.info(f"\nCriteria:")
     for criterion_name, criterion in heldout_eval['criteria'].items():
         status_icon = "✓" if criterion['pass'] else "✗"
-        logger.info(f"  {status_icon} {criterion_name}: {criterion['value']:.3f if isinstance(criterion['value'], float) else criterion['value']} (threshold: {criterion['threshold']})")
+        value = criterion['value']
+        if value is None:
+            value_str = "N/A"
+        elif isinstance(value, float):
+            value_str = f"{value:.3f}"
+        else:
+            value_str = str(value)
+        logger.info(f"  {status_icon} {criterion_name}: {value_str} (threshold: {criterion['threshold']})")
 
     # Save results
     heldout_metrics_file = heldout_dir / 'heldout_validation_metrics.json'
