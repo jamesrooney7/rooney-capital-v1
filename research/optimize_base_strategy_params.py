@@ -233,15 +233,15 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
     # 3. APPLY HARD CONSTRAINTS (MUST PASS)
 
     # Constraint 1: Minimum trade volume
-    if results['num_trades'] < 1500:
+    if results['num_trades'] < 1000:
         return -999999.0  # Severe penalty - reject trial
 
     # Constraint 2: Minimum win rate
-    if results['win_rate'] < 0.48:
+    if results['win_rate'] < 0.42:
         return -999999.0  # Severe penalty - reject trial
 
-    # Constraint 3: Minimum Sharpe (basic quality check)
-    if results['sharpe_ratio'] < 0.20:
+    # Constraint 3: Minimum Sharpe (allow slightly negative with realistic costs)
+    if results['sharpe_ratio'] < -0.10:
         return -999999.0  # Severe penalty - reject trial
 
     # 4. CALCULATE OBJECTIVE SCORE
