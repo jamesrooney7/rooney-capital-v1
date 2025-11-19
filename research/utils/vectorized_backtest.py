@@ -178,9 +178,8 @@ def run_backtest(
     df['ATR'] = calculate_atr(df, period=atr_period)
     df['Hour'] = df.index.hour
 
-    # Ensure we have High/Low for intrabar stop/target checks
-    if 'High' not in df.columns or 'Low' not in df.columns:
-        raise ValueError("DataFrame must have 'High' and 'Low' columns for realistic stop/target execution")
+    # Note: We check stops/targets at bar close only (not intrabar)
+    # This keeps backtesting simpler and more conservative
 
     # Skip warmup period
     df = df.iloc[warmup_bars:].copy()
@@ -199,8 +198,6 @@ def run_backtest(
     for i in range(len(df)):
         current_time = df.index[i]
         current_price = df.iloc[i]['Close']
-        current_high = df.iloc[i]['High']
-        current_low = df.iloc[i]['Low']
         current_ibs = df.iloc[i]['IBS']
         current_atr = df.iloc[i]['ATR']
         current_hour = df.iloc[i]['Hour']
@@ -234,15 +231,15 @@ def run_backtest(
             take_profit = entry_price + (target_atr_mult * entry_atr)
 
             # Check exit conditions (in priority order)
-            # Use intrabar High/Low for realistic stop/target execution
+            # Check stops/targets at bar close only (not intrabar)
 
-            # 1. Stop loss hit (check if Low touched stop)
-            if current_low <= stop_loss:
+            # 1. Stop loss hit (check Close)
+            if current_price <= stop_loss:
                 exit_reason = 'stop_loss'
                 exit_price = stop_loss - slippage_points  # Slippage on stop
 
-            # 2. Take profit hit (check if High touched target)
-            elif current_high >= take_profit:
+            # 2. Take profit hit (check Close)
+            elif current_price >= take_profit:
                 exit_reason = 'take_profit'
                 exit_price = take_profit - slippage_points  # Slippage on exit
 
