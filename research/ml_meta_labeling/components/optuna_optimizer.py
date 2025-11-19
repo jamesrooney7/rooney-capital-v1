@@ -137,7 +137,12 @@ class OptunaOptimizer:
         scoring_fn: Optional[Callable]
     ) -> float:
         """
-        Objective function for a single trial.
+        Objective function for a single trial with consistency bonus.
+
+        Evaluates hyperparameters across CV folds and returns a score that
+        balances mean performance (85%) with consistency across folds (15%).
+        This follows López de Prado's principle of preferring stable models
+        that work consistently across different time periods.
 
         Args:
             trial: Optuna trial
@@ -147,7 +152,7 @@ class OptunaOptimizer:
             scoring_fn: Scoring function
 
         Returns:
-            Score to maximize
+            Score to maximize: 0.85 * mean_score + 0.15 * (-std_score)
         """
         # Create model from trial
         trainer = create_lightgbm_from_trial(trial, self.random_state)
@@ -218,10 +223,22 @@ class OptunaOptimizer:
             # Return a poor score to discourage this hyperparameter combination
             return 0.5  # Random baseline for binary classification
 
-        # Return mean score across folds
+        # Calculate mean and std across folds
         mean_score = np.mean(fold_scores)
-        logger.debug(f"Trial CV score: {mean_score:.4f} (from {len(fold_scores)} folds)")
-        return mean_score
+        std_score = np.std(fold_scores)
+
+        # Add consistency bonus (López de Prado principle: prefer stable models)
+        # 85% mean performance + 15% consistency (penalize high variance)
+        # This gently favors hyperparameters that produce consistent results
+        # across different time periods, avoiding boom-bust models
+        consistency_bonus = -std_score  # Negative std (lower variance = higher bonus)
+        final_score = 0.85 * mean_score + 0.15 * consistency_bonus
+
+        logger.debug(
+            f"Trial CV score: mean={mean_score:.4f}, std={std_score:.4f}, "
+            f"final={final_score:.4f} (from {len(fold_scores)} folds)"
+        )
+        return final_score
 
     def _default_scoring(self, y_true: pd.Series, y_pred_proba: np.ndarray) -> float:
         """
