@@ -85,7 +85,7 @@ def _run_single_backtest(
     # Run backtest
     backtester = Backtester(
         initial_capital=100000,
-        commission_per_side=2.50,
+        commission_per_side=1.00,
         slippage_ticks=1.0  # 1 tick slippage per side
     )
 

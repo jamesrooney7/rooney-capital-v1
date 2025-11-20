@@ -206,7 +206,7 @@ class Backtester:
     def __init__(
         self,
         initial_capital: float = 100000.0,
-        commission_per_side: float = 2.50,
+        commission_per_side: float = 1.00,
         slippage_ticks: float = 1.0  # Number of ticks slippage per side
     ):
         """
