@@ -87,32 +87,43 @@ class BacktestResults:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (for database storage)."""
+        # Helper to convert numpy types to native Python types
+        def to_python(val):
+            if hasattr(val, 'item'):  # numpy scalar
+                return val.item()
+            elif isinstance(val, (int, float, str, bool)):
+                return val
+            elif isinstance(val, pd.Timestamp):
+                return str(val)
+            else:
+                return val
+
         result = {
-            'strategy_name': self.strategy_name,
-            'strategy_id': self.strategy_id,
-            'symbol': self.symbol,
+            'strategy_name': str(self.strategy_name),
+            'strategy_id': int(self.strategy_id),
+            'symbol': str(self.symbol),
             'params': str(self.params),
-            'start_date': self.start_date,
-            'end_date': self.end_date,
-            'total_bars': self.total_bars,
-            'total_trades': self.total_trades,
-            'winning_trades': self.winning_trades,
-            'losing_trades': self.losing_trades,
-            'win_rate': self.win_rate,
-            'total_pnl': self.total_pnl,
-            'total_pnl_pct': self.total_pnl_pct,
-            'avg_pnl_per_trade': self.avg_pnl_per_trade,
-            'avg_win': self.avg_win,
-            'avg_loss': self.avg_loss,
-            'largest_win': self.largest_win,
-            'largest_loss': self.largest_loss,
-            'sharpe_ratio': self.sharpe_ratio,
-            'max_drawdown': self.max_drawdown,
-            'max_drawdown_pct': self.max_drawdown_pct,
-            'profit_factor': self.profit_factor,
-            'avg_bars_held': self.avg_bars_held,
-            'max_bars_held': self.max_bars_held,
-            'min_bars_held': self.min_bars_held,
+            'start_date': str(self.start_date),
+            'end_date': str(self.end_date),
+            'total_bars': int(self.total_bars),
+            'total_trades': int(self.total_trades),
+            'winning_trades': int(self.winning_trades),
+            'losing_trades': int(self.losing_trades),
+            'win_rate': float(self.win_rate),
+            'total_pnl': float(self.total_pnl),
+            'total_pnl_pct': float(self.total_pnl_pct),
+            'avg_pnl_per_trade': float(self.avg_pnl_per_trade),
+            'avg_win': float(self.avg_win),
+            'avg_loss': float(self.avg_loss),
+            'largest_win': float(self.largest_win),
+            'largest_loss': float(self.largest_loss),
+            'sharpe_ratio': float(self.sharpe_ratio),
+            'max_drawdown': float(self.max_drawdown),
+            'max_drawdown_pct': float(self.max_drawdown_pct),
+            'profit_factor': float(self.profit_factor),
+            'avg_bars_held': float(self.avg_bars_held),
+            'max_bars_held': int(self.max_bars_held),
+            'min_bars_held': int(self.min_bars_held),
             'exit_counts': str(self.exit_counts)
         }
         return result
