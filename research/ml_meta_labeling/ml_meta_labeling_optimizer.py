@@ -56,6 +56,7 @@ def main(args):
     logger.info("ML META-LABELING SYSTEM - OPTIMIZATION PIPELINE")
     logger.info("=" * 100)
     logger.info(f"Symbol: {args.symbol}")
+    logger.info(f"Task Type: {args.task_type}")
     logger.info(f"Output Directory: {args.output_dir}")
     logger.info("")
 
@@ -80,7 +81,8 @@ def main(args):
         remove_vix=args.remove_vix,
         lambda_decay=args.lambda_decay,
         min_samples_per_class=args.min_samples_per_class,
-        missing_value_threshold=args.missing_value_threshold
+        missing_value_threshold=args.missing_value_threshold,
+        task_type=args.task_type
     )
 
     df, feature_columns = data_prep.load_and_prepare()
@@ -149,6 +151,7 @@ def main(args):
         optimization_metric=args.optimization_metric,
         precision_threshold=args.precision_threshold,
         random_state=args.seed,
+        task_type=args.task_type,
         output_dir=output_dir
     )
 
@@ -231,7 +234,12 @@ def main(args):
         )
 
         # Predict on held-out test
-        y_pred_proba = ensemble.predict_proba(X_test_selected)
+        if args.task_type == 'classification':
+            y_pred = ensemble.predict_proba(X_test_selected)
+        else:  # regression
+            # Note: Ensemble doesn't support regression yet, so this would error
+            logger.warning("Ensemble mode does not support regression yet. Use --no-use-ensemble flag.")
+            y_pred = ensemble.predict_proba(X_test_selected)  # Will error if reached
 
         # Save ensemble
         ensemble.save_ensemble(
@@ -251,13 +259,17 @@ def main(args):
 
         trainer = LightGBMTrainer(
             hyperparameters=best_hyperparams,
-            random_state=args.seed
+            random_state=args.seed,
+            task_type=args.task_type
         )
 
         trainer.train(X_train_selected, y_train_full, sw_train_full)
 
         # Predict on held-out test
-        y_pred_proba = trainer.predict_proba(X_test_selected)
+        if args.task_type == 'classification':
+            y_pred = trainer.predict_proba(X_test_selected)
+        else:  # regression
+            y_pred = trainer.predict(X_test_selected)
 
         # Save model
         trainer.save_model(
@@ -265,15 +277,22 @@ def main(args):
         )
 
     # Calculate held-out metrics
-    from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
     # Save held-out predictions to CSV
-    held_out_pred_df = pd.DataFrame({
-        'Date': test_df['Date'].values,
-        'y_true': y_test,
-        'y_pred_proba': y_pred_proba,
-        'y_pred_binary': (y_pred_proba >= 0.5).astype(int)
-    })
+    if args.task_type == 'classification':
+        held_out_pred_df = pd.DataFrame({
+            'Date': test_df['Date'].values,
+            'y_true': y_test,
+            'y_pred_proba': y_pred,
+            'y_pred_binary': (y_pred >= 0.5).astype(int)
+        })
+    else:  # regression
+        held_out_pred_df = pd.DataFrame({
+            'Date': test_df['Date'].values,
+            'y_true_pnl': y_test,
+            'y_pred_pnl': y_pred
+        })
+
     if 'y_return' in test_df.columns:
         held_out_pred_df['y_return'] = test_df['y_return'].values
 
@@ -283,72 +302,115 @@ def main(args):
     )
     logger.info(f"Saved held-out predictions to CSV")
 
-    # Filter trades based on ML threshold (0.50)
-    threshold = 0.5
-    filter_mask = y_pred_proba >= threshold
+    # Calculate metrics based on task type
+    if args.task_type == 'classification':
+        from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score
 
-    # Unfiltered metrics (for comparison)
-    unfiltered_metrics = {
-        'n_trades': len(y_test),
-        'win_rate': y_test.mean(),
-    }
+        # Filter trades based on ML threshold (0.50)
+        threshold = 0.5
+        filter_mask = y_pred >= threshold
 
-    if 'y_return' in test_df.columns:
-        returns_unfiltered = test_df['y_return'].values
-        from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
-        unfiltered_perf = calculate_performance_metrics(returns_unfiltered)
-        unfiltered_metrics['sharpe_ratio'] = unfiltered_perf['sharpe_ratio']
-        unfiltered_metrics['profit_factor'] = unfiltered_perf['profit_factor']
+        # Unfiltered metrics (for comparison)
+        unfiltered_metrics = {
+            'n_trades': len(y_test),
+            'win_rate': y_test.mean(),
+        }
 
-    # Filtered metrics (actual ML meta-labeling performance)
-    y_test_filtered = y_test[filter_mask]
+        if 'y_return' in test_df.columns:
+            returns_unfiltered = test_df['y_return'].values
+            from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
+            unfiltered_perf = calculate_performance_metrics(returns_unfiltered)
+            unfiltered_metrics['sharpe_ratio'] = unfiltered_perf['sharpe_ratio']
+            unfiltered_metrics['profit_factor'] = unfiltered_perf['profit_factor']
 
-    held_out_results = {
-        'threshold': threshold,
-        'auc': roc_auc_score(y_test, y_pred_proba),
-        'precision': precision_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
-        'recall': recall_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
-        'f1': f1_score(y_test, (y_pred_proba >= threshold).astype(int), zero_division=0),
-        'n_trades_unfiltered': unfiltered_metrics['n_trades'],
-        'n_trades_filtered': int(filter_mask.sum()),
-        'filter_rate': float(1 - filter_mask.mean()),
-        'win_rate_unfiltered': float(unfiltered_metrics['win_rate']),
-        'win_rate_filtered': float(y_test_filtered.mean()) if len(y_test_filtered) > 0 else 0.0,
-    }
+        # Filtered metrics (actual ML meta-labeling performance)
+        y_test_filtered = y_test[filter_mask]
 
-    # Calculate financial metrics on FILTERED trades
-    if 'y_return' in test_df.columns and filter_mask.sum() > 0:
-        returns_filtered = test_df['y_return'].values[filter_mask]
-        from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
+        held_out_results = {
+            'task_type': 'classification',
+            'threshold': threshold,
+            'auc': roc_auc_score(y_test, y_pred),
+            'precision': precision_score(y_test, (y_pred >= threshold).astype(int), zero_division=0),
+            'recall': recall_score(y_test, (y_pred >= threshold).astype(int), zero_division=0),
+            'f1': f1_score(y_test, (y_pred >= threshold).astype(int), zero_division=0),
+            'n_trades_unfiltered': unfiltered_metrics['n_trades'],
+            'n_trades_filtered': int(filter_mask.sum()),
+            'filter_rate': float(1 - filter_mask.mean()),
+            'win_rate_unfiltered': float(unfiltered_metrics['win_rate']),
+            'win_rate_filtered': float(y_test_filtered.mean()) if len(y_test_filtered) > 0 else 0.0,
+        }
 
-        perf_metrics = calculate_performance_metrics(returns_filtered)
-        held_out_results.update({
-            'sharpe_ratio_unfiltered': unfiltered_metrics['sharpe_ratio'],
-            'sharpe_ratio_filtered': perf_metrics['sharpe_ratio'],
-            'profit_factor_unfiltered': unfiltered_metrics['profit_factor'],
-            'profit_factor_filtered': perf_metrics['profit_factor'],
-            'sortino_ratio': perf_metrics['sortino_ratio'],
-            'calmar_ratio': perf_metrics['calmar_ratio'],
-            'max_drawdown': perf_metrics['max_drawdown'],
-            'total_return': perf_metrics['total_return'],
-        })
+        # Calculate financial metrics on FILTERED trades
+        if 'y_return' in test_df.columns and filter_mask.sum() > 0:
+            returns_filtered = test_df['y_return'].values[filter_mask]
+            from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
 
-    logger.info("Held-Out Test Results (2021-2024):")
-    logger.info(f"  AUC:                    {held_out_results['auc']:.4f}")
-    logger.info(f"  Threshold:              {threshold:.2f}")
-    logger.info("")
-    logger.info("  UNFILTERED (Primary Strategy):")
-    logger.info(f"    Trades:               {held_out_results['n_trades_unfiltered']}")
-    logger.info(f"    Win Rate:             {held_out_results['win_rate_unfiltered']:.2%}")
-    logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_unfiltered', 0):.3f}")
-    logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_unfiltered', 0):.2f}")
-    logger.info("")
-    logger.info("  FILTERED (ML Meta-Labeling):")
-    logger.info(f"    Trades:               {held_out_results['n_trades_filtered']}")
-    logger.info(f"    Filter Rate:          {held_out_results['filter_rate']:.1%}")
-    logger.info(f"    Win Rate:             {held_out_results['win_rate_filtered']:.2%}")
-    logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_filtered', 0):.3f}")
-    logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_filtered', 0):.2f}")
+            perf_metrics = calculate_performance_metrics(returns_filtered)
+            held_out_results.update({
+                'sharpe_ratio_unfiltered': unfiltered_metrics['sharpe_ratio'],
+                'sharpe_ratio_filtered': perf_metrics['sharpe_ratio'],
+                'profit_factor_unfiltered': unfiltered_metrics['profit_factor'],
+                'profit_factor_filtered': perf_metrics['profit_factor'],
+                'sortino_ratio': perf_metrics['sortino_ratio'],
+                'calmar_ratio': perf_metrics['calmar_ratio'],
+                'max_drawdown': perf_metrics['max_drawdown'],
+                'total_return': perf_metrics['total_return'],
+            })
+
+        logger.info("Held-Out Test Results (2021-2024):")
+        logger.info(f"  AUC:                    {held_out_results['auc']:.4f}")
+        logger.info(f"  Threshold:              {threshold:.2f}")
+        logger.info("")
+        logger.info("  UNFILTERED (Primary Strategy):")
+        logger.info(f"    Trades:               {held_out_results['n_trades_unfiltered']}")
+        logger.info(f"    Win Rate:             {held_out_results['win_rate_unfiltered']:.2%}")
+        logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_unfiltered', 0):.3f}")
+        logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_unfiltered', 0):.2f}")
+        logger.info("")
+        logger.info("  FILTERED (ML Meta-Labeling):")
+        logger.info(f"    Trades:               {held_out_results['n_trades_filtered']}")
+        logger.info(f"    Filter Rate:          {held_out_results['filter_rate']:.1%}")
+        logger.info(f"    Win Rate:             {held_out_results['win_rate_filtered']:.2%}")
+        logger.info(f"    Sharpe:               {held_out_results.get('sharpe_ratio_filtered', 0):.3f}")
+        logger.info(f"    Profit Factor:        {held_out_results.get('profit_factor_filtered', 0):.2f}")
+
+    else:  # regression
+        from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+        held_out_results = {
+            'task_type': 'regression',
+            'r2': r2_score(y_test, y_pred),
+            'mae': mean_absolute_error(y_test, y_pred),
+            'rmse': np.sqrt(mean_squared_error(y_test, y_pred)),
+            'mean_true_pnl': float(y_test.mean()),
+            'mean_pred_pnl': float(y_pred.mean()),
+            'n_samples': len(y_test)
+        }
+
+        # Calculate financial metrics on all trades
+        if 'y_return' in test_df.columns:
+            returns = test_df['y_return'].values
+            from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
+
+            perf_metrics = calculate_performance_metrics(returns)
+            held_out_results.update({
+                'sharpe_ratio': perf_metrics['sharpe_ratio'],
+                'profit_factor': perf_metrics['profit_factor'],
+                'sortino_ratio': perf_metrics['sortino_ratio'],
+                'calmar_ratio': perf_metrics['calmar_ratio'],
+                'max_drawdown': perf_metrics['max_drawdown'],
+                'total_return': perf_metrics['total_return'],
+            })
+
+        logger.info("Held-Out Test Results (2021-2024):")
+        logger.info(f"  R²:                     {held_out_results['r2']:.4f}")
+        logger.info(f"  MAE:                    ${held_out_results['mae']:.2f}")
+        logger.info(f"  RMSE:                   ${held_out_results['rmse']:.2f}")
+        logger.info(f"  Mean True P&L:          ${held_out_results['mean_true_pnl']:.2f}")
+        logger.info(f"  Mean Predicted P&L:     ${held_out_results['mean_pred_pnl']:.2f}")
+        logger.info(f"  Samples:                {held_out_results['n_samples']}")
+        logger.info(f"  Sharpe:                 {held_out_results.get('sharpe_ratio', 0):.3f}")
+        logger.info(f"  Profit Factor:          {held_out_results.get('profit_factor', 0):.2f}")
 
     # Save held-out results
     with open(output_dir / OUTPUT_TEMPLATES['held_out_results'].format(symbol=args.symbol), 'w') as f:
@@ -410,13 +472,21 @@ if __name__ == "__main__":
     parser.add_argument("--cv-folds", type=int, default=5, help="Number of CV folds")
     parser.add_argument("--embargo-days", type=int, default=2, help="Embargo period (days)")
 
+    # Task type
+    parser.add_argument(
+        "--task-type",
+        default="classification",
+        choices=["classification", "regression"],
+        help="Task type: classification (predict win/loss) or regression (predict P&L)"
+    )
+
     # Optuna
     parser.add_argument("--n-trials", type=int, default=100, help="Optuna trials per window")
     parser.add_argument(
         "--optimization-metric",
         default="precision",
-        choices=["auc", "f1", "precision"],
-        help="Metric to optimize during hyperparameter search (default: precision per López de Prado)"
+        choices=["auc", "f1", "precision", "r2", "neg_mae", "neg_rmse"],
+        help="Metric to optimize (classification: auc/f1/precision, regression: r2/neg_mae/neg_rmse)"
     )
     parser.add_argument(
         "--precision-threshold",
