@@ -16,8 +16,11 @@ Batch 1 (10 strategies):
 Batch 2 (10 strategies):
 3, 5, 6, 8, 9, 10, 14, 20, 27, 28 - ~550 combos
 
-Total Strategies: 30
-Total Combinations: ~1,185
+Batch 3 (9 strategies):
+29, 30, 31, 32, 33, 34, 35, 38, 39 - ~250 combos
+
+Total Strategies: 39/39 (100% COMPLETE!)
+Total Combinations: ~1,435
 """
 
 from .base import BaseStrategy
@@ -53,6 +56,16 @@ from .doji_reversal import DojiReversal
 from .fibonacci_retracement import FibonacciRetracement
 from .mean_reversion_bands import MeanReversionBands
 from .atr_trailing_stop import ATRTrailingStop
+# Batch 3
+from .volume_breakout import VolumeBreakout
+from .momentum_fade import MomentumFade
+from .pivot_point_reversal import PivotPointReversal
+from .roc_strategy import ROCStrategy
+from .aroon_indicator import AroonIndicator
+from .money_flow_index import MoneyFlowIndex
+from .chaikin_oscillator import ChaikinOscillator
+from .overnight_gap_strategy import OvernightGapStrategy
+from .time_of_day_reversal import TimeOfDayReversal
 
 __all__ = [
     'BaseStrategy',
@@ -85,7 +98,16 @@ __all__ = [
     'DojiReversal',
     'FibonacciRetracement',
     'MeanReversionBands',
-    'ATRTrailingStop'
+    'ATRTrailingStop',
+    'VolumeBreakout',
+    'MomentumFade',
+    'PivotPointReversal',
+    'ROCStrategy',
+    'AroonIndicator',
+    'MoneyFlowIndex',
+    'ChaikinOscillator',
+    'OvernightGapStrategy',
+    'TimeOfDayReversal'
 ]
 
 # Strategy registry for easy lookup by ID
@@ -118,6 +140,15 @@ STRATEGY_REGISTRY = {
     26: InsideBarBreakout,
     27: MeanReversionBands,
     28: ATRTrailingStop,
+    29: VolumeBreakout,
+    30: MomentumFade,
+    31: PivotPointReversal,
+    32: ROCStrategy,
+    33: AroonIndicator,
+    34: MoneyFlowIndex,
+    35: ChaikinOscillator,
     36: RSI2SMAFilter,
-    37: Double7s
+    37: Double7s,
+    38: OvernightGapStrategy,
+    39: TimeOfDayReversal
 }
