@@ -290,8 +290,15 @@ class BaseStrategy(ABC):
         Returns:
             True if EOD time reached
         """
+        # Skip if no auto_close_time set
+        if not self.auto_close_time:
+            return False
+
+        # Ensure auto_close_time is a string
+        auto_close_str = str(self.auto_close_time)
+
         # Parse auto_close_time (e.g., "16:00")
-        hour, minute = map(int, self.auto_close_time.split(':'))
+        hour, minute = map(int, auto_close_str.split(':'))
         eod_time = current_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
         return current_time >= eod_time
@@ -381,7 +388,8 @@ def calculate_rsi(close: pd.Series, period: int = 14) -> pd.Series:
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
     loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
 
-    rs = gain / loss.replace(0, np.nan)  # Avoid division by zero
+    # Avoid division by zero
+    rs = gain / loss.where(loss != 0, np.nan)
     rsi = 100 - (100 / (1 + rs))
 
     return rsi
