@@ -31,7 +31,8 @@ class OptunaOptimizer:
         pruning_patience: int = 25,
         cv_folds: int = 5,
         embargo_days: int = 60,
-        random_state: int = 42
+        random_state: int = 42,
+        task_type: str = 'classification'
     ):
         """
         Initialize Optuna optimizer.
@@ -39,12 +40,15 @@ class OptunaOptimizer:
         Args:
             n_trials: Number of optimization trials
             n_jobs: Number of parallel jobs (-1 for all cores)
-            optimization_metric: Metric to optimize ('auc', 'f1', 'precision')
+            optimization_metric: Metric to optimize
+                - Classification: 'auc', 'f1', 'precision'
+                - Regression: 'r2', 'neg_mae', 'neg_rmse'
             precision_threshold: Threshold for precision metric (default: 0.60)
             pruning_patience: Patience for pruning unpromising trials
             cv_folds: Number of CV folds
             embargo_days: Embargo period for Purged K-Fold
             random_state: Random seed
+            task_type: 'classification' or 'regression'
         """
         self.n_trials = n_trials
         self.n_jobs = n_jobs
@@ -54,6 +58,7 @@ class OptunaOptimizer:
         self.cv_folds = cv_folds
         self.embargo_days = embargo_days
         self.random_state = random_state
+        self.task_type = task_type
 
         self.study: Optional[optuna.Study] = None
         self.best_params: Optional[Dict] = None
@@ -155,7 +160,7 @@ class OptunaOptimizer:
             Score to maximize: 0.85 * mean_score + 0.15 * (-std_score)
         """
         # Create model from trial
-        trainer = create_lightgbm_from_trial(trial, self.random_state)
+        trainer = create_lightgbm_from_trial(trial, self.random_state, self.task_type)
 
         # Setup Purged K-Fold CV
         # Use k_test=1 (standard k-fold) for hyperparameter optimization
@@ -196,14 +201,17 @@ class OptunaOptimizer:
             # Train
             trainer.train(X_train_fold, y_train_fold, sw_train)
 
-            # Predict
-            y_pred_proba = trainer.predict_proba(X_test_fold)
+            # Predict (different methods for classification vs regression)
+            if self.task_type == 'classification':
+                y_pred = trainer.predict_proba(X_test_fold)
+            else:  # regression
+                y_pred = trainer.predict(X_test_fold)
 
             # Score
             if scoring_fn is not None:
-                score = scoring_fn(y_test_fold, y_pred_proba)
+                score = scoring_fn(y_test_fold, y_pred)
             else:
-                score = self._default_scoring(y_test_fold, y_pred_proba)
+                score = self._default_scoring(y_test_fold, y_pred)
 
             fold_scores.append(score)
 
@@ -240,31 +248,46 @@ class OptunaOptimizer:
         )
         return final_score
 
-    def _default_scoring(self, y_true: pd.Series, y_pred_proba: np.ndarray) -> float:
+    def _default_scoring(self, y_true: pd.Series, y_pred: np.ndarray) -> float:
         """
         Default scoring function.
 
         Args:
-            y_true: True labels
-            y_pred_proba: Predicted probabilities
+            y_true: True labels (binary for classification, continuous for regression)
+            y_pred: Predictions (probabilities for classification, continuous for regression)
 
         Returns:
             Score (metric depends on optimization_metric setting)
         """
-        from sklearn.metrics import roc_auc_score, precision_score, f1_score
+        if self.task_type == 'classification':
+            from sklearn.metrics import roc_auc_score, precision_score, f1_score
 
-        if self.optimization_metric == 'auc':
-            return roc_auc_score(y_true, y_pred_proba)
-        elif self.optimization_metric == 'f1':
-            y_pred = (y_pred_proba >= 0.5).astype(int)
-            return f1_score(y_true, y_pred, zero_division=0)
-        elif self.optimization_metric == 'precision':
-            # Use configurable threshold (López de Prado approach)
-            y_pred = (y_pred_proba >= self.precision_threshold).astype(int)
-            return precision_score(y_true, y_pred, zero_division=0)
-        else:
-            # Default to AUC
-            return roc_auc_score(y_true, y_pred_proba)
+            if self.optimization_metric == 'auc':
+                return roc_auc_score(y_true, y_pred)
+            elif self.optimization_metric == 'f1':
+                y_pred_binary = (y_pred >= 0.5).astype(int)
+                return f1_score(y_true, y_pred_binary, zero_division=0)
+            elif self.optimization_metric == 'precision':
+                # Use configurable threshold (López de Prado approach)
+                y_pred_binary = (y_pred >= self.precision_threshold).astype(int)
+                return precision_score(y_true, y_pred_binary, zero_division=0)
+            else:
+                # Default to AUC
+                return roc_auc_score(y_true, y_pred)
+        else:  # regression
+            from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+            if self.optimization_metric == 'r2':
+                return r2_score(y_true, y_pred)
+            elif self.optimization_metric == 'neg_mae':
+                # Negative because Optuna maximizes (lower MAE is better)
+                return -mean_absolute_error(y_true, y_pred)
+            elif self.optimization_metric == 'neg_rmse':
+                # Negative RMSE
+                return -np.sqrt(mean_squared_error(y_true, y_pred))
+            else:
+                # Default to R²
+                return r2_score(y_true, y_pred)
 
     def get_optimization_history(self) -> pd.DataFrame:
         """
