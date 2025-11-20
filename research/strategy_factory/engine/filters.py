@@ -14,8 +14,6 @@ import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
 from dataclasses import dataclass
 import logging
-from scipy import stats
-from statsmodels.stats.multitest import multipletests
 
 from .backtester import BacktestResults, Backtester
 from .data_loader import load_data
@@ -506,19 +504,30 @@ class FDRFilter:
         if not p_values:
             return []
 
-        # Apply FDR correction
-        reject, corrected_p, _, _ = multipletests(
-            p_values,
-            alpha=self.alpha,
-            method='fdr_bh'  # Benjamini-Hochberg
-        )
+        # Apply Benjamini-Hochberg FDR correction manually
+        # Sort p-values with their original indices
+        n = len(p_values)
+        sorted_pvals = sorted(enumerate(p_values), key=lambda x: x[1])
+
+        # Find largest i where p[i] <= (i+1)/n * alpha
+        max_passed_rank = -1
+        for rank, (original_idx, p_val) in enumerate(sorted_pvals):
+            critical_value = ((rank + 1) / n) * self.alpha
+            if p_val <= critical_value:
+                max_passed_rank = rank
 
         # Get indices that passed
-        passed_indices = [i for i, r in enumerate(reject) if r]
+        if max_passed_rank >= 0:
+            passed_indices = [
+                sorted_pvals[i][0]
+                for i in range(max_passed_rank + 1)
+            ]
+        else:
+            passed_indices = []
 
         logger.info(
             f"FDR: {len(passed_indices)}/{len(p_values)} strategies passed "
-            f"after correction"
+            f"after correction (alpha={self.alpha})"
         )
 
         return passed_indices
