@@ -21,7 +21,8 @@ class LightGBMTrainer:
     def __init__(
         self,
         hyperparameters: Optional[Dict] = None,
-        random_state: int = 42
+        random_state: int = 42,
+        task_type: str = 'classification'
     ):
         """
         Initialize LightGBM trainer.
@@ -29,10 +30,12 @@ class LightGBMTrainer:
         Args:
             hyperparameters: Dictionary of LightGBM hyperparameters
             random_state: Random seed
+            task_type: 'classification' or 'regression'
         """
         self.random_state = random_state
+        self.task_type = task_type
         self.hyperparameters = hyperparameters or self._get_default_hyperparameters()
-        self.model: Optional[lgb.LGBMClassifier] = None
+        self.model = None  # Will be LGBMClassifier or LGBMRegressor
         self.feature_importance_: Optional[Dict[str, float]] = None
 
     def _get_default_hyperparameters(self) -> Dict:
@@ -57,13 +60,13 @@ class LightGBMTrainer:
         X_val: Optional[pd.DataFrame] = None,
         y_val: Optional[pd.Series] = None,
         early_stopping_rounds: int = 50
-    ) -> lgb.LGBMClassifier:
+    ):
         """
         Train LightGBM model.
 
         Args:
             X_train: Training features
-            y_train: Training labels
+            y_train: Training labels (binary for classification, continuous for regression)
             sample_weight: Optional sample weights
             X_val: Optional validation features for early stopping
             y_val: Optional validation labels for early stopping
@@ -72,26 +75,41 @@ class LightGBMTrainer:
         Returns:
             Trained LightGBM model
         """
-        logger.info("Training LightGBM model...")
+        logger.info(f"Training LightGBM {self.task_type} model...")
         logger.info(f"Training samples: {len(X_train)}")
         logger.info(f"Features: {X_train.shape[1]}")
 
-        # Calculate class weights
-        class_weights = self._calculate_class_weights(y_train)
-        logger.info(f"Class weights: {class_weights}")
+        if self.task_type == 'classification':
+            # Calculate class weights
+            class_weights = self._calculate_class_weights(y_train)
+            logger.info(f"Class weights: {class_weights}")
 
-        # Build model
-        model_params = {
-            'boosting_type': 'gbdt',
-            'objective': 'binary',
-            'metric': 'auc',
-            'verbose': -1,
-            'random_state': self.random_state,
-            'class_weight': class_weights,
-            **self.hyperparameters
-        }
+            # Build classification model
+            model_params = {
+                'boosting_type': 'gbdt',
+                'objective': 'binary',
+                'metric': 'auc',
+                'verbose': -1,
+                'random_state': self.random_state,
+                'class_weight': class_weights,
+                **self.hyperparameters
+            }
 
-        self.model = lgb.LGBMClassifier(**model_params)
+            self.model = lgb.LGBMClassifier(**model_params)
+        else:  # regression
+            logger.info(f"Target (P&L) stats: mean=${y_train.mean():.2f}, std=${y_train.std():.2f}")
+
+            # Build regression model
+            model_params = {
+                'boosting_type': 'gbdt',
+                'objective': 'regression',
+                'metric': 'rmse',
+                'verbose': -1,
+                'random_state': self.random_state,
+                **self.hyperparameters
+            }
+
+            self.model = lgb.LGBMRegressor(**model_params)
 
         # Prepare callbacks
         callbacks = []
@@ -162,13 +180,13 @@ class LightGBMTrainer:
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Generate binary predictions.
+        Generate predictions.
 
         Args:
             X: Feature matrix
 
         Returns:
-            Binary predictions (0 or 1)
+            Binary predictions (0 or 1) for classification, continuous values for regression
         """
         if self.model is None:
             raise ValueError("Model not trained yet")
@@ -177,7 +195,7 @@ class LightGBMTrainer:
 
     def predict_proba(self, X: pd.DataFrame) -> np.ndarray:
         """
-        Generate probability predictions.
+        Generate probability predictions (classification only).
 
         Args:
             X: Feature matrix
@@ -187,6 +205,9 @@ class LightGBMTrainer:
         """
         if self.model is None:
             raise ValueError("Model not trained yet")
+
+        if self.task_type != 'classification':
+            raise ValueError("predict_proba only available for classification models")
 
         return self.model.predict_proba(X)[:, 1]
 
@@ -211,13 +232,14 @@ class LightGBMTrainer:
         logger.info(f"Model loaded from {filepath}")
 
 
-def create_lightgbm_from_trial(trial, random_state: int = 42) -> LightGBMTrainer:
+def create_lightgbm_from_trial(trial, random_state: int = 42, task_type: str = 'classification') -> LightGBMTrainer:
     """
     Create LightGBM trainer from Optuna trial.
 
     Args:
         trial: Optuna trial object
         random_state: Random seed
+        task_type: 'classification' or 'regression'
 
     Returns:
         LightGBMTrainer instance
@@ -247,4 +269,4 @@ def create_lightgbm_from_trial(trial, random_state: int = 42) -> LightGBMTrainer
                     config['max']
                 )
 
-    return LightGBMTrainer(hyperparameters=hyperparameters, random_state=random_state)
+    return LightGBMTrainer(hyperparameters=hyperparameters, random_state=random_state, task_type=task_type)
