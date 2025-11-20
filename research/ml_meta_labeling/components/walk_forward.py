@@ -33,6 +33,7 @@ class WalkForwardValidator:
         optimization_metric: str = 'precision',
         precision_threshold: float = 0.60,
         random_state: int = 42,
+        task_type: str = 'classification',
         output_dir: Optional[Path] = None
     ):
         """
@@ -44,9 +45,12 @@ class WalkForwardValidator:
             n_trials_per_window: Optuna trials per walk-forward window
             cv_folds: Number of CV folds within each window
             embargo_days: Embargo period for Purged K-Fold
-            optimization_metric: Metric to optimize ('auc', 'f1', 'precision')
+            optimization_metric: Metric to optimize
+                - Classification: 'auc', 'f1', 'precision'
+                - Regression: 'r2', 'neg_mae', 'neg_rmse'
             precision_threshold: Threshold for precision metric (default: 0.60)
             random_state: Random seed
+            task_type: 'classification' or 'regression'
             output_dir: Directory to save intermediate results
         """
         self.data_prep = data_prep
@@ -57,6 +61,7 @@ class WalkForwardValidator:
         self.optimization_metric = optimization_metric
         self.precision_threshold = precision_threshold
         self.random_state = random_state
+        self.task_type = task_type
         self.output_dir = output_dir
 
         # Results storage
@@ -166,7 +171,8 @@ class WalkForwardValidator:
             precision_threshold=self.precision_threshold,
             cv_folds=self.cv_folds,
             embargo_days=self.embargo_days,
-            random_state=self.random_state
+            random_state=self.random_state,
+            task_type=self.task_type
         )
 
         best_params, best_score = optimizer.optimize(
@@ -182,7 +188,8 @@ class WalkForwardValidator:
 
         trainer = LightGBMTrainer(
             hyperparameters=best_params,
-            random_state=self.random_state
+            random_state=self.random_state,
+            task_type=self.task_type
         )
 
         trainer.train(
@@ -194,21 +201,33 @@ class WalkForwardValidator:
         # Step 3: Generate out-of-sample predictions on test window
         logger.info("Generating OOS predictions on test window...")
 
-        y_pred_proba = trainer.predict_proba(X_test_selected)
+        if self.task_type == 'classification':
+            y_pred = trainer.predict_proba(X_test_selected)
+            pred_column_name = 'y_pred_proba'
+        else:  # regression
+            y_pred = trainer.predict(X_test_selected)
+            pred_column_name = 'y_pred_pnl'
 
         # Create predictions dataframe
         oos_predictions_df = pd.DataFrame({
             'Date': test_df['Date'].values,
             'y_true': y_test.values,
-            'y_pred_proba': y_pred_proba,
+            pred_column_name: y_pred,
             'window': window_idx
         })
 
         # Step 4: Calculate window metrics
-        test_metrics = self._calculate_window_metrics(y_test, y_pred_proba, test_df)
+        test_metrics = self._calculate_window_metrics(y_test, y_pred, test_df)
+
+        # Get training predictions
+        if self.task_type == 'classification':
+            y_train_pred = trainer.predict_proba(X_train_selected.drop(columns=['Date']))
+        else:
+            y_train_pred = trainer.predict(X_train_selected.drop(columns=['Date']))
+
         train_metrics = self._calculate_window_metrics(
             y_train,
-            trainer.predict_proba(X_train_selected.drop(columns=['Date'])),
+            y_train_pred,
             train_df,
             is_training=True
         )
@@ -241,9 +260,15 @@ class WalkForwardValidator:
 
         # Log summary
         logger.info(f"Window {window_idx} Results:")
-        logger.info(f"  CV AUC:    {best_score:.4f}")
-        logger.info(f"  Test AUC:  {test_metrics['auc']:.4f}")
-        logger.info(f"  Test Sharpe: {test_metrics['sharpe']:.3f}")
+        if self.task_type == 'classification':
+            logger.info(f"  CV {self.optimization_metric.upper()}: {best_score:.4f}")
+            logger.info(f"  Test AUC:  {test_metrics['auc']:.4f}")
+            logger.info(f"  Test Sharpe: {test_metrics.get('sharpe', 0):.3f}")
+        else:  # regression
+            logger.info(f"  CV {self.optimization_metric.upper()}: {best_score:.4f}")
+            logger.info(f"  Test R²:   {test_metrics['r2']:.4f}")
+            logger.info(f"  Test MAE:  ${test_metrics['mae']:.2f}")
+            logger.info(f"  Test Sharpe: {test_metrics.get('sharpe', 0):.3f}")
         logger.info(f"  WFE:       {wfe:.2%}")
 
         return window_result
@@ -251,42 +276,86 @@ class WalkForwardValidator:
     def _calculate_window_metrics(
         self,
         y_true: pd.Series,
-        y_pred_proba: np.ndarray,
+        y_pred: np.ndarray,
         df: pd.DataFrame,
         is_training: bool = False
     ) -> Dict:
-        """Calculate performance metrics for a window."""
-        from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
+        """
+        Calculate performance metrics for a window.
 
-        # Classification metrics
-        y_pred = (y_pred_proba >= 0.5).astype(int)
+        Args:
+            y_true: True target values (binary for classification, P&L for regression)
+            y_pred: Predictions (probabilities for classification, P&L for regression)
+            df: DataFrame with additional columns (Date, y_return, etc.)
+            is_training: Whether this is training data
 
-        metrics = {
-            'auc': roc_auc_score(y_true, y_pred_proba),
-            'f1': f1_score(y_true, y_pred),
-            'precision': precision_score(y_true, y_pred, zero_division=0),
-            'recall': recall_score(y_true, y_pred, zero_division=0),
-            'accuracy': (y_true == y_pred).mean(),
-            'n_trades': len(y_true),
-            'win_rate': y_true.mean()
-        }
+        Returns:
+            Dictionary of metrics
+        """
+        metrics = {'n_trades': len(y_true)}
 
-        # Financial metrics (if we have y_return)
-        if 'y_return' in df.columns:
-            returns = df['y_return'].values
-            daily_returns = self._aggregate_to_daily_returns(df['Date'], returns)
+        if self.task_type == 'classification':
+            from sklearn.metrics import roc_auc_score, f1_score, precision_score, recall_score
 
-            if len(daily_returns) > 0:
-                sharpe = self._calculate_sharpe(daily_returns)
-                metrics['sharpe'] = sharpe
-                metrics['total_return'] = returns.sum()
-                metrics['mean_return'] = returns.mean()
-                metrics['std_return'] = returns.std()
-            else:
-                metrics['sharpe'] = 0.0
-                metrics['total_return'] = 0.0
-                metrics['mean_return'] = 0.0
-                metrics['std_return'] = 0.0
+            # Classification metrics
+            y_pred_binary = (y_pred >= 0.5).astype(int)
+
+            metrics.update({
+                'auc': roc_auc_score(y_true, y_pred),
+                'f1': f1_score(y_true, y_pred_binary, zero_division=0),
+                'precision': precision_score(y_true, y_pred_binary, zero_division=0),
+                'recall': recall_score(y_true, y_pred_binary, zero_division=0),
+                'accuracy': (y_true == y_pred_binary).mean(),
+                'win_rate': y_true.mean()
+            })
+
+            # Financial metrics (if we have y_return)
+            if 'y_return' in df.columns:
+                returns = df['y_return'].values
+                daily_returns = self._aggregate_to_daily_returns(df['Date'], returns)
+
+                if len(daily_returns) > 0:
+                    sharpe = self._calculate_sharpe(daily_returns)
+                    metrics['sharpe'] = sharpe
+                    metrics['total_return'] = returns.sum()
+                    metrics['mean_return'] = returns.mean()
+                    metrics['std_return'] = returns.std()
+                else:
+                    metrics['sharpe'] = 0.0
+                    metrics['total_return'] = 0.0
+                    metrics['mean_return'] = 0.0
+                    metrics['std_return'] = 0.0
+
+        else:  # regression
+            from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+
+            # Regression metrics (predicting P&L directly)
+            metrics.update({
+                'r2': r2_score(y_true, y_pred),
+                'mae': mean_absolute_error(y_true, y_pred),
+                'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+                'mean_pred_pnl': y_pred.mean(),
+                'mean_true_pnl': y_true.mean()
+            })
+
+            # Financial metrics - use predicted P&L values
+            # Convert predicted P&L to returns for Sharpe calculation
+            if 'y_return' in df.columns:
+                # Use actual returns for Sharpe (we can't calculate daily Sharpe from P&L predictions)
+                returns = df['y_return'].values
+                daily_returns = self._aggregate_to_daily_returns(df['Date'], returns)
+
+                if len(daily_returns) > 0:
+                    sharpe = self._calculate_sharpe(daily_returns)
+                    metrics['sharpe'] = sharpe
+                    metrics['total_return'] = returns.sum()
+                    metrics['mean_return'] = returns.mean()
+                    metrics['std_return'] = returns.std()
+                else:
+                    metrics['sharpe'] = 0.0
+                    metrics['total_return'] = 0.0
+                    metrics['mean_return'] = 0.0
+                    metrics['std_return'] = 0.0
 
         return metrics
 
@@ -320,11 +389,15 @@ class WalkForwardValidator:
         Returns:
             WFE ratio
         """
-        # Use Sharpe ratio for WFE if available, otherwise use AUC
+        # Use Sharpe ratio for WFE if available
         if 'sharpe' in train_metrics and train_metrics['sharpe'] != 0:
             return test_metrics['sharpe'] / train_metrics['sharpe']
-        elif train_metrics['auc'] != 0:
+        # For classification, use AUC
+        elif self.task_type == 'classification' and train_metrics.get('auc', 0) != 0:
             return test_metrics['auc'] / train_metrics['auc']
+        # For regression, use R²
+        elif self.task_type == 'regression' and train_metrics.get('r2', 0) != 0:
+            return test_metrics['r2'] / train_metrics['r2']
         else:
             return 0.0
 
@@ -334,12 +407,20 @@ class WalkForwardValidator:
 
         # Extract metrics from each window
         test_sharpes = [w['test_metrics'].get('sharpe', 0) for w in self.window_results]
-        test_aucs = [w['test_metrics']['auc'] for w in self.window_results]
         wfes = [w['wfe'] for w in self.window_results]
 
         logger.info("Aggregate Walk-Forward Results:")
         logger.info(f"  Mean Test Sharpe:  {np.mean(test_sharpes):.3f} ± {np.std(test_sharpes):.3f}")
-        logger.info(f"  Mean Test AUC:     {np.mean(test_aucs):.4f} ± {np.std(test_aucs):.4f}")
+
+        if self.task_type == 'classification':
+            test_aucs = [w['test_metrics']['auc'] for w in self.window_results]
+            logger.info(f"  Mean Test AUC:     {np.mean(test_aucs):.4f} ± {np.std(test_aucs):.4f}")
+        else:  # regression
+            test_r2s = [w['test_metrics']['r2'] for w in self.window_results]
+            test_maes = [w['test_metrics']['mae'] for w in self.window_results]
+            logger.info(f"  Mean Test R²:      {np.mean(test_r2s):.4f} ± {np.std(test_r2s):.4f}")
+            logger.info(f"  Mean Test MAE:     ${np.mean(test_maes):.2f} ± ${np.std(test_maes):.2f}")
+
         logger.info(f"  Mean WFE:          {np.mean(wfes):.2%} ± {np.std(wfes):.2%}")
         logger.info(f"  Min WFE:           {np.min(wfes):.2%}")
         logger.info(f"  Positive Windows:  {sum(s > 0 for s in test_sharpes)}/{len(test_sharpes)}")
@@ -349,7 +430,7 @@ class WalkForwardValidator:
         summary_data = []
 
         for window in self.window_results:
-            summary_data.append({
+            base_data = {
                 'Window': window['window_name'],
                 'Train_Start': window['train_start'],
                 'Train_End': window['train_end'],
@@ -357,11 +438,24 @@ class WalkForwardValidator:
                 'Test_End': window['test_end'],
                 'Train_Samples': window['train_samples'],
                 'Test_Samples': window['test_samples'],
-                'CV_AUC': window['cv_score'],
-                'Test_AUC': window['test_metrics']['auc'],
+                'CV_Score': window['cv_score'],
                 'Test_Sharpe': window['test_metrics'].get('sharpe', 0),
-                'WFE': window['wfe'],
-                'Win_Rate': window['test_metrics']['win_rate']
-            })
+                'WFE': window['wfe']
+            }
+
+            if self.task_type == 'classification':
+                base_data.update({
+                    'Test_AUC': window['test_metrics']['auc'],
+                    'Win_Rate': window['test_metrics']['win_rate']
+                })
+            else:  # regression
+                base_data.update({
+                    'Test_R2': window['test_metrics']['r2'],
+                    'Test_MAE': window['test_metrics']['mae'],
+                    'Mean_Pred_PnL': window['test_metrics']['mean_pred_pnl'],
+                    'Mean_True_PnL': window['test_metrics']['mean_true_pnl']
+                })
+
+            summary_data.append(base_data)
 
         return pd.DataFrame(summary_data)
