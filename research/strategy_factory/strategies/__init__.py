@@ -10,11 +10,14 @@ Each strategy inherits from BaseStrategy and implements:
 Tier 1 (Original 10):
 1-10: BollingerBands, RSI2, MACD, etc. - 235 combos
 
-Batch 1 (New 10):
+Batch 1 (10 strategies):
 2, 4, 7, 11, 12, 13, 16, 18, 22, 26 - ~400 combos
 
-Total Strategies: 20
-Total Combinations: ~635
+Batch 2 (10 strategies):
+3, 5, 6, 8, 9, 10, 14, 20, 27, 28 - ~550 combos
+
+Total Strategies: 30
+Total Combinations: ~1,185
 """
 
 from .base import BaseStrategy
@@ -39,6 +42,17 @@ from .turtle_trading import TurtleTrading
 from .ema_ribbon import EMARibbon
 from .rsi_divergence import RSIDivergence
 from .inside_bar_breakout import InsideBarBreakout
+# Batch 2
+from .three_bar_reversal import ThreeBarReversal
+from .engulfing_pattern import EngulfingPattern
+from .hammer_shooting_star import HammerShootingStar
+from .parabolic_sar import ParabolicSAR
+from .adx_trend_strength import ADXTrendStrength
+from .ichimoku_cloud import IchimokuCloud
+from .doji_reversal import DojiReversal
+from .fibonacci_retracement import FibonacciRetracement
+from .mean_reversion_bands import MeanReversionBands
+from .atr_trailing_stop import ATRTrailingStop
 
 __all__ = [
     'BaseStrategy',
@@ -61,29 +75,49 @@ __all__ = [
     'TurtleTrading',
     'EMARibbon',
     'RSIDivergence',
-    'InsideBarBreakout'
+    'InsideBarBreakout',
+    'ThreeBarReversal',
+    'EngulfingPattern',
+    'HammerShootingStar',
+    'ParabolicSAR',
+    'ADXTrendStrength',
+    'IchimokuCloud',
+    'DojiReversal',
+    'FibonacciRetracement',
+    'MeanReversionBands',
+    'ATRTrailingStop'
 ]
 
 # Strategy registry for easy lookup by ID
 STRATEGY_REGISTRY = {
     1: BollingerBands,
     2: KeltnerChannelBreakout,
+    3: ThreeBarReversal,
     4: SupportResistanceBounce,
+    5: EngulfingPattern,
+    6: HammerShootingStar,
     7: MovingAverageEnvelope,
+    8: ParabolicSAR,
+    9: ADXTrendStrength,
+    10: IchimokuCloud,
     11: StochasticRSI,
     12: WilliamsPercentR,
     13: CCIStrategy,
+    14: DojiReversal,
     15: PriceChannelBreakout,
     16: TurtleTrading,
     17: MACross,
     18: EMARibbon,
     19: MACDStrategy,
+    20: FibonacciRetracement,
     21: RSI2MeanReversion,
     22: RSIDivergence,
     23: GapFill,
     24: VWAPReversion,
     25: OpeningRangeBreakout,
     26: InsideBarBreakout,
+    27: MeanReversionBands,
+    28: ATRTrailingStop,
     36: RSI2SMAFilter,
     37: Double7s
 }
