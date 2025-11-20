@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Resample tick/minute data to hourly and daily bars for backtesting.
+Resample tick/minute data to 15min, hourly, and daily bars for backtesting.
 
-This script converts raw tick data to the two timeframes needed by IbsStrategy:
+This script converts raw tick data to the timeframes needed by strategies:
+- 15-minute bars (for higher-frequency intraday indicators and entries)
 - Hourly bars (for intraday indicators, IBS, entries)
 - Daily bars (for trend filters, daily IBS, SMA200)
 
@@ -23,6 +24,30 @@ import logging
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+
+def resample_to_15min(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Resample tick/minute data to 15-minute OHLCV bars.
+
+    Args:
+        df: DataFrame with datetime index and OHLCV columns
+
+    Returns:
+        DataFrame with 15-minute bars
+    """
+    bars_15min = pd.DataFrame({
+        'Open': df['Open'].resample('15min', label='left', closed='left').first(),
+        'High': df['High'].resample('15min', label='left', closed='left').max(),
+        'Low': df['Low'].resample('15min', label='left', closed='left').min(),
+        'Close': df['Close'].resample('15min', label='left', closed='left').last(),
+        'volume': df['volume'].resample('15min', label='left', closed='left').sum(),
+    })
+
+    # Remove bars with no data
+    bars_15min = bars_15min.dropna()
+
+    return bars_15min
 
 
 def resample_to_hourly(df: pd.DataFrame) -> pd.DataFrame:
@@ -94,7 +119,7 @@ def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
 
 def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date: str = None, end_date: str = None):
     """
-    Resample a single symbol's tick data to hourly and daily bars.
+    Resample a single symbol's tick data to 15min, hourly, and daily bars.
 
     Args:
         symbol: Symbol name (e.g., 'ES', 'NQ')
@@ -134,6 +159,11 @@ def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date:
     # Sort by datetime
     df = df.sort_index()
 
+    # Resample to 15-minute bars
+    logger.info("Resampling to 15-minute bars...")
+    bars_15min = resample_to_15min(df[['Open', 'High', 'Low', 'Close', 'volume']])
+    logger.info(f"Created {len(bars_15min):,} 15-minute bars")
+
     # Resample to hourly
     logger.info("Resampling to hourly bars...")
     hourly = resample_to_hourly(df[['Open', 'High', 'Low', 'Close', 'volume']])
@@ -147,8 +177,12 @@ def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date:
     # Save resampled data
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    bars_15min_path = output_dir / f"{symbol}_15min.csv"
     hourly_path = output_dir / f"{symbol}_hourly.csv"
     daily_path = output_dir / f"{symbol}_daily.csv"
+
+    logger.info(f"Saving 15-minute bars to {bars_15min_path}...")
+    bars_15min.to_csv(bars_15min_path)
 
     logger.info(f"Saving hourly bars to {hourly_path}...")
     hourly.to_csv(hourly_path)
@@ -156,11 +190,11 @@ def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date:
     logger.info(f"Saving daily bars to {daily_path}...")
     daily.to_csv(daily_path)
 
-    logger.info(f"✅ {symbol} complete: {len(hourly):,} hourly, {len(daily):,} daily bars\n")
+    logger.info(f"✅ {symbol} complete: {len(bars_15min):,} 15min, {len(hourly):,} hourly, {len(daily):,} daily bars\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Resample tick data to hourly and daily bars')
+    parser = argparse.ArgumentParser(description='Resample tick/minute data to 15min, hourly, and daily bars')
     parser.add_argument('--symbol', type=str, help='Symbol to process (e.g., ES, NQ)')
     parser.add_argument('--input', type=str, help='Input CSV file path')
     parser.add_argument('--output-dir', type=str, default='data/resampled', help='Output directory')
