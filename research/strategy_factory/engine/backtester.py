@@ -10,6 +10,16 @@ import numpy as np
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 import logging
+import sys
+from pathlib import Path
+
+# Add src to path for contract specs
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "src"))
+try:
+    from strategy.contract_specs import CONTRACT_SPECS
+except ImportError:
+    # Fallback if contract_specs not available
+    CONTRACT_SPECS = {}
 
 from ..strategies.base import BaseStrategy, TradeExit
 
@@ -188,7 +198,7 @@ class Backtester:
     Features:
     - Proper position management (one position at a time)
     - Exit hierarchy (strategy → stop → target → time → EOD)
-    - Slippage and commission modeling
+    - Contract-specific slippage and commission modeling
     - Equity curve tracking
     - Detailed trade analytics
     """
@@ -197,7 +207,7 @@ class Backtester:
         self,
         initial_capital: float = 100000.0,
         commission_per_side: float = 2.50,
-        slippage_pct: float = 0.0001  # 0.01% = 1 basis point
+        slippage_ticks: float = 1.0  # Number of ticks slippage per side
     ):
         """
         Initialize backtester.
@@ -205,11 +215,11 @@ class Backtester:
         Args:
             initial_capital: Starting capital
             commission_per_side: Commission per side (round-turn = 2x)
-            slippage_pct: Slippage as percentage of price
+            slippage_ticks: Number of ticks slippage per side (default: 1 tick)
         """
         self.initial_capital = initial_capital
         self.commission_per_side = commission_per_side
-        self.slippage_pct = slippage_pct
+        self.slippage_ticks = slippage_ticks
 
     def run(
         self,
@@ -228,6 +238,11 @@ class Backtester:
         Returns:
             BacktestResults object with full analytics
         """
+        # Get contract specs for tick-based slippage
+        spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.01, "tick_value": 1.0})
+        tick_size = spec["tick_size"]
+        slippage_points = tick_size * self.slippage_ticks
+
         # Prepare data (calculate indicators)
         data = strategy.prepare_data(data.copy())
 
@@ -264,8 +279,8 @@ class Backtester:
                     # Exit trade
                     exit_price = trade_exit.exit_price
 
-                    # Apply slippage (assuming we sell at slightly worse price)
-                    exit_price *= (1 - self.slippage_pct)
+                    # Apply slippage (1 tick worse on exit)
+                    exit_price -= slippage_points
 
                     # Calculate P&L
                     pnl_points = exit_price - entry_price
@@ -300,8 +315,8 @@ class Backtester:
                 # Entry signal
                 entry_price = current_price
 
-                # Apply slippage (assuming we buy at slightly worse price)
-                entry_price *= (1 + self.slippage_pct)
+                # Apply slippage (1 tick worse on entry)
+                entry_price += slippage_points
 
                 entry_time = current_time
                 entry_idx = i
