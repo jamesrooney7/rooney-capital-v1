@@ -21,8 +21,11 @@ The data resampling script has been updated to generate 15-minute bars alongside
 # Generate 15min, hourly, and daily bars for all symbols
 python research/utils/resample_data.py --all
 
+# Generate ONLY 15min bars (skip hourly and daily if you already have them)
+python research/utils/resample_data.py --all --only-15min
+
 # With date range filter
-python research/utils/resample_data.py --all --start-date 2010-01-01 --end-date 2024-12-31
+python research/utils/resample_data.py --all --start-date 2010-01-01 --end-date 2024-12-31 --only-15min
 ```
 
 ### Process Single Symbol
@@ -30,6 +33,9 @@ python research/utils/resample_data.py --all --start-date 2010-01-01 --end-date 
 ```bash
 # Generate bars for ES only
 python research/utils/resample_data.py --symbol ES --input data/historical/ES_bt.csv
+
+# Generate ONLY 15min bars for ES
+python research/utils/resample_data.py --symbol ES --input data/historical/ES_bt.csv --only-15min
 
 # With custom output directory
 python research/utils/resample_data.py --symbol ES --input data/historical/ES_bt.csv --output-dir data/resampled
@@ -98,12 +104,29 @@ pip list | grep pandas
 # Navigate to project root
 cd /path/to/rooney-capital-v1
 
-# Process all symbols (recommended)
+# If you already have hourly and daily data, use --only-15min flag
+python research/utils/resample_data.py --all --only-15min
+
+# Or process all timeframes (if starting fresh)
 python research/utils/resample_data.py --all
 ```
 
 ### Expected Output
 
+**With `--only-15min` flag** (recommended if you already have hourly/daily):
+```
+2025-01-20 14:30:22 - INFO - Processing ES...
+2025-01-20 14:30:22 - INFO - Reading data/historical/ES_bt.csv...
+2025-01-20 14:30:45 - INFO - Loaded 7,234,891 tick/minute bars from 2010-01-04 to 2024-12-31
+2025-01-20 14:30:45 - INFO - Resampling to 15-minute bars...
+2025-01-20 14:30:52 - INFO - Created 489,234 15-minute bars
+2025-01-20 14:30:52 - INFO - Saving 15-minute bars to data/resampled/ES_15min.csv...
+2025-01-20 14:30:54 - INFO - ✅ ES complete: 489,234 15min bars only
+
+[Repeats for NQ, YM, RTY, etc.]
+```
+
+**Without flag** (generates all timeframes):
 ```
 2025-01-20 14:30:22 - INFO - Processing ES...
 2025-01-20 14:30:22 - INFO - Reading data/historical/ES_bt.csv...

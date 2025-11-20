@@ -117,7 +117,8 @@ def resample_to_daily(df: pd.DataFrame) -> pd.DataFrame:
     return daily
 
 
-def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date: str = None, end_date: str = None):
+def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date: str = None, end_date: str = None,
+                    only_15min: bool = False):
     """
     Resample a single symbol's tick data to 15min, hourly, and daily bars.
 
@@ -127,6 +128,7 @@ def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date:
         output_dir: Directory to save resampled files
         start_date: Optional start date filter (YYYY-MM-DD)
         end_date: Optional end date filter (YYYY-MM-DD)
+        only_15min: If True, only generate 15min bars (skip hourly and daily)
     """
     logger.info(f"Processing {symbol}...")
 
@@ -164,33 +166,40 @@ def resample_symbol(symbol: str, input_path: Path, output_dir: Path, start_date:
     bars_15min = resample_to_15min(df[['Open', 'High', 'Low', 'Close', 'volume']])
     logger.info(f"Created {len(bars_15min):,} 15-minute bars")
 
-    # Resample to hourly
-    logger.info("Resampling to hourly bars...")
-    hourly = resample_to_hourly(df[['Open', 'High', 'Low', 'Close', 'volume']])
-    logger.info(f"Created {len(hourly):,} hourly bars")
+    # Optionally resample to hourly and daily
+    if not only_15min:
+        # Resample to hourly
+        logger.info("Resampling to hourly bars...")
+        hourly = resample_to_hourly(df[['Open', 'High', 'Low', 'Close', 'volume']])
+        logger.info(f"Created {len(hourly):,} hourly bars")
 
-    # Resample to daily
-    logger.info("Resampling to daily bars...")
-    daily = resample_to_daily(df[['Open', 'High', 'Low', 'Close', 'volume']])
-    logger.info(f"Created {len(daily):,} daily bars")
+        # Resample to daily
+        logger.info("Resampling to daily bars...")
+        daily = resample_to_daily(df[['Open', 'High', 'Low', 'Close', 'volume']])
+        logger.info(f"Created {len(daily):,} daily bars")
 
     # Save resampled data
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Always save 15-minute bars
     bars_15min_path = output_dir / f"{symbol}_15min.csv"
-    hourly_path = output_dir / f"{symbol}_hourly.csv"
-    daily_path = output_dir / f"{symbol}_daily.csv"
-
     logger.info(f"Saving 15-minute bars to {bars_15min_path}...")
     bars_15min.to_csv(bars_15min_path)
 
-    logger.info(f"Saving hourly bars to {hourly_path}...")
-    hourly.to_csv(hourly_path)
+    # Optionally save hourly and daily
+    if not only_15min:
+        hourly_path = output_dir / f"{symbol}_hourly.csv"
+        daily_path = output_dir / f"{symbol}_daily.csv"
 
-    logger.info(f"Saving daily bars to {daily_path}...")
-    daily.to_csv(daily_path)
+        logger.info(f"Saving hourly bars to {hourly_path}...")
+        hourly.to_csv(hourly_path)
 
-    logger.info(f"✅ {symbol} complete: {len(bars_15min):,} 15min, {len(hourly):,} hourly, {len(daily):,} daily bars\n")
+        logger.info(f"Saving daily bars to {daily_path}...")
+        daily.to_csv(daily_path)
+
+        logger.info(f"✅ {symbol} complete: {len(bars_15min):,} 15min, {len(hourly):,} hourly, {len(daily):,} daily bars\n")
+    else:
+        logger.info(f"✅ {symbol} complete: {len(bars_15min):,} 15min bars only\n")
 
 
 def main():
@@ -201,6 +210,8 @@ def main():
     parser.add_argument('--all', action='store_true', help='Process all symbols in data/historical/')
     parser.add_argument('--start-date', type=str, help='Start date filter (YYYY-MM-DD)')
     parser.add_argument('--end-date', type=str, help='End date filter (YYYY-MM-DD)')
+    parser.add_argument('--only-15min', action='store_true',
+                       help='Only generate 15min bars (skip hourly and daily)')
 
     args = parser.parse_args()
 
@@ -215,11 +226,11 @@ def main():
 
         for csv_file in sorted(historical_dir.glob('*_bt.csv')):
             symbol = csv_file.stem.replace('_bt', '')
-            resample_symbol(symbol, csv_file, output_dir, args.start_date, args.end_date)
+            resample_symbol(symbol, csv_file, output_dir, args.start_date, args.end_date, args.only_15min)
 
     elif args.symbol and args.input:
         input_path = Path(args.input)
-        resample_symbol(args.symbol, input_path, output_dir, args.start_date, args.end_date)
+        resample_symbol(args.symbol, input_path, output_dir, args.start_date, args.end_date, args.only_15min)
 
     else:
         parser.print_help()
