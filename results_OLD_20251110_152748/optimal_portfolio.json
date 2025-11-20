@@ -1,0 +1,66 @@
+{
+  "symbols": [
+    "6A",
+    "6B",
+    "6C",
+    "6E",
+    "6M",
+    "6N",
+    "6S",
+    "CL",
+    "ES",
+    "GC",
+    "HG",
+    "NG",
+    "NQ",
+    "PL",
+    "RTY",
+    "YM"
+  ],
+  "max_positions": 2,
+  "position_size": 1.0,
+  "portfolio_train_period": {
+    "start": "2019-01-01",
+    "end": "2021-12-31",
+    "metrics": {
+      "total_return": 899160.5000000016,
+      "pct_return": 4.495802500000008,
+      "cagr": 0.6088676223195513,
+      "sharpe": 10.55074005819256,
+      "sortino": 23.892202537747583,
+      "annualized_return": 0.47699442448232976,
+      "annualized_vol": 0.04520957030989951,
+      "max_drawdown": -3397.75,
+      "max_drawdown_pct": -0.004191706336906352,
+      "win_rate": 0.8217054263565892,
+      "profit_factor": 9.115295142296986,
+      "avg_win": 1361.1303908355808,
+      "avg_loss": 688.1878881987536,
+      "trading_days": 903.0,
+      "avg_positions": 6.496124031007752,
+      "daily_stops_hit": 8.0
+    }
+  },
+  "test_period": {
+    "start": "2022-01-01",
+    "end": "2024-12-31",
+    "metrics": {
+      "total_return": 1055171.2499999988,
+      "pct_return": 5.275856249999994,
+      "cagr": 0.6743485552836803,
+      "sharpe": 7.883701721117275,
+      "sortino": 16.075474260363567,
+      "annualized_return": 0.5180889664828598,
+      "annualized_vol": 0.06571645970510367,
+      "max_drawdown": -6774.0,
+      "max_drawdown_pct": -0.006145924888432734,
+      "win_rate": 0.7884187082405345,
+      "profit_factor": 6.896483220801426,
+      "avg_win": 1743.1080508474586,
+      "avg_loss": 941.8381578947377,
+      "trading_days": 898.0,
+      "avg_positions": 6.353006681514477,
+      "daily_stops_hit": 19.0
+    }
+  }
+}

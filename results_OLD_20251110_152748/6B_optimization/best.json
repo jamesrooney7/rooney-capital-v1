@@ -1,0 +1,160 @@
+{
+  "Symbol": "6B",
+  "Sharpe": 3.4410925577032647,
+  "Deflated_Sharpe": null,
+  "Profit_Factor": 3.459628392841897,
+  "Trades": 234,
+  "Prod_Threshold": 0.65,
+  "Guardrails": {
+    "Trades": 500,
+    "Era_Positive_Count": 4,
+    "Era_Count": 5
+  },
+  "Params": {
+    "n_estimators": 600,
+    "min_samples_leaf": 100,
+    "max_depth": null,
+    "max_features": 0.5,
+    "bootstrap": false,
+    "max_samples": null,
+    "class_weight": null,
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "Features": [
+    "6n_hourly_return",
+    "6a_hourly_z_pipeline",
+    "6e_daily_z_score",
+    "enableTLTZScoreHour",
+    "enableDOM",
+    "enableN7Bar",
+    "NG Daily Z Score",
+    "ng_daily_return",
+    "ibs_pct",
+    "cl_hourly_return_pipeline",
+    "prev_ibs",
+    "prev_ibs_pct",
+    "prev_daily_ibs",
+    "enableEvenOdd",
+    "enableInsideBar",
+    "allowedDOW",
+    "enableTLTReturnHour"
+  ],
+  "Score_Metric": "Sharpe",
+  "Holdout": {
+    "Sharpe": 3.3144428952942135,
+    "DSR": 1.0,
+    "PF": 2.0747357171741174,
+    "Trades": 482.0,
+    "Thr": 0.55,
+    "Total_PnL_USD": 18604.750000000844,
+    "Era_Positive": 1.0,
+    "Era_Positive_Count": 1.0,
+    "Era_Count": 1.0,
+    "Sortino": 3.3968981105690568,
+    "Max_Drawdown_USD": 1547.0858391511865,
+    "Max_Drawdown_Pct": 0.01280811034754329
+  },
+  "Holdout_Folds": [
+    {
+      "Fold": 1,
+      "Sharpe": 3.2340464871078543,
+      "Sortino": 3.825143875471558,
+      "Max_Drawdown_Pct": 0.012560576626664407,
+      "Max_Drawdown_USD": 1349.8550578767317,
+      "Trades": 272,
+      "Threshold": 0.5,
+      "Rows": 529
+    },
+    {
+      "Fold": 2,
+      "Sharpe": 1.8234095454443513,
+      "Sortino": 1.180484168459352,
+      "Max_Drawdown_Pct": 0.011340850141664117,
+      "Max_Drawdown_USD": 1203.4461940186156,
+      "Trades": 137,
+      "Threshold": 0.6,
+      "Rows": 544
+    },
+    {
+      "Fold": 3,
+      "Sharpe": 2.5697663835957556,
+      "Sortino": 2.2678099854110094,
+      "Max_Drawdown_Pct": 0.006909828547445255,
+      "Max_Drawdown_USD": 755.0131767928397,
+      "Trades": 223,
+      "Threshold": 0.5,
+      "Rows": 538
+    },
+    {
+      "Fold": 4,
+      "Sharpe": 2.4598770004790484,
+      "Sortino": 2.325669639287962,
+      "Max_Drawdown_Pct": 0.006909828547445122,
+      "Max_Drawdown_USD": 755.3083869284455,
+      "Trades": 211,
+      "Threshold": 0.5,
+      "Rows": 535
+    },
+    {
+      "Fold": 5,
+      "Sharpe": 3.0928736907511944,
+      "Sortino": 3.047120653320986,
+      "Max_Drawdown_Pct": 0.012345519679025887,
+      "Max_Drawdown_USD": 1359.8105616848625,
+      "Trades": 216,
+      "Threshold": 0.55,
+      "Rows": 553
+    },
+    {
+      "Fold": 6,
+      "Sharpe": 2.2405132726193044,
+      "Sortino": 1.9160320596667062,
+      "Max_Drawdown_Pct": 0.010117991604635208,
+      "Max_Drawdown_USD": 1040.260749002453,
+      "Trades": 208,
+      "Threshold": 0.55,
+      "Rows": 547
+    },
+    {
+      "Fold": 7,
+      "Sharpe": 2.0312969691038587,
+      "Sortino": 1.4459621254184998,
+      "Max_Drawdown_Pct": 0.010422956328764032,
+      "Max_Drawdown_USD": 1075.1108570340439,
+      "Trades": 178,
+      "Threshold": 0.6,
+      "Rows": 544
+    },
+    {
+      "Fold": 8,
+      "Sharpe": 2.520186815195761,
+      "Sortino": 2.4635250510968545,
+      "Max_Drawdown_Pct": 0.013197449974499162,
+      "Max_Drawdown_USD": 1379.0322895829595,
+      "Trades": 243,
+      "Threshold": 0.55,
+      "Rows": 562
+    },
+    {
+      "Fold": 9,
+      "Sharpe": 2.2152992677224925,
+      "Sortino": 1.4402769753962763,
+      "Max_Drawdown_Pct": 0.016462411991015502,
+      "Max_Drawdown_USD": 1706.9420724030497,
+      "Trades": 153,
+      "Threshold": 0.6,
+      "Rows": 559
+    },
+    {
+      "Fold": 10,
+      "Sharpe": 0.354808184165305,
+      "Sortino": 0.19104261523723276,
+      "Max_Drawdown_Pct": 0.005436418865172481,
+      "Max_Drawdown_USD": 544.1559159558237,
+      "Trades": 48,
+      "Threshold": 0.65,
+      "Rows": 553
+    }
+  ]
+}

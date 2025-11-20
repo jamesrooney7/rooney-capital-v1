@@ -1,0 +1,161 @@
+{
+  "Symbol": "PL",
+  "Sharpe": 5.3600038890673325,
+  "Deflated_Sharpe": null,
+  "Profit_Factor": 3.7703504253494122,
+  "Trades": 356,
+  "Prod_Threshold": 0.625,
+  "Guardrails": {
+    "Trades": 500,
+    "Era_Positive_Count": 4,
+    "Era_Count": 5
+  },
+  "Params": {
+    "n_estimators": 600,
+    "min_samples_leaf": 50,
+    "max_depth": null,
+    "max_features": 0.3,
+    "bootstrap": false,
+    "max_samples": null,
+    "class_weight": "balanced_subsample",
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "Features": [
+    "ibs",
+    "6e_hourly_z_pipeline",
+    "6a_hourly_z_pipeline",
+    "6n_daily_return_pipeline",
+    "vix_daily_return",
+    "6N Hourly Return",
+    "ibs_percentile",
+    "enableBegWeek",
+    "prev_ibs",
+    "prev_ibs_pct",
+    "ng_hourly_z_score",
+    "enableCLReturnHour",
+    "domDay",
+    "enableN7Bar",
+    "enableEvenOdd",
+    "ng_daily_return",
+    "NG Daily Z Score",
+    "enableCLReturnDay"
+  ],
+  "Score_Metric": "Sharpe",
+  "Holdout": {
+    "Sharpe": 5.004470284474778,
+    "DSR": 1.0,
+    "PF": 3.320648424925385,
+    "Trades": 430.0,
+    "Thr": 0.6,
+    "Total_PnL_USD": 60555.000000001855,
+    "Era_Positive": 1.0,
+    "Era_Positive_Count": 1.0,
+    "Era_Count": 1.0,
+    "Sortino": 5.930809929189255,
+    "Max_Drawdown_USD": 6701.922665734368,
+    "Max_Drawdown_Pct": 0.028175570882708403
+  },
+  "Holdout_Folds": [
+    {
+      "Fold": 1,
+      "Sharpe": 4.219014901435664,
+      "Sortino": 5.796408327977774,
+      "Max_Drawdown_Pct": 0.047932350764284405,
+      "Max_Drawdown_USD": 7467.726172304974,
+      "Trades": 260,
+      "Threshold": 0.5,
+      "Rows": 546
+    },
+    {
+      "Fold": 2,
+      "Sharpe": 3.4584845821419985,
+      "Sortino": 3.354108585845371,
+      "Max_Drawdown_Pct": 0.04943201351474305,
+      "Max_Drawdown_USD": 6509.920047676162,
+      "Trades": 156,
+      "Threshold": 0.6,
+      "Rows": 543
+    },
+    {
+      "Fold": 3,
+      "Sharpe": 2.9148462088253373,
+      "Sortino": 2.5176495537504127,
+      "Max_Drawdown_Pct": 0.024770638576312374,
+      "Max_Drawdown_USD": 3679.4439464730676,
+      "Trades": 119,
+      "Threshold": 0.65,
+      "Rows": 524
+    },
+    {
+      "Fold": 4,
+      "Sharpe": 3.72439127292214,
+      "Sortino": 3.233798086151097,
+      "Max_Drawdown_Pct": 0.01323467574351868,
+      "Max_Drawdown_USD": 2030.7773044476635,
+      "Trades": 171,
+      "Threshold": 0.6,
+      "Rows": 550
+    },
+    {
+      "Fold": 5,
+      "Sharpe": 4.683673648976444,
+      "Sortino": 4.98162696400056,
+      "Max_Drawdown_Pct": 0.03396727052769841,
+      "Max_Drawdown_USD": 4140.295325332379,
+      "Trades": 177,
+      "Threshold": 0.6,
+      "Rows": 555
+    },
+    {
+      "Fold": 6,
+      "Sharpe": 3.2800668840937046,
+      "Sortino": 2.919440252717147,
+      "Max_Drawdown_Pct": 0.025722825025661682,
+      "Max_Drawdown_USD": 3714.5660555482027,
+      "Trades": 175,
+      "Threshold": 0.6,
+      "Rows": 536
+    },
+    {
+      "Fold": 7,
+      "Sharpe": 3.4487654386815207,
+      "Sortino": 2.9231114079339955,
+      "Max_Drawdown_Pct": 0.02078790139144599,
+      "Max_Drawdown_USD": 2284.760765876068,
+      "Trades": 179,
+      "Threshold": 0.6,
+      "Rows": 562
+    },
+    {
+      "Fold": 8,
+      "Sharpe": 3.7414310952257264,
+      "Sortino": 4.891670419601914,
+      "Max_Drawdown_Pct": 0.03844941273050311,
+      "Max_Drawdown_USD": 3877.3528560597915,
+      "Trades": 177,
+      "Threshold": 0.6,
+      "Rows": 533
+    },
+    {
+      "Fold": 9,
+      "Sharpe": 4.643538920611602,
+      "Sortino": 4.581397820688229,
+      "Max_Drawdown_Pct": 0.029670548351702665,
+      "Max_Drawdown_USD": 2993.376862200428,
+      "Trades": 167,
+      "Threshold": 0.6,
+      "Rows": 559
+    },
+    {
+      "Fold": 10,
+      "Sharpe": 5.106765273328865,
+      "Sortino": 5.359914386206172,
+      "Max_Drawdown_Pct": 0.02477063857631231,
+      "Max_Drawdown_USD": 2907.280557053513,
+      "Trades": 115,
+      "Threshold": 0.65,
+      "Rows": 540
+    }
+  ]
+}

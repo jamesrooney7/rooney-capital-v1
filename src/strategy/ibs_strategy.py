@@ -2259,14 +2259,14 @@ class IbsStrategy(bt.Strategy):
         pct = safe_div(prev - prev_prev, prev_prev, zero=None)
         return pct * 100 if pct is not None else None
 
-    def prev_bar_pct(self):
+    def prev_bar_pct(self, intraday_ago: int = 0):
         """Return the previous bar's percent change for the configured feed."""
 
         data = getattr(self, "prev_bar_pct_data", None)
         if data is None or len(data) < 3:
             return None
 
-        base_ago = timeframe_ago(data=data)
+        base_ago = timeframe_ago(data=data, intraday_ago=intraday_ago)
         last_close = line_val(data.close, ago=base_ago)
         prior_close = line_val(data.close, ago=base_ago - 1)
         if None in (last_close, prior_close):
@@ -2277,7 +2277,7 @@ class IbsStrategy(bt.Strategy):
         pct = safe_div(last_close - prior_close, prior_close, zero=None)
         return pct * 100 if pct is not None else None
 
-    def _calc_return_value(self, meta: dict[str, object]) -> float | None:
+    def _calc_return_value(self, meta: dict[str, object], intraday_ago: int = 0) -> float | None:
         """Compute and cache the percent return for a return filter."""
 
         line = meta.get("line")
@@ -2292,6 +2292,7 @@ class IbsStrategy(bt.Strategy):
                 data.datetime,
                 data=data,
                 timeframe=meta.get("timeframe"),
+                intraday_ago=intraday_ago,
             )
             if dt_num is not None and meta.get("last_dt") == dt_num:
                 cached = meta.get("last_value")
@@ -2307,6 +2308,7 @@ class IbsStrategy(bt.Strategy):
                 line,
                 data=data,
                 timeframe=meta.get("timeframe"),
+                intraday_ago=intraday_ago,
             )
             if val is None:
                 val = timeframed_line_val(
@@ -2314,7 +2316,7 @@ class IbsStrategy(bt.Strategy):
                     data=data,
                     timeframe=meta.get("timeframe"),
                     daily_ago=0,
-                    intraday_ago=0,
+                    intraday_ago=intraday_ago,
                 )
             if val is None or math.isnan(val):
                 # Debug: Why did indicator line read fail?
@@ -2734,7 +2736,7 @@ class IbsStrategy(bt.Strategy):
     ) -> tuple[float | None, float | None]:
         """Publish the latest cross return values and return them."""
 
-        raw_val = self._calc_return_value(meta)
+        raw_val = self._calc_return_value(meta, intraday_ago=intraday_ago)
         numeric = self._coerce_numeric(raw_val)
 
         pipeline_line = meta.get("line")
@@ -3362,7 +3364,7 @@ class IbsStrategy(bt.Strategy):
                     pct_source=raw,
                 )
             elif key in {"enablePrevBarPct", "prev_bar_pct"}:
-                raw = self.prev_bar_pct()
+                raw = self.prev_bar_pct(intraday_ago=intraday_ago)
                 stored = float(raw) if raw is not None else float("nan")
                 record_continuous(
                     "prev_bar_pct",
@@ -3373,13 +3375,17 @@ class IbsStrategy(bt.Strategy):
                     pct_source=raw,
                 )
             elif key in {"enableIBSEntry", "enableIBSExit", "ibs"}:
-                raw = self.ibs()
+                # CRITICAL: Calculate IBS from PREVIOUS bar to avoid look-ahead bias
+                # When collecting features with intraday_ago=-1, we want IBS of bar T-1,
+                # not the current bar T (whose close is not yet known)
+                # Simply pass through the intraday_ago offset to _calc_ibs
+                raw = self._calc_ibs(self.hourly, ago=intraday_ago)
                 record_continuous(
                     "ibs",
                     key,
                     raw,
                     data=self.hourly,
-                    intraday_offset=0,
+                    intraday_offset=intraday_ago,
                     pct_source=raw,
                 )
             elif key in {"enableDailyIBS", "daily_ibs"}:

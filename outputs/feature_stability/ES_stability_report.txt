@@ -1,0 +1,230 @@
+================================================================================
+FEATURE STABILITY ANALYSIS REPORT
+================================================================================
+
+SUMMARY
+--------------------------------------------------------------------------------
+Total features analyzed: 69
+Time windows: 6
+
+  2010-2013: 30 features selected
+  2011-2014: 30 features selected
+  2012-2015: 30 features selected
+  2013-2016: 30 features selected
+  2014-2017: 30 features selected
+  2015-2018: 30 features selected
+
+HIGH VARIANCE FEATURES (REVIEW RECOMMENDED)
+--------------------------------------------------------------------------------
+These features show high coefficient of variation in importance
+across different time periods, suggesting regime-dependence.
+
+Found 8 high variance features:
+
+  ibs                                      | CV=0.77 | Selection=33.3% | MeanImp=0.0167
+  ym_z_score_hour                          | CV=0.57 | Selection=66.7% | MeanImp=0.0252
+  enableHourlyATRPercentile                | CV=0.56 | Selection=33.3% | MeanImp=0.0547
+  6c_daily_z_pipeline                      | CV=0.56 | Selection=100.0% | MeanImp=0.0877
+  6b_z_score_hour                          | CV=0.55 | Selection=83.3% | MeanImp=0.0991
+  si_daily_z_score                         | CV=0.55 | Selection=50.0% | MeanImp=0.0428
+  tlt_hourly_return                        | CV=0.51 | Selection=83.3% | MeanImp=0.0391
+  nq_hourly_return                         | CV=0.51 | Selection=83.3% | MeanImp=0.0333
+
+INCONSISTENTLY SELECTED FEATURES
+--------------------------------------------------------------------------------
+These features are sometimes selected, sometimes not,
+suggesting they may not be reliably predictive.
+
+Found 36 inconsistent features:
+
+  ibs                                      | Selected in 2/6 windows | CV=0.77
+  ym_z_score_hour                          | Selected in 4/6 windows | CV=0.57
+  enableHourlyATRPercentile                | Selected in 2/6 windows | CV=0.56
+  si_daily_z_score                         | Selected in 3/6 windows | CV=0.55
+  prev_day_pct                             | Selected in 3/6 windows | CV=0.47
+  6m_hourly_z_score                        | Selected in 3/6 windows | CV=0.44
+  n7_bar                                   | Selected in 4/6 windows | CV=0.44
+  6b_daily_z_pipeline                      | Selected in 3/6 windows | CV=0.44
+  enableBegWeek                            | Selected in 4/6 windows | CV=0.41
+  rty_z_score_day                          | Selected in 4/6 windows | CV=0.40
+  secondary_rsi_percentile                 | Selected in 2/6 windows | CV=0.39
+  ym_hourly_return                         | Selected in 2/6 windows | CV=0.39
+  pricez                                   | Selected in 4/6 windows | CV=0.36
+  enableDOM                                | Selected in 4/6 windows | CV=0.36
+  dvolz_pct                                | Selected in 3/6 windows | CV=0.35
+  ema20                                    | Selected in 4/6 windows | CV=0.34
+  tlt_hourly_z_pipeline                    | Selected in 2/6 windows | CV=0.28
+  enableATRZ                               | Selected in 2/6 windows | CV=0.27
+  bb_high_d                                | Selected in 4/6 windows | CV=0.27
+  ng_daily_return                          | Selected in 3/6 windows | CV=0.26
+  ... and 16 more
+
+STABLE FEATURES (HIGH CONFIDENCE)
+--------------------------------------------------------------------------------
+These features are consistently selected with low variance,
+suggesting robust predictive power across regimes.
+
+Found 3 stable features:
+
+  prev_day_pct_pct                         | Selection=83.3% | CV=0.29 | MeanImp=0.0291
+  prev_ibs                                 | Selection=100.0% | CV=0.26 | MeanImp=0.0284
+  pair_z_pct                               | Selection=83.3% | CV=0.18 | MeanImp=0.0344
+
+CURRENCY FEATURES (POTENTIALLY REGIME-DEPENDENT)
+--------------------------------------------------------------------------------
+Currencies are known to change behavior across carry trade,
+crisis, and QE regimes. Consider removing if unstable.
+
+Found 19 currency features:
+
+  6c_daily_z_pipeline                      | Selection=100.0% | CV=0.56
+  6b_z_score_hour                          | Selection=83.3% | CV=0.55
+  6m_hourly_z_score                        | Selection=50.0% | CV=0.44
+  6b_daily_z_pipeline                      | Selection=50.0% | CV=0.44
+  6j_z_score_day                           | Selection=83.3% | CV=0.36
+  6m_daily_z_pipeline                      | Selection=50.0% | CV=0.24
+  6b_z_score_day                           | Selection=66.7% | CV=0.21
+  6j_hourly_return                         | Selection=33.3% | CV=0.20
+  6e_hourly_z_score                        | Selection=50.0% | CV=0.16
+  6m_hourly_z_pipeline                     | Selection=66.7% | CV=0.15
+  6e_daily_return_pipeline                 | Selection=33.3% | CV=0.00
+  6b_hourly_return_pipeline                | Selection=16.7% | CV=0.00
+  6a_hourly_return                         | Selection=16.7% | CV=0.00
+  6b_hourly_return                         | Selection=16.7% | CV=0.00
+  6j_daily_return_pipeline                 | Selection=16.7% | CV=0.00
+  6e_hourly_return_pipeline                | Selection=16.7% | CV=0.00
+  6e_hourly_return                         | Selection=16.7% | CV=0.00
+  6c_hourly_return                         | Selection=16.7% | CV=0.00
+  6n_hourly_z_score                        | Selection=16.7% | CV=0.00
+
+METAL/COMMODITY FEATURES
+--------------------------------------------------------------------------------
+Metals and commodities can be regime-dependent (e.g., inflation cycles).
+
+Found 13 metal/commodity features:
+
+  si_daily_z_score                         | Selection=50.0% | CV=0.55
+  secondary_rsi_percentile                 | Selection=33.3% | CV=0.39
+  si_z_score_day                           | Selection=100.0% | CV=0.32
+  ng_daily_return                          | Selection=50.0% | CV=0.26
+  hg_daily_z_score                         | Selection=50.0% | CV=0.18
+  gc_hourly_return_pipeline                | Selection=16.7% | CV=0.00
+  gc_daily_z_pipeline                      | Selection=16.7% | CV=0.00
+  pl_daily_z_pipeline                      | Selection=16.7% | CV=0.00
+  pl_hourly_z_pipeline                     | Selection=16.7% | CV=0.00
+  ng_z_score_hour                          | Selection=16.7% | CV=0.00
+  gc_hourly_z_score                        | Selection=16.7% | CV=0.00
+  hg_daily_return                          | Selection=16.7% | CV=0.00
+  rsi_entry                                | Selection=16.7% | CV=0.00
+
+RECOMMENDATIONS
+--------------------------------------------------------------------------------
+
+1. REMOVE: Features with CV > 0.7 and selection rate < 0.5
+   → These are highly unstable and unreliable
+
+   Suggested removals:
+     - ibs
+
+2. REVIEW: Currency features with selection rate < 0.6
+   → Known regime-dependence, consider removing
+
+   Currency features to review:
+     - 6m_hourly_z_score (selected 50.0%)
+     - 6b_daily_z_pipeline (selected 50.0%)
+     - 6m_daily_z_pipeline (selected 50.0%)
+     - 6j_hourly_return (selected 33.3%)
+     - 6e_hourly_z_score (selected 50.0%)
+     - 6e_daily_return_pipeline (selected 33.3%)
+     - 6b_hourly_return_pipeline (selected 16.7%)
+     - 6a_hourly_return (selected 16.7%)
+     - 6b_hourly_return (selected 16.7%)
+     - 6j_daily_return_pipeline (selected 16.7%)
+     - 6e_hourly_return_pipeline (selected 16.7%)
+     - 6e_hourly_return (selected 16.7%)
+     - 6c_hourly_return (selected 16.7%)
+     - 6n_hourly_z_score (selected 16.7%)
+
+3. KEEP: Stable features with selection rate >= 0.8 and CV < 0.3
+   → These are robust across regimes
+
+
+================================================================================
+FULL FEATURE STABILITY TABLE
+================================================================================
+
+Feature                                  |  SelRate |     CV |  MeanImp |   StdImp |  RankStd |  N/Total
+------------------------------------------------------------------------------------------------------------------------
+ibs                                      |    33.3% |   0.77 |   0.0167 |   0.0129 |     7.50 |   2/  6
+ym_z_score_hour                          |    66.7% |   0.57 |   0.0252 |   0.0144 |     7.53 |   4/  6
+enableHourlyATRPercentile                |    33.3% |   0.56 |   0.0547 |   0.0307 |     9.00 |   2/  6
+6c_daily_z_pipeline                      |   100.0% |   0.56 |   0.0877 |   0.0490 |     4.85 |   6/  6
+6b_z_score_hour                          |    83.3% |   0.55 |   0.0991 |   0.0544 |     5.71 |   5/  6
+si_daily_z_score                         |    50.0% |   0.55 |   0.0428 |   0.0235 |    11.34 |   3/  6
+tlt_hourly_return                        |    83.3% |   0.51 |   0.0391 |   0.0199 |     9.74 |   5/  6
+nq_hourly_return                         |    83.3% |   0.51 |   0.0333 |   0.0169 |     9.58 |   5/  6
+prev_day_pct                             |    50.0% |   0.47 |   0.0287 |   0.0134 |     8.65 |   3/  6
+dist_z                                   |    83.3% |   0.45 |   0.0309 |   0.0139 |     8.17 |   5/  6
+6m_hourly_z_score                        |    50.0% |   0.44 |   0.0384 |   0.0170 |     7.54 |   3/  6
+n7_bar                                   |    66.7% |   0.44 |   0.0584 |   0.0259 |     8.26 |   4/  6
+6b_daily_z_pipeline                      |    50.0% |   0.44 |   0.0171 |   0.0075 |     6.02 |   3/  6
+enableBegWeek                            |    66.7% |   0.41 |   0.0517 |   0.0210 |     4.74 |   4/  6
+rty_z_score_day                          |    66.7% |   0.40 |   0.0205 |   0.0082 |     4.74 |   4/  6
+secondary_rsi_percentile                 |    33.3% |   0.39 |   0.0653 |   0.0256 |     4.50 |   2/  6
+ym_hourly_return                         |    33.3% |   0.39 |   0.0495 |   0.0192 |     3.50 |   2/  6
+pricez                                   |    66.7% |   0.36 |   0.0830 |   0.0301 |     1.79 |   4/  6
+6j_z_score_day                           |    83.3% |   0.36 |   0.0269 |   0.0096 |     5.10 |   5/  6
+enableDOM                                |    66.7% |   0.36 |   0.0351 |   0.0125 |     6.65 |   4/  6
+dvolz_pct                                |    50.0% |   0.35 |   0.0123 |   0.0044 |     3.09 |   3/  6
+ema20                                    |    66.7% |   0.34 |   0.0218 |   0.0075 |     3.24 |   4/  6
+si_z_score_day                           |   100.0% |   0.32 |   0.0446 |   0.0145 |     7.45 |   6/  6
+prev_day_pct_pct                         |    83.3% |   0.29 |   0.0291 |   0.0086 |     6.92 |   5/  6
+tlt_hourly_z_pipeline                    |    33.3% |   0.28 |   0.0209 |   0.0058 |     2.00 |   2/  6
+enableATRZ                               |    33.3% |   0.27 |   0.0328 |   0.0088 |     7.00 |   2/  6
+bb_high_d                                |    66.7% |   0.27 |   0.0272 |   0.0073 |     3.83 |   4/  6
+prev_ibs                                 |   100.0% |   0.26 |   0.0284 |   0.0073 |     5.00 |   6/  6
+ng_daily_return                          |    50.0% |   0.26 |   0.0278 |   0.0071 |     4.50 |   3/  6
+6m_daily_z_pipeline                      |    50.0% |   0.24 |   0.0106 |   0.0026 |     0.47 |   3/  6
+nq_daily_return_pipeline                 |    50.0% |   0.24 |   0.0125 |   0.0030 |     0.94 |   3/  6
+6b_z_score_day                           |    66.7% |   0.21 |   0.0489 |   0.0101 |     2.24 |   4/  6
+6j_hourly_return                         |    33.3% |   0.20 |   0.0059 |   0.0012 |     0.50 |   2/  6
+datrz_pct                                |    50.0% |   0.19 |   0.0290 |   0.0054 |     2.62 |   3/  6
+pair_z_pct                               |    83.3% |   0.18 |   0.0344 |   0.0063 |     2.06 |   5/  6
+hg_daily_z_score                         |    50.0% |   0.18 |   0.0256 |   0.0047 |     3.56 |   3/  6
+enableRSIEntry2Len                       |    33.3% |   0.18 |   0.0283 |   0.0050 |     2.00 |   2/  6
+es_daily_z_score                         |    33.3% |   0.16 |   0.0210 |   0.0035 |     3.50 |   2/  6
+6e_hourly_z_score                        |    50.0% |   0.16 |   0.0275 |   0.0043 |     3.30 |   3/  6
+rsi                                      |    33.3% |   0.15 |   0.0092 |   0.0014 |     2.00 |   2/  6
+rty_hourly_return                        |    33.3% |   0.15 |   0.0248 |   0.0037 |     0.00 |   2/  6
+6m_hourly_z_pipeline                     |    66.7% |   0.15 |   0.0202 |   0.0030 |     3.49 |   4/  6
+pair_ibs_percentile                      |    33.3% |   0.14 |   0.0290 |   0.0041 |     3.50 |   2/  6
+rty_daily_return_pipeline                |    50.0% |   0.09 |   0.0157 |   0.0014 |     1.25 |   3/  6
+ser                                      |    33.3% |   0.06 |   0.0243 |   0.0014 |     3.50 |   2/  6
+6e_daily_return_pipeline                 |    33.3% |   0.00 |   0.0041 |   0.0000 |     0.00 |   2/  6
+6b_hourly_return_pipeline                |    16.7% |   0.00 |   0.0067 |   0.0000 |     0.00 |   1/  6
+6a_hourly_return                         |    16.7% |   0.00 |   0.0081 |   0.0000 |     0.00 |   1/  6
+6b_hourly_return                         |    16.7% |   0.00 |   0.0258 |   0.0000 |     0.00 |   1/  6
+6j_daily_return_pipeline                 |    16.7% |   0.00 |   0.0035 |   0.0000 |     0.00 |   1/  6
+6e_hourly_return_pipeline                |    16.7% |   0.00 |   0.0052 |   0.0000 |     0.00 |   1/  6
+6e_hourly_return                         |    16.7% |   0.00 |   0.0053 |   0.0000 |     0.00 |   1/  6
+6c_hourly_return                         |    16.7% |   0.00 |   0.0175 |   0.0000 |     0.00 |   1/  6
+gc_hourly_return_pipeline                |    16.7% |   0.00 |   0.0073 |   0.0000 |     0.00 |   1/  6
+gc_daily_z_pipeline                      |    16.7% |   0.00 |   0.0143 |   0.0000 |     0.00 |   1/  6
+es_hourly_return_pipeline                |    16.7% |   0.00 |   0.0051 |   0.0000 |     0.00 |   1/  6
+es_hourly_return                         |    16.7% |   0.00 |   0.0211 |   0.0000 |     0.00 |   1/  6
+es_daily_return_pipeline                 |    16.7% |   0.00 |   0.0053 |   0.0000 |     0.00 |   1/  6
+enableIBSEntry                           |    16.7% |   0.00 |   0.0332 |   0.0000 |     0.00 |   1/  6
+6n_hourly_z_score                        |    16.7% |   0.00 |   0.0260 |   0.0000 |     0.00 |   1/  6
+atr_z_percentile                         |    16.7% |   0.00 |   0.0190 |   0.0000 |     0.00 |   1/  6
+pl_daily_z_pipeline                      |    16.7% |   0.00 |   0.0164 |   0.0000 |     0.00 |   1/  6
+pl_hourly_z_pipeline                     |    16.7% |   0.00 |   0.0127 |   0.0000 |     0.00 |   1/  6
+nq_z_score_day                           |    16.7% |   0.00 |   0.0126 |   0.0000 |     0.00 |   1/  6
+ng_z_score_hour                          |    16.7% |   0.00 |   0.0374 |   0.0000 |     0.00 |   1/  6
+gc_hourly_z_score                        |    16.7% |   0.00 |   0.0200 |   0.0000 |     0.00 |   1/  6
+hg_daily_return                          |    16.7% |   0.00 |   0.0125 |   0.0000 |     0.00 |   1/  6
+rsi_entry                                |    16.7% |   0.00 |   0.0214 |   0.0000 |     0.00 |   1/  6
+ym_daily_z_score                         |    16.7% |   0.00 |   0.0308 |   0.0000 |     0.00 |   1/  6
+
+================================================================================
+END OF REPORT
+================================================================================

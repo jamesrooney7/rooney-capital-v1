@@ -1,0 +1,67 @@
+{
+  "symbol": "ES",
+  "threshold": 0.5,
+  "params": {
+    "n_estimators": 1200,
+    "max_depth": 5,
+    "min_samples_leaf": 50,
+    "max_features": 0.5,
+    "bootstrap": false,
+    "class_weight": "balanced_subsample",
+    "max_samples": null,
+    "n_jobs": -1,
+    "random_state": 42
+  },
+  "features": [
+    "pricez",
+    "nq_hourly_return",
+    "ym_hourly_return",
+    "enableATRZ",
+    "n7_bar",
+    "tlt_hourly_return",
+    "enableBegWeek",
+    "pair_ibs_percentile",
+    "dist_z",
+    "prev_day_pct",
+    "ym_daily_z_score",
+    "bb_high_d",
+    "rty_hourly_return",
+    "ser",
+    "datrz_pct",
+    "prev_ibs",
+    "prev_day_pct_pct",
+    "pair_z_pct",
+    "es_hourly_return",
+    "ema20",
+    "ym_z_score_hour",
+    "rty_z_score_day",
+    "tlt_hourly_z_pipeline",
+    "enableDOM",
+    "enableIBSEntry"
+  ],
+  "train_period": {
+    "start": "2010-01-18 08:00:00",
+    "end": "2018-12-30 22:00:00",
+    "trades": 10272
+  },
+  "threshold_period": {
+    "start": "2018-12-31 08:00:00",
+    "end": "2020-12-30 08:00:00",
+    "trades": 2420
+  },
+  "threshold_optimization": {
+    "threshold": 0.5,
+    "trades": 1885,
+    "sharpe": 0.3674786245032128,
+    "profit_factor": 1.0319251562918423,
+    "win_rate": 0.5946949602122016,
+    "note": "Fixed threshold (0.50) used - no optimization to avoid bias"
+  },
+  "model_metadata": {
+    "rs_trials": 30,
+    "bo_trials": 50,
+    "embargo_days": 2,
+    "screen_method": "importance",
+    "seed": 42
+  }
+}

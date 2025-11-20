@@ -1,0 +1,225 @@
+{
+  "total_return_dollars": 1087396.6623500003,
+  "total_return_pct": 1087.3966623500003,
+  "cagr_pct": 246.05332653362572,
+  "avg_daily_return_pct": 0.3444072017592329,
+  "avg_monthly_return_pct": 7.23255123694389,
+  "avg_yearly_return_pct": 86.79061484332668,
+  "volatility_daily_pct": 0.9552235617346716,
+  "volatility_annual_pct": 15.163703944915774,
+  "downside_deviation_annual_pct": 8.378124888788765,
+  "sharpe_ratio": 16.226466002465365,
+  "sortino_ratio": 29.3685436538292,
+  "max_drawdown_dollars": -10957.478449999937,
+  "max_drawdown_pct": -3.6867089837977027,
+  "avg_drawdown_dollars": -2351.8256266798453,
+  "avg_drawdown_pct": -0.5041472472932599,
+  "calmar_ratio": 66.74064256630439,
+  "pct_time_underwater": 34.657534246575345,
+  "avg_recovery_days": 2.7752808988764044,
+  "max_recovery_days": "11",
+  "max_drawdown_duration_days": 11,
+  "win_rate_pct": 63.923182441700966,
+  "avg_win_dollars": 2829.2867556866963,
+  "avg_loss_dollars": 1698.9041602941186,
+  "win_loss_ratio": 1.6653598371298843,
+  "profit_factor": 5.706306500753868,
+  "expectancy_daily_dollars": 1491.6277947187934,
+  "largest_win_dollars": 18408.843150000175,
+  "largest_loss_dollars": 10051.54540000006,
+  "total_winning_days": 466,
+  "total_losing_days": 136,
+  "skewness": 4.684793358683492,
+  "kurtosis": 39.422944645944064,
+  "var_95_pct": -0.4025453706406723,
+  "var_99_pct": -1.1409161274195676,
+  "cvar_95_pct": -0.9547478683730244,
+  "cvar_99_pct": -2.0863000107046434,
+  "worst_day_pct": -2.9912489581850443,
+  "best_day_pct": 10.43514499859073,
+  "omega_ratio": 6.177780558931701,
+  "gain_to_pain_ratio": 1.8275209158215455,
+  "ulcer_index": 0.4815919022281093,
+  "ulcer_performance_index": 510.91666075622857,
+  "monthly_win_rate_pct": 100.0,
+  "positive_months": 23,
+  "total_months": 23,
+  "avg_rolling_sharpe_6m": 7.9846291322689344,
+  "std_rolling_sharpe_6m": 1.2398481513953934,
+  "consistency_score_pct": 100.0,
+  "monthly_returns": [
+    {
+      "year": 2023,
+      "month": 2,
+      "month_name": "Feb",
+      "return_pct": 33.12849981199702,
+      "equity": 233012.28125000084
+    },
+    {
+      "year": 2023,
+      "month": 3,
+      "month_name": "Mar",
+      "return_pct": 18.826150563684042,
+      "equity": 276879.52415000094
+    },
+    {
+      "year": 2023,
+      "month": 4,
+      "month_name": "Apr",
+      "return_pct": 18.388404453634234,
+      "equity": 327793.250900001
+    },
+    {
+      "year": 2023,
+      "month": 5,
+      "month_name": "May",
+      "return_pct": 11.161790991591047,
+      "equity": 364380.84845000075
+    },
+    {
+      "year": 2023,
+      "month": 6,
+      "month_name": "Jun",
+      "return_pct": 11.617041422474351,
+      "equity": 406711.12255000084
+    },
+    {
+      "year": 2023,
+      "month": 7,
+      "month_name": "Jul",
+      "return_pct": 12.246552021423174,
+      "equity": 456519.2117500009
+    },
+    {
+      "year": 2023,
+      "month": 8,
+      "month_name": "Aug",
+      "return_pct": 4.70014365173097,
+      "equity": 477976.27050000086
+    },
+    {
+      "year": 2023,
+      "month": 9,
+      "month_name": "Sep",
+      "return_pct": 7.085792891887932,
+      "equity": 511844.679100001
+    },
+    {
+      "year": 2023,
+      "month": 10,
+      "month_name": "Oct",
+      "return_pct": 6.416903015921127,
+      "equity": 544689.2557500008
+    },
+    {
+      "year": 2023,
+      "month": 11,
+      "month_name": "Nov",
+      "return_pct": 8.489904089686018,
+      "equity": 590932.8511500005
+    },
+    {
+      "year": 2023,
+      "month": 12,
+      "month_name": "Dec",
+      "return_pct": 6.782227696768617,
+      "equity": 631011.2626500003
+    },
+    {
+      "year": 2024,
+      "month": 1,
+      "month_name": "Jan",
+      "return_pct": 5.317958772886944,
+      "equity": 664568.1814500006
+    },
+    {
+      "year": 2024,
+      "month": 2,
+      "month_name": "Feb",
+      "return_pct": 4.036809374692973,
+      "equity": 691395.5321000009
+    },
+    {
+      "year": 2024,
+      "month": 3,
+      "month_name": "Mar",
+      "return_pct": 5.030410869789903,
+      "equity": 726175.5681000011
+    },
+    {
+      "year": 2024,
+      "month": 4,
+      "month_name": "Apr",
+      "return_pct": 4.9373616071674675,
+      "equity": 762029.4818000008
+    },
+    {
+      "year": 2024,
+      "month": 5,
+      "month_name": "May",
+      "return_pct": 6.067515897256959,
+      "equity": 808265.7417500006
+    },
+    {
+      "year": 2024,
+      "month": 6,
+      "month_name": "Jun",
+      "return_pct": 3.281263213330976,
+      "equity": 834787.0682000001
+    },
+    {
+      "year": 2024,
+      "month": 7,
+      "month_name": "Jul",
+      "return_pct": 7.581128626783884,
+      "equity": 898073.3496000002
+    },
+    {
+      "year": 2024,
+      "month": 8,
+      "month_name": "Aug",
+      "return_pct": 8.116543451875756,
+      "equity": 970965.8632500003
+    },
+    {
+      "year": 2024,
+      "month": 9,
+      "month_name": "Sep",
+      "return_pct": 6.3659063556681605,
+      "equity": 1032776.6408500002
+    },
+    {
+      "year": 2024,
+      "month": 10,
+      "month_name": "Oct",
+      "return_pct": 7.4484939053896415,
+      "equity": 1109702.9460000002
+    },
+    {
+      "year": 2024,
+      "month": 11,
+      "month_name": "Nov",
+      "return_pct": 5.121340409598241,
+      "equity": 1166534.6114000003
+    },
+    {
+      "year": 2024,
+      "month": 12,
+      "month_name": "Dec",
+      "return_pct": 1.7883782226540745,
+      "equity": 1187396.6623500003
+    }
+  ],
+  "yearly_returns": [
+    {
+      "year": 2023,
+      "return_pct": 531.0112626500003,
+      "equity": 631011.2626500003
+    },
+    {
+      "year": 2024,
+      "return_pct": 88.17360840175803,
+      "equity": 1187396.6623500003
+    }
+  ]
+}
