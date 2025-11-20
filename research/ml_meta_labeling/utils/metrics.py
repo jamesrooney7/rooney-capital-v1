@@ -160,3 +160,113 @@ def calculate_performance_metrics(
     }
 
     return metrics
+
+
+# Regression metrics for ML models
+
+def r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate R² (coefficient of determination).
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        R² score (1.0 = perfect, 0.0 = as good as mean baseline, negative = worse than mean)
+    """
+    if len(y_true) == 0:
+        return 0.0
+
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - y_true.mean()) ** 2)
+
+    if ss_tot == 0:
+        return 0.0
+
+    return 1 - (ss_res / ss_tot)
+
+
+def mean_absolute_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Mean Absolute Error.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        MAE
+    """
+    if len(y_true) == 0:
+        return 0.0
+
+    return np.abs(y_true - y_pred).mean()
+
+
+def root_mean_squared_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Root Mean Squared Error.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        RMSE
+    """
+    if len(y_true) == 0:
+        return 0.0
+
+    return np.sqrt(np.mean((y_true - y_pred) ** 2))
+
+
+def mean_absolute_percentage_error(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Calculate Mean Absolute Percentage Error.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        MAPE (as percentage, 0-100)
+    """
+    if len(y_true) == 0:
+        return 0.0
+
+    # Avoid division by zero
+    mask = y_true != 0
+    if not mask.any():
+        return 0.0
+
+    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+
+
+def calculate_regression_metrics(
+    y_true: np.ndarray,
+    y_pred: np.ndarray
+) -> Dict[str, float]:
+    """
+    Calculate comprehensive regression metrics.
+
+    Args:
+        y_true: True values
+        y_pred: Predicted values
+
+    Returns:
+        Dictionary of metrics
+    """
+    metrics = {
+        'r2': r2_score(y_true, y_pred),
+        'mae': mean_absolute_error(y_true, y_pred),
+        'rmse': root_mean_squared_error(y_true, y_pred),
+        'mape': mean_absolute_percentage_error(y_true, y_pred),
+        'mean_true': y_true.mean(),
+        'mean_pred': y_pred.mean(),
+        'std_true': y_true.std(),
+        'std_pred': y_pred.std(),
+        'n_samples': len(y_true)
+    }
+
+    return metrics
