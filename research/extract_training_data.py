@@ -444,10 +444,11 @@ class FeatureLoggingStrategy(IbsStrategy):
             if order.isbuy():
                 # Entry order completed - capture features
                 try:
-                    # CRITICAL: Use intraday_ago=1 to avoid look-ahead bias!
+                    # CRITICAL: Use intraday_ago=-1 to avoid look-ahead bias!
                     # intraday_ago=0 would use current bar's close (not known at entry)
-                    # intraday_ago=1 uses previous bar's close (known at entry time)
-                    features = self.collect_filter_values(intraday_ago=1)
+                    # intraday_ago=-1 uses previous bar's close (known at entry time)
+                    # NOTE: Backtrader uses NEGATIVE indexing for past bars (ago=-1 is previous)
+                    features = self.collect_filter_values(intraday_ago=-1)
                     entry_time = bt.num2date(self.hourly.datetime[0])
                     entry_price = order.executed.price
 

@@ -2259,14 +2259,14 @@ class IbsStrategy(bt.Strategy):
         pct = safe_div(prev - prev_prev, prev_prev, zero=None)
         return pct * 100 if pct is not None else None
 
-    def prev_bar_pct(self):
+    def prev_bar_pct(self, intraday_ago: int = 0):
         """Return the previous bar's percent change for the configured feed."""
 
         data = getattr(self, "prev_bar_pct_data", None)
         if data is None or len(data) < 3:
             return None
 
-        base_ago = timeframe_ago(data=data)
+        base_ago = timeframe_ago(data=data, intraday_ago=intraday_ago)
         last_close = line_val(data.close, ago=base_ago)
         prior_close = line_val(data.close, ago=base_ago - 1)
         if None in (last_close, prior_close):
@@ -3364,7 +3364,7 @@ class IbsStrategy(bt.Strategy):
                     pct_source=raw,
                 )
             elif key in {"enablePrevBarPct", "prev_bar_pct"}:
-                raw = self.prev_bar_pct()
+                raw = self.prev_bar_pct(intraday_ago=intraday_ago)
                 stored = float(raw) if raw is not None else float("nan")
                 record_continuous(
                     "prev_bar_pct",
@@ -3376,10 +3376,10 @@ class IbsStrategy(bt.Strategy):
                 )
             elif key in {"enableIBSEntry", "enableIBSExit", "ibs"}:
                 # CRITICAL: Calculate IBS from PREVIOUS bar to avoid look-ahead bias
-                # When collecting features with intraday_ago=1, we want IBS of bar T-1,
+                # When collecting features with intraday_ago=-1, we want IBS of bar T-1,
                 # not the current bar T (whose close is not yet known)
-                ago_offset = -1 if intraday_ago > 0 else 0
-                raw = self._calc_ibs(self.hourly, ago=ago_offset)
+                # Simply pass through the intraday_ago offset to _calc_ibs
+                raw = self._calc_ibs(self.hourly, ago=intraday_ago)
                 record_continuous(
                     "ibs",
                     key,
