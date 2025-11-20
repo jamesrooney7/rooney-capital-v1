@@ -113,7 +113,8 @@ def main(args):
         n_clusters=args.n_clusters,
         linkage_method=args.linkage_method,
         rf_n_estimators=args.rf_n_estimators,
-        random_state=args.seed
+        random_state=args.seed,
+        task_type=args.task_type
     )
 
     selected_features, selection_report = feature_selector.select_features(

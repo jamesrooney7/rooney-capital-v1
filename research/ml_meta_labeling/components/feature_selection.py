@@ -9,7 +9,7 @@ import logging
 import numpy as np
 import pandas as pd
 from typing import Tuple, List, Dict, Optional
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import squareform
 
@@ -26,7 +26,8 @@ class FeatureSelection:
         n_clusters: int = FEATURE_SELECTION_DEFAULTS['n_clusters'],
         linkage_method: str = FEATURE_SELECTION_DEFAULTS['linkage_method'],
         rf_n_estimators: int = FEATURE_SELECTION_DEFAULTS['rf_n_estimators'],
-        random_state: int = 42
+        random_state: int = 42,
+        task_type: str = 'classification'
     ):
         """
         Initialize feature selection.
@@ -36,11 +37,13 @@ class FeatureSelection:
             linkage_method: Hierarchical clustering linkage ('ward' or 'complete')
             rf_n_estimators: Number of trees for preliminary Random Forest
             random_state: Random seed for reproducibility
+            task_type: 'classification' or 'regression'
         """
         self.n_clusters = n_clusters
         self.linkage_method = linkage_method
         self.rf_n_estimators = rf_n_estimators
         self.random_state = random_state
+        self.task_type = task_type
 
         # Will be populated by select_features()
         self.correlation_matrix: Optional[pd.DataFrame] = None
@@ -150,13 +153,21 @@ class FeatureSelection:
         """Calculate Mean Decrease Accuracy (MDA) importance using Random Forest."""
         logger.info(f"Calculating MDA importance (n_estimators={self.rf_n_estimators})...")
 
-        # Train Random Forest
-        rf = RandomForestClassifier(
-            n_estimators=self.rf_n_estimators,
-            random_state=self.random_state,
-            n_jobs=-1,
-            oob_score=True
-        )
+        # Train Random Forest (Classifier or Regressor based on task type)
+        if self.task_type == 'classification':
+            rf = RandomForestClassifier(
+                n_estimators=self.rf_n_estimators,
+                random_state=self.random_state,
+                n_jobs=-1,
+                oob_score=True
+            )
+        else:  # regression
+            rf = RandomForestRegressor(
+                n_estimators=self.rf_n_estimators,
+                random_state=self.random_state,
+                n_jobs=-1,
+                oob_score=True
+            )
 
         if sample_weight is not None:
             rf.fit(X, y, sample_weight=sample_weight)
