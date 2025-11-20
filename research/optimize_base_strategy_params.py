@@ -3,11 +3,16 @@
 Base Strategy Parameter Optimization with Walk-Forward Analysis.
 
 This script optimizes the core IBS strategy parameters (entry/exit thresholds,
-ATR-based stops/targets, holding period) to maximize trade volume while
-maintaining minimum quality thresholds.
+ATR-based stops/targets, holding period) to find PROFITABLE base strategies
+that can be further improved by ML meta-labeling.
 
-Primary Goal: Generate MAXIMUM trade volume for downstream ML training
-Success Metric: 3,000-5,000 OOS trades with win rate > 48% and Sharpe > 0.25
+UPDATED Philosophy (Post-Analysis):
+- Base strategy MUST be profitable (Sharpe > 0 OR PF > 1.0)
+- ML can only improve profitable strategies, not fix unprofitable ones
+- Primary Goal: Maximize Sharpe ratio and profit factor
+- Secondary Goal: Sufficient trade volume for ML training (>1000 trades)
+
+Success Metric: Sharpe > 0, PF > 1.0, with 1,000+ OOS trades per window
 
 Usage:
     python research/optimize_base_strategy_params.py --symbol ES
@@ -283,19 +288,19 @@ def calculate_robust_performance(
 
 def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: str) -> float:
     """
-    Objective function that prioritizes volume with light consistency preference.
+    Objective function that requires profitability and optimizes for stability.
 
-    Philosophy:
-    - Base strategy does NOT need to be profitable (ML filter adds profitability)
-    - Primary goal: Maximum trade volume for ML training
-    - Secondary goal: Light consistency across years (avoid boom-bust)
+    NEW Philosophy (Post-Analysis):
+    - Base strategy MUST be profitable (Sharpe > 0 OR PF > 1.0)
+    - ML can only improve profitable strategies, not fix unprofitable ones
+    - Primary goal: Profitability (Sharpe ratio, profit factor)
+    - Secondary goal: Sufficient volume for ML training (>1000 trades)
+    - Tertiary goal: Consistency across years
 
     This function:
     1. Splits training data into yearly sub-periods
-    2. Calculates profit factor variance across years
-    3. Optimizes for: (80% volume) + (20% consistency bonus)
-
-    Returns score to maximize: 80% volume + 20% consistency
+    2. Requires profitability (Sharpe > 0 OR PF > 1.0)
+    3. Optimizes for: Sharpe * sqrt(PF) * volume_factor
 
     Args:
         trial: Optuna trial object
@@ -333,35 +338,40 @@ def objective_function(trial: optuna.Trial, train_data: pd.DataFrame, symbol: st
     if robust_results['total_trades'] < 1000:
         return -999999.0  # Severe penalty - reject trial
 
-    # NOTE: We do NOT require profitability at this stage!
-    # Base strategy was slightly unprofitable (mean -$0.13/trade)
-    # ML filter is what makes it profitable
-    # We just want: (1) volume, (2) light consistency
+    # Constraint 2: MUST BE PROFITABLE
+    # Calculate mean Sharpe across years
+    year_results = robust_results['year_results']
+    if len(year_results) == 0:
+        return -999999.0
+
+    mean_sharpe = np.mean([y['sharpe_ratio'] for y in year_results])
+    mean_pf = robust_results['mean_pf']
+
+    # REJECT if BOTH Sharpe <= 0 AND PF <= 1.0
+    if mean_sharpe <= 0 and mean_pf <= 1.0:
+        return -999999.0  # Reject unprofitable strategies
 
     # 4. CALCULATE OBJECTIVE SCORE
-    # Weighted combination: 80% volume, 20% consistency bonus
+    # Optimize for profitability with volume consideration
 
-    # Volume component (normalize to ~1.0 at 2500 trades)
-    volume_score = robust_results['total_trades'] / 2500.0
+    # Sharpe component (can be negative, but we've filtered out bad cases)
+    sharpe_score = max(0.01, mean_sharpe)  # Floor at 0.01 to avoid division issues
 
-    # Consistency bonus: Reward low variance across years (very light)
-    # We don't want boom-bust strategies, but we're not strict about it
-    # std_pf = 0.0 → bonus of +0.20 (perfectly consistent)
-    # std_pf = 0.5 → bonus of +0.10 (moderate variance)
-    # std_pf = 1.0 → bonus of 0.00 (high variance, no bonus)
-    consistency_bonus = max(0.0, 0.20 - robust_results['std_pf'] * 0.20)
+    # Profit factor component (bounded)
+    pf_score = max(0.1, min(mean_pf, 3.0))  # Bound PF between 0.1 and 3.0
 
-    # Combined score: 80% volume, 20% consistency
-    # This prioritizes volume generation while gently favoring consistency
-    score = 0.80 * volume_score + 0.20 * consistency_bonus
+    # Volume factor: Reward having sufficient trades, but don't over-optimize for volume
+    # Full credit at 2000+ trades, linear scaling below that
+    volume_factor = min(1.0, robust_results['total_trades'] / 2000.0)
 
-    # 5. BONUS FOR HIGH VOLUME
-    if robust_results['total_trades'] >= 3000:
-        score *= 1.3  # 30% bonus
-    elif robust_results['total_trades'] >= 2500:
-        score *= 1.15  # 15% bonus
-    elif robust_results['total_trades'] >= 2000:
-        score *= 1.05  # 5% bonus
+    # Combined score: Sharpe * sqrt(PF) * volume_factor
+    # This prioritizes profitability while ensuring sufficient volume
+    score = sharpe_score * np.sqrt(pf_score) * volume_factor
+
+    # 5. CONSISTENCY BONUS (small)
+    # Reward low variance across years
+    consistency_bonus = max(0.0, 1.0 - robust_results['std_pf'] * 0.2)
+    score *= consistency_bonus
 
     return score
 
