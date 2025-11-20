@@ -32,7 +32,8 @@ class DataPreparation:
         remove_vix: bool = True,
         lambda_decay: float = DATA_DEFAULTS['lambda_decay'],
         min_samples_per_class: int = DATA_DEFAULTS['min_samples_per_class'],
-        missing_value_threshold: float = DATA_DEFAULTS['missing_value_threshold']
+        missing_value_threshold: float = DATA_DEFAULTS['missing_value_threshold'],
+        task_type: str = 'classification'
     ):
         """
         Initialize data preparation pipeline.
@@ -46,6 +47,7 @@ class DataPreparation:
             lambda_decay: Exponential decay rate for recency weighting
             min_samples_per_class: Minimum samples required per class
             missing_value_threshold: Maximum allowed missing value fraction
+            task_type: 'classification' or 'regression' (predict P&L instead of win/loss)
         """
         self.symbol = symbol
         self.data_dir = Path(data_dir)
@@ -55,6 +57,7 @@ class DataPreparation:
         self.lambda_decay = lambda_decay
         self.min_samples_per_class = min_samples_per_class
         self.missing_value_threshold = missing_value_threshold
+        self.task_type = task_type
 
         # Will be populated by load_and_prepare()
         self.raw_df: Optional[pd.DataFrame] = None
@@ -151,20 +154,35 @@ class DataPreparation:
         """Validate data quality."""
         logger.info("Validating data quality...")
 
-        # Check for target column
-        if 'y_binary' not in self.filtered_df.columns:
-            raise ValueError("Target column 'y_binary' not found in data")
+        if self.task_type == 'classification':
+            # Check for target column
+            if 'y_binary' not in self.filtered_df.columns:
+                raise ValueError("Target column 'y_binary' not found in data")
 
-        # Check class balance
-        class_counts = self.filtered_df['y_binary'].value_counts()
-        logger.info(f"Class distribution: {dict(class_counts)}")
+            # Check class balance
+            class_counts = self.filtered_df['y_binary'].value_counts()
+            logger.info(f"Class distribution: {dict(class_counts)}")
 
-        for class_label, count in class_counts.items():
-            if count < self.min_samples_per_class:
-                raise ValueError(
-                    f"Insufficient samples for class {class_label}: "
-                    f"{count} < {self.min_samples_per_class}"
-                )
+            for class_label, count in class_counts.items():
+                if count < self.min_samples_per_class:
+                    raise ValueError(
+                        f"Insufficient samples for class {class_label}: "
+                        f"{count} < {self.min_samples_per_class}"
+                    )
+        else:  # regression
+            # Check for P&L target column
+            if 'y_pnl_usd' not in self.filtered_df.columns:
+                # Try to calculate from y_return
+                if 'y_return' in self.filtered_df.columns:
+                    logger.info("Calculating y_pnl_usd from y_return...")
+                    avg_price = 4500  # Approximate ES price
+                    self.filtered_df['y_pnl_usd'] = self.filtered_df['y_return'] * avg_price * 50
+                else:
+                    raise ValueError("Neither 'y_pnl_usd' nor 'y_return' found in data")
+
+            # Log P&L statistics
+            pnl_stats = self.filtered_df['y_pnl_usd'].describe()
+            logger.info(f"P&L statistics:\n{pnl_stats}")
 
         # Check for all-NaN features
         all_nan_features = [
@@ -274,7 +292,13 @@ class DataPreparation:
             Tuple of (X_features, y_target, sample_weights)
         """
         X = df[self.feature_columns].copy()
-        y = df['y_binary'].copy()
+
+        # Select target based on task type
+        if self.task_type == 'classification':
+            y = df['y_binary'].copy()
+        else:  # regression
+            y = df['y_pnl_usd'].copy()
+
         weights = df['sample_weight'].copy() if 'sample_weight' in df.columns else pd.Series(
             np.ones(len(df)),
             index=df.index
@@ -287,19 +311,31 @@ class DataPreparation:
         if self.filtered_df is None:
             raise ValueError("Must call load_and_prepare() first")
 
-        # Convert numpy types to Python types for JSON serialization
-        class_dist = self.filtered_df['y_binary'].value_counts()
-        class_distribution = {int(k): int(v) for k, v in class_dist.items()}
-
-        return {
+        stats = {
             'symbol': self.symbol,
+            'task_type': self.task_type,
             'total_samples': int(len(self.filtered_df)),
             'n_features': int(len(self.feature_columns)),
             'date_range': {
                 'start': str(self.filtered_df['Date'].min()),
                 'end': str(self.filtered_df['Date'].max())
             },
-            'class_distribution': class_distribution,
             'columns_removed': int(len(self.removed_columns)),
             'columns_kept': int(len(self.filtered_df.columns))
         }
+
+        if self.task_type == 'classification':
+            # Convert numpy types to Python types for JSON serialization
+            class_dist = self.filtered_df['y_binary'].value_counts()
+            class_distribution = {int(k): int(v) for k, v in class_dist.items()}
+            stats['class_distribution'] = class_distribution
+        else:  # regression
+            pnl_stats = self.filtered_df['y_pnl_usd'].describe()
+            stats['pnl_statistics'] = {
+                'mean': float(pnl_stats['mean']),
+                'std': float(pnl_stats['std']),
+                'min': float(pnl_stats['min']),
+                'max': float(pnl_stats['max'])
+            }
+
+        return stats
