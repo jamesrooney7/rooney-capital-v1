@@ -294,14 +294,21 @@ class BaseStrategy(ABC):
         if not self.auto_close_time:
             return False
 
+        # Ensure current_time is a Timestamp (not int from index)
+        if not isinstance(current_time, pd.Timestamp):
+            current_time = pd.Timestamp(current_time)
+
         # Ensure auto_close_time is a string
         auto_close_str = str(self.auto_close_time)
 
         # Parse auto_close_time (e.g., "16:00")
-        hour, minute = map(int, auto_close_str.split(':'))
-        eod_time = current_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
-
-        return current_time >= eod_time
+        try:
+            hour, minute = map(int, auto_close_str.split(':'))
+            eod_time = current_time.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            return current_time >= eod_time
+        except (ValueError, AttributeError):
+            # If parsing fails, don't exit
+            return False
 
     def get_exit(
         self,
@@ -333,7 +340,8 @@ class BaseStrategy(ABC):
         """
         current_bar = data.iloc[current_idx]
         current_price = current_bar['Close']
-        current_time = data.index[current_idx]
+        # Get current_time from datetime column (after reset_index in backtester)
+        current_time = current_bar.get('datetime', data.index[current_idx])
         atr = current_bar.get('atr', 10.0)  # Default ATR if missing
 
         # 1. Strategy-specific exit
