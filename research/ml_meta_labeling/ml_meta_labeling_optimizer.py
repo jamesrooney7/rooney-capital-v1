@@ -496,7 +496,8 @@ if __name__ == "__main__":
     )
 
     # Ensemble
-    parser.add_argument("--use-ensemble", action="store_true", default=True, help="Use ensemble model")
+    parser.add_argument("--no-use-ensemble", action="store_false", dest="use_ensemble", default=True,
+                        help="Disable ensemble model (use single LightGBM instead)")
 
     # Data preparation
     parser.add_argument("--lambda-decay", type=float, default=0.10, help="Exponential decay for sample weights")
