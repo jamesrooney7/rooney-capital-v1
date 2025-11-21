@@ -238,10 +238,14 @@ class Backtester:
         Returns:
             BacktestResults object with full analytics
         """
-        # Get contract specs for tick-based slippage
+        # Get contract specs for tick-based slippage and P&L calculation
         spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.01, "tick_value": 1.0})
         tick_size = spec["tick_size"]
+        tick_value = spec["tick_value"]
         slippage_points = tick_size * self.slippage_ticks
+
+        # Calculate dollar value per point (for ES: $12.50/0.25 = $50/point)
+        point_value = tick_value / tick_size
 
         # Prepare data (calculate indicators)
         data = strategy.prepare_data(data.copy())
@@ -286,7 +290,10 @@ class Backtester:
                     pnl_points = exit_price - entry_price
                     pnl_pct = pnl_points / entry_price
                     commission = 2 * self.commission_per_side  # Round turn
-                    pnl = pnl_points - commission
+
+                    # Convert points to dollars using contract multiplier
+                    pnl_dollars = pnl_points * point_value
+                    pnl = pnl_dollars - commission
 
                     # Create trade record
                     trade = Trade(
