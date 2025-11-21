@@ -469,3 +469,31 @@ def calculate_vwap(data: pd.DataFrame) -> pd.Series:
     vwap = (typical_price * data['volume']).cumsum() / data['volume'].cumsum()
 
     return vwap
+
+
+def calculate_atr(data: pd.DataFrame, period: int = 14) -> pd.Series:
+    """
+    Calculate Average True Range (ATR).
+
+    Args:
+        data: DataFrame with High, Low, Close columns
+        period: ATR period (default 14)
+
+    Returns:
+        ATR series
+    """
+    high = data['High']
+    low = data['Low']
+    close = data['Close']
+
+    # Calculate True Range
+    tr1 = high - low
+    tr2 = (high - close.shift()).abs()
+    tr3 = (low - close.shift()).abs()
+
+    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+
+    # Calculate ATR as EMA of True Range
+    atr = tr.ewm(span=period, adjust=False).mean()
+
+    return atr
