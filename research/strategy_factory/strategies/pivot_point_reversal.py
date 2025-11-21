@@ -71,11 +71,13 @@ class PivotPointReversal(BaseStrategy):
             DataFrame with pivot levels
         """
         # Need datetime column for daily grouping
-        if 'datetime' not in data.columns:
-            data['datetime'] = data.index
+        if 'datetime' in data.columns:
+            dt_col = data['datetime']
+        else:
+            dt_col = data.index
 
         # Extract date for daily pivots
-        data['date'] = pd.to_datetime(data['datetime']).dt.date
+        data['date'] = pd.to_datetime(dt_col).dt.date
 
         # Calculate daily high, low, close (prior day)
         daily_hlc = data.groupby('date').agg({

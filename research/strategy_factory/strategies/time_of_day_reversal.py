@@ -73,11 +73,13 @@ class TimeOfDayReversal(BaseStrategy):
             DataFrame with RSI and time info
         """
         # Need datetime for time filtering
-        if 'datetime' not in data.columns:
-            data['datetime'] = data.index
+        if 'datetime' in data.columns:
+            dt_col = data['datetime']
+        else:
+            dt_col = data.index
 
         # Extract hour
-        data['hour'] = pd.to_datetime(data['datetime']).dt.hour
+        data['hour'] = pd.to_datetime(dt_col).dt.hour
 
         # Calculate RSI for oversold detection
         data['rsi'] = calculate_rsi(data['Close'], period=14)

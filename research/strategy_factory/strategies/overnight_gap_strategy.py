@@ -73,12 +73,14 @@ class OvernightGapStrategy(BaseStrategy):
             DataFrame with gap metrics
         """
         # Need datetime for session detection
-        if 'datetime' not in data.columns:
-            data['datetime'] = data.index
+        if 'datetime' in data.columns:
+            dt_col = data['datetime']
+        else:
+            dt_col = data.index
 
         # Detect session start (first bar of day)
         # Assuming intraday data, detect when date changes
-        data['date'] = pd.to_datetime(data['datetime']).dt.date
+        data['date'] = pd.to_datetime(dt_col).dt.date
         data['is_open'] = data['date'] != data['date'].shift(1)
 
         # Prior session close (last close of previous day)
