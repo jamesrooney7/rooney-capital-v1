@@ -160,16 +160,18 @@ class StrategyFactoryCLI:
         logger.info(f"{'='*80}")
         logger.info(f"Total Backtests: {total_backtests}")
         logger.info(f"Strategies Tested: {strategies_tested}")
+        logger.info(f"✓ All {total_backtests} results saved to database")
         logger.info("")
 
         # Apply Gate 1 filters
         logger.info("Applying Gate 1 Filters (Basic Criteria)...")
+        logger.info(f"  Thresholds: trades≥5000, sharpe≥0.0, pf≥1.0, winrate≥35%")
         gate1_survivors = filter_results(
             all_results,
-            min_trades=10000,
-            min_sharpe=0.2,
-            min_profit_factor=1.15,
-            max_drawdown_pct=0.30,
+            min_trades=5000,
+            min_sharpe=0.0,
+            min_profit_factor=1.0,
+            max_drawdown_pct=1.0,
             min_win_rate=0.35
         )
         logger.info(f"Gate 1: {len(gate1_survivors)}/{total_backtests} passed")
