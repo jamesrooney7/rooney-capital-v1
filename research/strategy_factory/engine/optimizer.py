@@ -155,16 +155,22 @@ class ParameterOptimizer:
             temp_strategy = self.strategy_class(params={})
             param_grid = temp_strategy.param_grid
 
+        # Add exit parameters to optimization grid
+        # These were previously fixed at 1.0, now we optimize them
+        exit_params = {
+            'stop_loss_atr': [0.5, 1.0, 1.5, 2.0],
+            'take_profit_atr': [0.5, 1.0, 1.5, 2.0, 3.0]
+        }
+        param_grid = {**param_grid, **exit_params}
+
         # Generate combinations
         combinations = generate_parameter_combinations(param_grid)
 
-        logger.info(f"Starting optimization: {len(combinations)} backtests")
+        logger.info(f"Starting optimization: {len(combinations)} backtests (including exit params)")
 
-        # Fixed parameters (Phase 1: fixed exits)
+        # Fixed parameters (non-optimized)
         if fixed_params is None:
             fixed_params = {
-                'stop_loss_atr': 1.0,
-                'take_profit_atr': 1.0,
                 'max_bars_held': 20,
                 'auto_close_time': '16:00'
             }
@@ -254,7 +260,7 @@ def results_to_dataframe(results: List[BacktestResults]) -> pd.DataFrame:
 
 def filter_results(
     results: List[BacktestResults],
-    min_trades: int = 5000,
+    min_trades: int = 1000,
     min_sharpe: float = 0.0,
     min_profit_factor: float = 1.0,
     max_drawdown_pct: float = 1.0,

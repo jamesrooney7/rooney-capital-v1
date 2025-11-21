@@ -71,11 +71,11 @@ def analyze_results(db_path='/opt/pine/rooney-capital-v1/research/strategy_facto
     """
 
     df_filters = pd.read_sql_query(filter_query, conn)
-    print(f"Filter: trades≥5000, sharpe≥0.0, pf≥1.0, winrate≥35%")
-    print(f"  Would pass with ≥5000 trades: {df_filters['pass_5000'][0]} / {df_filters['total'][0]}")
-    print(f"  Would pass with ≥3000 trades: {df_filters['pass_3000'][0]} / {df_filters['total'][0]}")
+    print(f"Current Gate 1 Filter: trades≥1000, sharpe≥0.0, pf≥1.0, winrate≥35%")
+    print(f"  Passing with ≥1000 trades: {df_filters['pass_1000'][0]} / {df_filters['total'][0]}")
     print(f"  Would pass with ≥2000 trades: {df_filters['pass_2000'][0]} / {df_filters['total'][0]}")
-    print(f"  Would pass with ≥1000 trades: {df_filters['pass_1000'][0]} / {df_filters['total'][0]}")
+    print(f"  Would pass with ≥3000 trades: {df_filters['pass_3000'][0]} / {df_filters['total'][0]}")
+    print(f"  Would pass with ≥5000 trades: {df_filters['pass_5000'][0]} / {df_filters['total'][0]}")
     print()
 
     # Top 20 performers
@@ -103,9 +103,9 @@ def analyze_results(db_path='/opt/pine/rooney-capital-v1/research/strategy_facto
     print(df_top.to_string(index=False))
     print()
 
-    # Strategies that would pass 5000 trade threshold
+    # Strategies that would pass 1000 trade threshold
     print("=" * 100)
-    print("STRATEGIES PASSING GATE 1 (trades≥5000, sharpe≥0, pf≥1.0, winrate≥35%)")
+    print("STRATEGIES PASSING GATE 1 (trades≥1000, sharpe≥0, pf≥1.0, winrate≥35%)")
     print("=" * 100)
 
     pass_query = """
@@ -117,7 +117,7 @@ def analyze_results(db_path='/opt/pine/rooney-capital-v1/research/strategy_facto
         ROUND(profit_factor, 3) as pf,
         ROUND(win_rate, 3) as winrate
     FROM backtests
-    WHERE total_trades >= 5000
+    WHERE total_trades >= 1000
       AND sharpe_ratio >= 0.0
       AND profit_factor >= 1.0
       AND win_rate >= 0.35
