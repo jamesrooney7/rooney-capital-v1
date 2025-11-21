@@ -254,7 +254,7 @@ def results_to_dataframe(results: List[BacktestResults]) -> pd.DataFrame:
 
 def filter_results(
     results: List[BacktestResults],
-    min_trades: int = 10000,
+    min_trades: int = 100,
     min_sharpe: float = 0.2,
     min_profit_factor: float = 1.15,
     max_drawdown_pct: float = 0.30,
