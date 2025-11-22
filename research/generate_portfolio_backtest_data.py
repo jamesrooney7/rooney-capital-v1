@@ -368,10 +368,11 @@ def run_backtest_with_trade_logging(
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=COMMISSION_PER_SIDE)
 
-    # Set slippage
+    # Set slippage: 2 ticks per order (4 ticks round trip - conservative estimate)
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]
-    cerebro.broker.set_slippage_fixed(tick_size)
+    slippage_ticks = 2  # Conservative: 2 ticks per order
+    cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)
 
     # Enable cheat-on-close to match original test methodology
     # WARNING: This introduces look-ahead bias but matches how the model was tested

@@ -34,6 +34,7 @@ from research.utils.data_loader import setup_cerebro_with_data
 from strategy.ibs_strategy import IbsStrategy
 from models.loader import load_model_bundle
 from config import COMMISSION_PER_SIDE
+from strategy.contract_specs import CONTRACT_SPECS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -148,6 +149,13 @@ def run_backtest(
 
     # Set commission
     cerebro.broker.setcommission(commission=commission)
+
+    # Set slippage: 2 ticks per order (4 ticks round trip for conservative estimate)
+    spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
+    tick_size = spec["tick_size"]
+    slippage_ticks = 2  # Conservative: 2 ticks per order
+    cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)
+    logger.info(f"Slippage: {slippage_ticks} ticks = {tick_size * slippage_ticks:.4f} points per order")
 
     # Load ML model bundle first to detect required reference symbols
     symbols_to_load = {symbol}  # Start with primary symbol

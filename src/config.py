@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 #: derived from the deployment notes for the Tradovate micro futures account and
 #: covers exchange, clearing, and broker fees.  Live workers can override this
 #: via ``PINE_COMMISSION_PER_SIDE`` or ``COMMISSION_PER_SIDE``.
-DEFAULT_COMMISSION_PER_SIDE: float = 1.25
+DEFAULT_COMMISSION_PER_SIDE: float = 1.00
 
 #: Canonical symbol pairings used by the IBS strategy when constructing
 #: secondary filters (pair IBS, RSI-2 cross instrument, etc.).  The mapping is
