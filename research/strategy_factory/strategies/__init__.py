@@ -19,8 +19,11 @@ Batch 2 (10 strategies):
 Batch 3 (9 strategies):
 29, 30, 31, 32, 33, 34, 35, 38, 39 - ~250 combos
 
-Total Strategies: 39/39 (100% COMPLETE!)
-Total Combinations: ~1,435
+Batch 4 - Botnet101 Strategies (15 strategies):
+40-54: Buy on 5 Bar Low, 3-Bar Low, Gap Down Reversal, etc. - ~TBD combos
+
+Total Strategies: 54/54 (100% COMPLETE!)
+Total Combinations: ~TBD
 """
 
 from .base import BaseStrategy
@@ -66,6 +69,22 @@ from .money_flow_index import MoneyFlowIndex
 from .chaikin_oscillator import ChaikinOscillator
 from .overnight_gap_strategy import OvernightGapStrategy
 from .time_of_day_reversal import TimeOfDayReversal
+# Batch 4 - Botnet101 Strategies
+from .buy_on_5_bar_low import BuyOn5BarLow
+from .three_bar_low import ThreeBarLow
+from .gap_down_reversal import GapDownReversal
+from .turn_of_month import TurnOfMonth
+from .bb_ibs_reversal import BBIBSReversal
+from .ibs_strategy import IBSStrategy
+from .four_bar_momentum_reversal import FourBarMomentumReversal
+from .consecutive_bearish_candle import ConsecutiveBearishCandle
+from .consecutive_bars_ema import ConsecutiveBarsEMA
+from .avg_hl_range_ibs import AvgHLRangeIBS
+from .three_down_three_up import ThreeDownThreeUp
+from .consecutive_close_low import ConsecutiveCloseLow
+from .atr_buy_dip import ATRBuyDip
+from .ibs_extreme import IBSExtreme
+from .ten_bar_high_breakout import TenBarHighBreakout
 
 __all__ = [
     'BaseStrategy',
@@ -107,7 +126,22 @@ __all__ = [
     'MoneyFlowIndex',
     'ChaikinOscillator',
     'OvernightGapStrategy',
-    'TimeOfDayReversal'
+    'TimeOfDayReversal',
+    'BuyOn5BarLow',
+    'ThreeBarLow',
+    'GapDownReversal',
+    'TurnOfMonth',
+    'BBIBSReversal',
+    'IBSStrategy',
+    'FourBarMomentumReversal',
+    'ConsecutiveBearishCandle',
+    'ConsecutiveBarsEMA',
+    'AvgHLRangeIBS',
+    'ThreeDownThreeUp',
+    'ConsecutiveCloseLow',
+    'ATRBuyDip',
+    'IBSExtreme',
+    'TenBarHighBreakout'
 ]
 
 # Strategy registry for easy lookup by ID
@@ -150,5 +184,20 @@ STRATEGY_REGISTRY = {
     36: RSI2SMAFilter,
     37: Double7s,
     38: OvernightGapStrategy,
-    39: TimeOfDayReversal
+    39: TimeOfDayReversal,
+    40: BuyOn5BarLow,
+    41: ThreeBarLow,
+    42: GapDownReversal,
+    43: TurnOfMonth,
+    44: BBIBSReversal,
+    45: IBSStrategy,
+    46: FourBarMomentumReversal,
+    47: ConsecutiveBearishCandle,
+    48: ConsecutiveBarsEMA,
+    49: AvgHLRangeIBS,
+    50: ThreeDownThreeUp,
+    51: ConsecutiveCloseLow,
+    52: ATRBuyDip,
+    53: IBSExtreme,
+    54: TenBarHighBreakout
 }
