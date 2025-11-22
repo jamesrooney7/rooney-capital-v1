@@ -59,7 +59,10 @@ def calculate_adx(data: pd.DataFrame, period: int = 14) -> tuple:
     minus_di = 100 * (minus_dm_smooth / atr)
 
     # Calculate DX and ADX
-    dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+    di_sum = plus_di + minus_di
+    # Avoid division by zero
+    di_sum = di_sum.replace(0, np.nan)
+    dx = 100 * ((plus_di - minus_di).abs() / di_sum)
     adx = dx.ewm(alpha=alpha, adjust=False).mean()
 
     return adx, plus_di, minus_di
@@ -142,8 +145,9 @@ class ADXTrendStrength(BaseStrategy):
         strong_trend = data['adx'] > threshold
 
         # 2. +DI crosses above -DI (bullish)
-        di_cross = (data['plus_di'] > data['minus_di']) & \
-                   (data['plus_di'].shift(1) <= data['minus_di'].shift(1))
+        plus_di_prev = data['plus_di'].shift(1).fillna(0)
+        minus_di_prev = data['minus_di'].shift(1).fillna(0)
+        di_cross = (data['plus_di'] > data['minus_di']) & (plus_di_prev <= minus_di_prev)
 
         entry = strong_trend & di_cross
 

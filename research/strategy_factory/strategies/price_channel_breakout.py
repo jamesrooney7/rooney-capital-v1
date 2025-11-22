@@ -71,9 +71,10 @@ class PriceChannelBreakout(BaseStrategy):
         channel_length = self.params.get('channel_length', 20)
         breakout_pct = self.params.get('channel_breakout_pct', 0.0) / 100.0
 
-        # Rolling highest high and lowest low
-        data['channel_high'] = data['High'].rolling(window=channel_length).max()
-        data['channel_low'] = data['Low'].rolling(window=channel_length).min()
+        # Rolling highest high and lowest low (exclude current bar)
+        # Shift by 1 so we compare against previous N bars, not including current
+        data['channel_high'] = data['High'].shift(1).rolling(window=channel_length).max()
+        data['channel_low'] = data['Low'].shift(1).rolling(window=channel_length).min()
 
         # Apply breakout percentage buffer
         channel_range = data['channel_high'] - data['channel_low']

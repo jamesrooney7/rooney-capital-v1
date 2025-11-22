@@ -176,7 +176,7 @@ class ParabolicSAR(BaseStrategy):
         """
         # Entry: SAR flips from above to below price (bullish)
         sar_now_below = data['sar_below']
-        sar_was_above = ~data['sar_below'].shift(1)
+        sar_was_above = (~data['sar_below'].shift(1)).fillna(False)
 
         entry = sar_now_below & sar_was_above
 
