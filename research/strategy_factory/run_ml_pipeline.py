@@ -139,7 +139,13 @@ class MLPipelineRunner:
 
     def train_ml_model(self, winner: Dict[str, Any], training_csv: Path) -> Path:
         """
-        Train ML model for a winner.
+        Train ML meta-labeling model for a winner.
+
+        Uses the advanced ML meta-labeling system with:
+        - Hierarchical feature clustering
+        - Walk-forward validation (2011-2020)
+        - LightGBM ensemble with Optuna optimization
+        - Held-out test (2021-2024)
 
         Args:
             winner: Winner dictionary from manifest
@@ -151,26 +157,42 @@ class MLPipelineRunner:
         symbol = winner['symbol']
         strategy_id = winner['strategy_id']
 
-        model_path = self.models_dir / f"{symbol}_{strategy_id}_model.pkl"
+        # ML meta-labeling outputs to specific directory structure
+        output_dir = Path('research/ml_meta_labeling/results') / f"{symbol}_{strategy_id}"
+        model_path = output_dir / f"{symbol}_{strategy_id}_ml_meta_labeling_final_model.pkl"
 
         if self.skip_existing and model_path.exists():
             logger.info(f"  Model already exists: {model_path}")
             return model_path
 
-        logger.info(f"  Training ML model...")
+        logger.info(f"  Training ML meta-labeling model...")
         logger.info(f"    Input: {training_csv}")
-        logger.info(f"    Output: {model_path}")
+        logger.info(f"    Output directory: {output_dir}")
+        logger.info(f"    System: LightGBM ensemble + walk-forward validation")
 
-        # Build command
+        # Copy training CSV to expected location
+        # ML meta-labeling expects data in data/training/{symbol}_transformed_features.csv
+        training_data_dir = Path('data/training')
+        training_data_dir.mkdir(parents=True, exist_ok=True)
+        expected_csv = training_data_dir / f"{symbol}_{strategy_id}_transformed_features.csv"
+
+        import shutil
+        shutil.copy(training_csv, expected_csv)
+
+        # Build command for ML meta-labeling optimizer
         cmd = [
-            'python3', 'research/train_rf_cpcv_bo.py',
-            '--input', str(training_csv),
-            '--output', str(model_path),
-            '--train-end', '2021-12-31',
-            '--random-trials', '120',
-            '--bayesian-trials', '300',
-            '--cv-folds', '5',
-            '--embargo-days', '5'
+            'python3', 'research/ml_meta_labeling/ml_meta_labeling_optimizer.py',
+            '--symbol', f"{symbol}_{strategy_id}",  # Use symbol_strategyid as identifier
+            '--data-dir', str(training_data_dir.parent),  # Parent of training/
+            '--output-dir', 'research/ml_meta_labeling/results',
+            '--n-clusters', '30',          # Feature clustering
+            '--n-trials', '100',           # Optuna trials per window
+            '--cv-folds', '5',             # Cross-validation folds
+            '--embargo-days', '5',         # Prevent label leakage
+            '--task-type', 'classification',  # Predict win/loss
+            '--optimization-metric', 'precision',
+            '--precision-threshold', '0.60',  # Only take high-confidence trades
+            '--use-ensemble'               # Use LightGBM + CatBoost + XGBoost
         ]
 
         try:
@@ -179,19 +201,29 @@ class MLPipelineRunner:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=7200  # 2 hour timeout per model
+                timeout=10800  # 3 hour timeout (more complex than old system)
             )
-            logger.info(f"  ✅ Model trained: {model_path}")
+            logger.info(f"  ✅ ML meta-labeling model trained: {model_path}")
+
+            # Log key results
+            summary_file = output_dir / f"{symbol}_{strategy_id}_ml_meta_labeling_executive_summary.txt"
+            if summary_file.exists():
+                logger.info(f"  📊 Summary: {summary_file}")
+
             return model_path
 
         except subprocess.CalledProcessError as e:
-            logger.error(f"  ❌ Failed to train model: {e}")
+            logger.error(f"  ❌ Failed to train ML meta-labeling model: {e}")
             logger.error(f"  stdout: {e.stdout}")
             logger.error(f"  stderr: {e.stderr}")
             return None
         except subprocess.TimeoutExpired:
-            logger.error(f"  ❌ Model training timed out (2 hours)")
+            logger.error(f"  ❌ ML meta-labeling training timed out (3 hours)")
             return None
+        finally:
+            # Clean up temporary CSV
+            if expected_csv.exists():
+                expected_csv.unlink()
 
     def validate_strategy(
         self,
