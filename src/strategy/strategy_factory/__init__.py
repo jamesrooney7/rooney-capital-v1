@@ -31,7 +31,21 @@ Phase B (Mean Reversion & Calendar - COMPLETE):
 - ConsecutiveCloseLowBT: Aggressive selling pressure detection
 - ATRBuyDipBT: ATR-based dynamic dip buying
 
-Phase C-E (Remaining 42 strategies - IN PROGRESS):
+Phase C (Indicator-based Strategies - COMPLETE):
+- BollingerBandsBT: Classic BB mean reversion
+- KeltnerChannelBreakoutBT: Volatility breakout strategy
+- MovingAverageEnvelopeBT: MA envelope mean reversion
+- StochasticRSIBT: Stochastic RSI momentum
+- WilliamsPercentRBT: Williams %R oscillator
+- CCIStrategyBT: Commodity Channel Index
+- PriceChannelBreakoutBT: Donchian Channel breakout
+- EMARibbonBT: Multi-EMA trend following
+- MACDStrategyBT: MACD crossover system
+- RSIDivergenceBT: RSI divergence trading
+- RSI2SMAFilterBT: Larry Connors RSI2 + 200 SMA
+- TenBarHighBreakoutBT: Breakout with IBS filter
+
+Phase D-E (Remaining 25 strategies - IN PROGRESS):
 - Coming soon...
 
 Usage:
@@ -70,6 +84,20 @@ from .three_down_three_up_bt import ThreeDownThreeUpBT
 from .consecutive_close_low_bt import ConsecutiveCloseLowBT
 from .atr_buy_dip_bt import ATRBuyDipBT
 
+# Phase C imports
+from .bollinger_bands_bt import BollingerBandsBT
+from .keltner_channel_breakout_bt import KeltnerChannelBreakoutBT
+from .moving_average_envelope_bt import MovingAverageEnvelopeBT
+from .stochastic_rsi_bt import StochasticRSIBT
+from .williams_percent_r_bt import WilliamsPercentRBT
+from .cci_strategy_bt import CCIStrategyBT
+from .price_channel_breakout_bt import PriceChannelBreakoutBT
+from .ema_ribbon_bt import EMARibbonBT
+from .macd_strategy_bt import MACDStrategyBT
+from .rsi_divergence_bt import RSIDivergenceBT
+from .rsi2_sma_filter_bt import RSI2SMAFilterBT
+from .ten_bar_high_breakout_bt import TenBarHighBreakoutBT
+
 __all__ = [
     # Phase A
     'RSI2MeanReversionBT',
@@ -90,6 +118,19 @@ __all__ = [
     'ThreeDownThreeUpBT',
     'ConsecutiveCloseLowBT',
     'ATRBuyDipBT',
+    # Phase C
+    'BollingerBandsBT',
+    'KeltnerChannelBreakoutBT',
+    'MovingAverageEnvelopeBT',
+    'StochasticRSIBT',
+    'WilliamsPercentRBT',
+    'CCIStrategyBT',
+    'PriceChannelBreakoutBT',
+    'EMARibbonBT',
+    'MACDStrategyBT',
+    'RSIDivergenceBT',
+    'RSI2SMAFilterBT',
+    'TenBarHighBreakoutBT',
 ]
 
 # Strategy ID mapping (from Strategy Factory)
@@ -113,6 +154,19 @@ STRATEGY_ID_MAP = {
     51: ConsecutiveCloseLowBT,  # Consecutive Close Low
     52: ATRBuyDipBT,           # ATR Buy Dip
     53: IBSExtremeBT,          # IBS Extreme
+    # Phase C
+    1: BollingerBandsBT,       # Bollinger Bands
+    2: KeltnerChannelBreakoutBT,  # Keltner Channel Breakout
+    7: MovingAverageEnvelopeBT,  # Moving Average Envelope
+    11: StochasticRSIBT,       # Stochastic RSI
+    12: WilliamsPercentRBT,    # Williams %R
+    13: CCIStrategyBT,         # CCI Strategy
+    15: PriceChannelBreakoutBT,  # Price Channel Breakout
+    18: EMARibbonBT,           # EMA Ribbon
+    19: MACDStrategyBT,        # MACD Strategy
+    22: RSIDivergenceBT,       # RSI Divergence
+    36: RSI2SMAFilterBT,       # RSI2 + SMA Filter
+    54: TenBarHighBreakoutBT,  # 10 Bar High Breakout
 }
 
 
