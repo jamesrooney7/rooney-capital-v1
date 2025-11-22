@@ -68,3 +68,4 @@ requests_local/
 !research/**/*.py
 !dashboard/**/*.py
 results/
+test_data/
