@@ -59,8 +59,22 @@ Phase D (Pattern Recognition & Advanced Indicators - COMPLETE):
 - GapFillBT: Gap fill mean reversion
 - VWAPReversionBT: VWAP deviation strategy
 
-Phase E (Remaining 13 strategies - IN PROGRESS):
-- Coming soon...
+Phase E (Breakout, Volume & Time-based Strategies - COMPLETE):
+- OpeningRangeBreakoutBT: Opening range breakout strategy
+- InsideBarBreakoutBT: Inside bar volatility contraction
+- MeanReversionBandsBT: Band-based mean reversion
+- ATRTrailingStopBT: ATR trailing stop system
+- VolumeBreakoutBT: Volume spike breakout
+- MomentumFadeBT: Momentum exhaustion fade
+- PivotPointReversalBT: Pivot point reversal system
+- ROCStrategyBT: Rate of Change momentum
+- AroonIndicatorBT: Aroon trend identification
+- MoneyFlowIndexBT: MFI overbought/oversold
+- ChaikinOscillatorBT: Accumulation/Distribution oscillator
+- OvernightGapStrategyBT: Gap trading system
+- TimeOfDayReversalBT: Intraday time-based reversal
+
+ALL 54 STRATEGIES COMPLETE! 🎉
 
 Usage:
     from strategy.strategy_factory.rsi2_mean_reversion_bt import RSI2MeanReversionBT
@@ -126,6 +140,21 @@ from .fibonacci_retracement_bt import FibonacciRetracementBT
 from .gap_fill_bt import GapFillBT
 from .vwap_reversion_bt import VWAPReversionBT
 
+# Phase E imports
+from .opening_range_breakout_bt import OpeningRangeBreakoutBT
+from .inside_bar_breakout_bt import InsideBarBreakoutBT
+from .mean_reversion_bands_bt import MeanReversionBandsBT
+from .atr_trailing_stop_bt import ATRTrailingStopBT
+from .volume_breakout_bt import VolumeBreakoutBT
+from .momentum_fade_bt import MomentumFadeBT
+from .pivot_point_reversal_bt import PivotPointReversalBT
+from .roc_strategy_bt import ROCStrategyBT
+from .aroon_indicator_bt import AroonIndicatorBT
+from .money_flow_index_bt import MoneyFlowIndexBT
+from .chaikin_oscillator_bt import ChaikinOscillatorBT
+from .overnight_gap_strategy_bt import OvernightGapStrategyBT
+from .time_of_day_reversal_bt import TimeOfDayReversalBT
+
 __all__ = [
     # Phase A
     'RSI2MeanReversionBT',
@@ -172,6 +201,20 @@ __all__ = [
     'FibonacciRetracementBT',
     'GapFillBT',
     'VWAPReversionBT',
+    # Phase E
+    'OpeningRangeBreakoutBT',
+    'InsideBarBreakoutBT',
+    'MeanReversionBandsBT',
+    'ATRTrailingStopBT',
+    'VolumeBreakoutBT',
+    'MomentumFadeBT',
+    'PivotPointReversalBT',
+    'ROCStrategyBT',
+    'AroonIndicatorBT',
+    'MoneyFlowIndexBT',
+    'ChaikinOscillatorBT',
+    'OvernightGapStrategyBT',
+    'TimeOfDayReversalBT',
 ]
 
 # Strategy ID mapping (from Strategy Factory)
@@ -221,6 +264,20 @@ STRATEGY_ID_MAP = {
     20: FibonacciRetracementBT,  # Fibonacci Retracement
     23: GapFillBT,             # Gap Fill
     24: VWAPReversionBT,       # VWAP Reversion
+    # Phase E
+    25: OpeningRangeBreakoutBT,  # Opening Range Breakout
+    26: InsideBarBreakoutBT,   # Inside Bar Breakout
+    27: MeanReversionBandsBT,  # Mean Reversion Bands
+    28: ATRTrailingStopBT,     # ATR Trailing Stop
+    29: VolumeBreakoutBT,      # Volume Breakout
+    30: MomentumFadeBT,        # Momentum Fade
+    31: PivotPointReversalBT,  # Pivot Point Reversal
+    32: ROCStrategyBT,         # Rate of Change
+    33: AroonIndicatorBT,      # Aroon Indicator
+    34: MoneyFlowIndexBT,      # Money Flow Index
+    35: ChaikinOscillatorBT,   # Chaikin Oscillator
+    38: OvernightGapStrategyBT,  # Overnight Gap Strategy
+    39: TimeOfDayReversalBT,   # Time of Day Reversal
 }
 
 
