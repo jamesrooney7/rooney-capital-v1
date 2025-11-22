@@ -185,14 +185,14 @@ class StrategyFactoryCLI:
 
         # Apply Gate 1 filters
         logger.info("Applying Gate 1 Filters (Basic Criteria)...")
-        logger.info(f"  Thresholds: trades≥1000, sharpe≥0.0, pf≥1.0, winrate≥35%")
+        logger.info(f"  Thresholds: trades≥500, sharpe≥0.0, pf≥1.0, winrate≥30%")
         gate1_survivors = filter_results(
             all_results,
-            min_trades=1000,
+            min_trades=500,      # Lowered from 1000 - allows slower strategies
             min_sharpe=0.0,
             min_profit_factor=1.0,
             max_drawdown_pct=1.0,
-            min_win_rate=0.35
+            min_win_rate=0.30    # Lowered from 0.35 - allows trend followers
         )
         logger.info(f"Gate 1: {len(gate1_survivors)}/{total_backtests} passed")
 
