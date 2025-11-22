@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 import sqlite3
 import logging
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
@@ -159,7 +160,7 @@ def generate_ml_manifest(
     """
     manifest = {
         'version': '1.0',
-        'created_at': pd.Timestamp.now().isoformat(),
+        'created_at': datetime.now().isoformat(),
         'total_winners': len(winners),
         'winners_by_instrument': {},
         'winners': winners
