@@ -121,8 +121,9 @@ class PortfolioOptimizer:
                 df['date'] = pd.to_datetime(df['date'])
                 df = df.sort_values('date')
 
-                # Calculate daily P&L
-                df['daily_pnl'] = df['equity'].diff().fillna(0)
+                # Use daily_pnl if it exists, otherwise calculate from equity
+                if 'daily_pnl' not in df.columns:
+                    df['daily_pnl'] = df['equity'].diff().fillna(0)
 
                 self.strategies[strategy_id] = df
                 logger.info(f"  Loaded {strategy_id}: {len(df)} days")
