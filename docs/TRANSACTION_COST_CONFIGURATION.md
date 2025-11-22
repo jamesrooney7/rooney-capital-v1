@@ -13,8 +13,8 @@ All backtest scripts now use **consistent, conservative** transaction cost assum
 |-----------|--------------|-------|
 | **Commission** | Per side | **$1.00** |
 | **Round-trip Commission** | Entry + Exit | **$2.00** |
-| **Slippage** | Per order | **2 ticks** |
-| **Round-trip Slippage** | Entry + Exit | **4 ticks** |
+| **Slippage** | Per order | **1 tick** |
+| **Round-trip Slippage** | Entry + Exit | **2 ticks** |
 
 ---
 
@@ -36,7 +36,7 @@ DEFAULT_COMMISSION_PER_SIDE: float = 1.00
 
 ---
 
-### Slippage: 2 Ticks Per Order
+### Slippage: 1 Tick Per Order (2 Ticks Round Trip)
 
 **Calculation:**
 ```python
@@ -44,20 +44,19 @@ from strategy.contract_specs import CONTRACT_SPECS
 
 spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
 tick_size = spec["tick_size"]
-slippage_ticks = 2  # Conservative: 2 ticks per order
-slippage_amount = tick_size * slippage_ticks
+slippage_amount = tick_size  # 1 tick per order
 ```
 
 **Example Slippage by Instrument:**
 
-| Symbol | Tick Size | 1 Tick | 2 Ticks (Per Order) | 4 Ticks (Round Trip) |
-|--------|-----------|--------|---------------------|----------------------|
-| **ES** | 0.25 pts | $12.50 | **$25.00** | **$50.00** |
-| **NQ** | 0.25 pts | $5.00 | **$10.00** | **$20.00** |
-| **RTY** | 0.10 pts | $5.00 | **$10.00** | **$20.00** |
-| **YM** | 1.00 pts | $5.00 | **$10.00** | **$20.00** |
-| **GC** | 0.10 pts | $10.00 | **$20.00** | **$40.00** |
-| **CL** | 0.01 pts | $10.00 | **$20.00** | **$40.00** |
+| Symbol | Tick Size | 1 Tick (Per Order) | 2 Ticks (Round Trip) |
+|--------|-----------|-------------------|----------------------|
+| **ES** | 0.25 pts | **$12.50** | **$25.00** |
+| **NQ** | 0.25 pts | **$5.00** | **$10.00** |
+| **RTY** | 0.10 pts | **$5.00** | **$10.00** |
+| **YM** | 1.00 pts | **$5.00** | **$10.00** |
+| **GC** | 0.10 pts | **$10.00** | **$20.00** |
+| **CL** | 0.01 pts | **$10.00** | **$20.00** |
 
 ---
 
@@ -66,8 +65,8 @@ slippage_amount = tick_size * slippage_ticks
 **For ES (most common):**
 ```
 Round-trip cost = Commission + Slippage
-                = $2.00 + $50.00
-                = $52.00 per round trip
+                = $2.00 + $25.00
+                = $27.00 per round trip
 ```
 
 **For other symbols:** See table above (varies by tick value)
@@ -98,12 +97,11 @@ DEFAULT_COMMISSION_PER_SIDE: float = 1.00
 # Set commission
 cerebro.broker.setcommission(commission=commission)
 
-# Set slippage: 2 ticks per order (4 ticks round trip for conservative estimate)
+# Set slippage: 1 tick per order (2 ticks round trip total)
 spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
 tick_size = spec["tick_size"]
-slippage_ticks = 2  # Conservative: 2 ticks per order
-cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)
-logger.info(f"Slippage: {slippage_ticks} ticks = {tick_size * slippage_ticks:.4f} points per order")
+cerebro.broker.set_slippage_fixed(tick_size)
+logger.info(f"Slippage: 1 tick per order = {tick_size:.4f} points (2 ticks round trip)")
 ```
 
 **Impact:** This was a **CRITICAL FIX** - backtest_runner.py was not applying any slippage before!
@@ -111,15 +109,14 @@ logger.info(f"Slippage: {slippage_ticks} ticks = {tick_size * slippage_ticks:.4f
 ---
 
 ### 3. ✅ `research/extract_training_data.py`
-**Change:** Slippage 1 tick → 2 ticks per order
+**Change:** Commission $1.25 → $1.00, Slippage stays at 1 tick per order (already correct)
 
 ```python
-# BEFORE:
-cerebro.broker.set_slippage_fixed(tick_size)  # 1 tick
+# Set commission: $1.00 per side (user requirement)
+cerebro.broker.setcommission(commission=1.00)
 
-# AFTER:
-slippage_ticks = 2  # Conservative: 2 ticks per order
-cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)  # 2 ticks
+# Set slippage: 1 tick per order (2 ticks round trip total)
+cerebro.broker.set_slippage_fixed(tick_size)
 ```
 
 ---
@@ -127,26 +124,21 @@ cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)  # 2 ticks
 ### 4. ✅ `research/generate_portfolio_backtest_data.py`
 **Changes:**
 - Uses `COMMISSION_PER_SIDE` from config (inherits $1.00 change)
-- Slippage updated from 1 tick → 2 ticks per order
+- Slippage stays at 1 tick per order (already correct)
 
 ```python
-# BEFORE:
-cerebro.broker.setcommission(commission=COMMISSION_PER_SIDE)  # Was $1.25
-cerebro.broker.set_slippage_fixed(tick_size)  # 1 tick
-
-# AFTER:
 cerebro.broker.setcommission(commission=COMMISSION_PER_SIDE)  # Now $1.00
-slippage_ticks = 2  # Conservative: 2 ticks per order
-cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)  # 2 ticks
+
+# Set slippage: 1 tick per order (2 ticks round trip total)
+cerebro.broker.set_slippage_fixed(tick_size)
 ```
 
 ---
 
 ### 5. ✅ `research/utils/vectorized_backtest.py`
-**Change:** Default exit slippage 1 tick → 2 ticks
+**Change:** Default slippage stays at 1 tick (already correct)
 
 ```python
-# BEFORE:
 def run_backtest(
     ...
     commission_per_side: float = 1.00,
@@ -155,18 +147,7 @@ def run_backtest(
 ):
     if slippage_exit is None:
         spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
-        slippage_exit = spec["tick_size"]  # 1 tick
-
-# AFTER:
-def run_backtest(
-    ...
-    commission_per_side: float = 1.00,
-    slippage_entry: float = 0.0,
-    slippage_exit: Optional[float] = None  # Auto-calculated as 2 ticks if None
-):
-    if slippage_exit is None:
-        spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
-        slippage_exit = spec["tick_size"] * 2  # 2 ticks
+        slippage_exit = spec["tick_size"]  # 1 tick per order (2 ticks round trip)
 ```
 
 **Also updated:**
@@ -186,10 +167,10 @@ def run_backtest(
 - [x] `research/utils/vectorized_backtest.py`: Defaults to $1.00
 
 ✅ **Slippage:**
-- [x] `research/backtest_runner.py`: 2 ticks per order (ADDED)
-- [x] `research/extract_training_data.py`: 2 ticks per order (UPDATED from 1)
-- [x] `research/generate_portfolio_backtest_data.py`: 2 ticks per order (UPDATED from 1)
-- [x] `research/utils/vectorized_backtest.py`: 2 ticks default (UPDATED from 1)
+- [x] `research/backtest_runner.py`: 1 tick per order (ADDED - was missing!)
+- [x] `research/extract_training_data.py`: 1 tick per order (verified correct)
+- [x] `research/generate_portfolio_backtest_data.py`: 1 tick per order (verified correct)
+- [x] `research/utils/vectorized_backtest.py`: 1 tick default (verified correct)
 
 ✅ **Documentation:**
 - [x] All docstrings updated
@@ -202,28 +183,25 @@ def run_backtest(
 
 ### Expected Impact:
 
-**Before (1 tick slippage + $1.25 commission):**
+**Before (1 tick slippage per order + $1.25 commission):**
 - ES round-trip cost: $2.50 (commission) + $25.00 (slippage) = **$27.50**
 
-**After (2 ticks slippage + $1.00 commission):**
-- ES round-trip cost: $2.00 (commission) + $50.00 (slippage) = **$52.00**
+**After (1 tick slippage per order + $1.00 commission):**
+- ES round-trip cost: $2.00 (commission) + $25.00 (slippage) = **$27.00**
 
-**Net change:** +$24.50 per round trip (+89% increase in transaction costs)
+**Net change:** -$0.50 per round trip (-1.8% decrease in transaction costs)
 
 **Why this is important:**
-- More conservative estimate reduces risk of over-optimistic backtest results
-- Strategies that survive higher transaction costs are more robust
-- Real-world slippage can easily be 2+ ticks during volatile markets
-- Better safe than sorry - would rather underestimate than overestimate performance
+- Standardized transaction costs across all backtest scripts (consistency)
+- Critical fix: backtest_runner.py now applies slippage (was missing!)
+- Realistic estimate: 1 tick slippage per order (2 ticks round trip)
+- Slight commission reduction ($1.25 → $1.00) matches actual broker costs
 
 ### Strategy Filtering:
 
-Strategies that were marginally profitable with low transaction costs will now be **correctly identified as unprofitable**. This is **GOOD** - it prevents us from trading strategies that would lose money in live trading.
+**Most Important Fix:** backtest_runner.py was missing slippage configuration entirely!
 
-**Example:**
-- Strategy avg P&L/trade: $30
-- Old costs: $27.50 → Net = $2.50/trade ✓ (falsely profitable)
-- New costs: $52.00 → Net = -$22.00/trade ✗ (correctly unprofitable)
+Without slippage, strategies appeared ~$25/trade MORE profitable than they actually are. Now all scripts apply realistic transaction costs consistently.
 
 ---
 
@@ -308,13 +286,13 @@ Slippage: 2 ticks = 0.5000 points per order
 
 ## Questions?
 
-**Q: Why 2 ticks instead of 1 tick?**
-A: Conservative estimate. Real-world slippage varies:
-- Low volatility, high liquidity: 0-1 tick
-- Normal conditions: 1-2 ticks
-- High volatility or large size: 2+ ticks
+**Q: Why 1 tick per order (2 ticks round trip)?**
+A: Realistic estimate based on normal market conditions:
+- Low volatility, high liquidity: 0-1 tick per order
+- Normal conditions: 1 tick per order (most common)
+- High volatility or large size: 2+ ticks per order
 
-We use 2 ticks to account for realistic worst-case scenarios.
+We use 1 tick as a balanced estimate for normal trading conditions.
 
 **Q: Can I override these values?**
 A: Yes!

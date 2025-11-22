@@ -150,12 +150,11 @@ def run_backtest(
     # Set commission
     cerebro.broker.setcommission(commission=commission)
 
-    # Set slippage: 2 ticks per order (4 ticks round trip for conservative estimate)
+    # Set slippage: 1 tick per order (2 ticks round trip total)
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]
-    slippage_ticks = 2  # Conservative: 2 ticks per order
-    cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)
-    logger.info(f"Slippage: {slippage_ticks} ticks = {tick_size * slippage_ticks:.4f} points per order")
+    cerebro.broker.set_slippage_fixed(tick_size)
+    logger.info(f"Slippage: 1 tick per order = {tick_size:.4f} points (2 ticks round trip)")
 
     # Load ML model bundle first to detect required reference symbols
     symbols_to_load = {symbol}  # Start with primary symbol

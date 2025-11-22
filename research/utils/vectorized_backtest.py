@@ -129,7 +129,7 @@ def run_backtest(
     warmup_bars: int = 365,  # 365 hours for ATR warmup
     commission_per_side: float = 1.00,  # Commission per side ($)
     slippage_entry: float = 0.0,  # Entry slippage (limit orders)
-    slippage_exit: Optional[float] = None  # Exit slippage (market orders, auto-calculated as 2 ticks if None)
+    slippage_exit: Optional[float] = None  # Exit slippage (market orders, auto-calculated as 1 tick if None)
 ) -> Dict:
     """
     Run vectorized backtest with given parameters.
@@ -137,7 +137,7 @@ def run_backtest(
     Includes realistic execution:
     - Commissions: $1.00 per side ($2 round trip)
     - Entry slippage: 0.0 points (limit orders at target price)
-    - Exit slippage: 2 ticks (market orders, symbol-specific, conservative)
+    - Exit slippage: 1 tick (market orders, symbol-specific, 2 ticks round trip)
     - Entry at OPEN of bar following signal (no look-ahead bias)
     - ATR from signal bar used for stops/targets (not entry bar)
     - Stops/targets checked at bar close (not intrabar)
@@ -158,7 +158,7 @@ def run_backtest(
         warmup_bars: Number of bars to use for warmup (default: 365)
         commission_per_side: Commission per side in dollars (default: 1.00)
         slippage_entry: Entry slippage in points (default: 0.0 for limit orders)
-        slippage_exit: Exit slippage in points (default: None = auto-calculate 2 ticks based on symbol)
+        slippage_exit: Exit slippage in points (default: None = auto-calculate 1 tick based on symbol)
 
     Returns:
         Dictionary with performance metrics:
@@ -174,11 +174,11 @@ def run_backtest(
             - max_drawdown_pct: Maximum drawdown as percentage
             - avg_duration_bars: Average trade duration in hours
     """
-    # Auto-calculate exit slippage as 2 ticks if not provided (conservative estimate)
+    # Auto-calculate exit slippage as 1 tick if not provided (2 ticks round trip total)
     if slippage_exit is None:
         spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
-        slippage_exit = spec["tick_size"] * 2  # 2 ticks slippage for market order exits
-        logger.debug(f"{symbol}: Using 2-tick exit slippage = {slippage_exit} points")
+        slippage_exit = spec["tick_size"]  # 1 tick slippage for market order exits
+        logger.debug(f"{symbol}: Using 1-tick exit slippage = {slippage_exit} points (2 ticks round trip)")
 
     # Extract parameters
     ibs_entry_low = params.get('ibs_entry_low', 0.0)

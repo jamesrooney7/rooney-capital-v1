@@ -573,14 +573,13 @@ def extract_training_data(
     # Set commission: $1.00 per side (user requirement)
     cerebro.broker.setcommission(commission=1.00)
 
-    # Set slippage: 2 ticks per order (4 ticks round trip - conservative estimate)
+    # Set slippage: 1 tick per order (2 ticks round trip total)
     from strategy.contract_specs import CONTRACT_SPECS
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]
-    slippage_ticks = 2  # Conservative: 2 ticks per order
 
     # Use FixedSlippage slicer
-    cerebro.broker.set_slippage_fixed(tick_size * slippage_ticks)
+    cerebro.broker.set_slippage_fixed(tick_size)
 
     # Enable cheat-on-close to execute at bar close price (not next bar open)
     # This matches live trading: signal at bar close → execute at bar close
