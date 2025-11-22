@@ -197,10 +197,27 @@ class DatabaseManager:
             run_id: Execution run ID
             results: List of BacktestResults
         """
-        for result in results:
-            self.save_backtest_result(run_id, result)
+        saved_count = 0
+        failed_count = 0
 
-        logger.info(f"Saved {len(results)} backtest results to run {run_id}")
+        for result in results:
+            try:
+                self.save_backtest_result(run_id, result)
+                saved_count += 1
+            except Exception as e:
+                failed_count += 1
+                logger.error(
+                    f"Failed to save result for {result.strategy_name} "
+                    f"(params: {result.params}): {e}"
+                )
+
+        if failed_count > 0:
+            logger.warning(
+                f"Saved {saved_count}/{len(results)} results "
+                f"({failed_count} failed)"
+            )
+        else:
+            logger.info(f"Saved {len(results)} backtest results to run {run_id}")
 
     def get_results(
         self,

@@ -142,17 +142,37 @@ class StrategyFactoryCLI:
 
             try:
                 results = optimizer.optimize()
+
+                # Check if we got any results
+                if not results:
+                    logger.warning(
+                        f"⚠ {strategy_class.__name__} produced 0 successful backtests "
+                        f"(all parameter combinations may have failed)"
+                    )
+                    strategies_tested += 1
+                    continue
+
                 all_results.extend(results)
                 total_backtests += len(results)
                 strategies_tested += 1
 
-                # Save to database
-                self.db.save_backtest_results_batch(run_id, results)
+                # Save to database (with error handling inside)
+                try:
+                    self.db.save_backtest_results_batch(run_id, results)
+                except Exception as db_error:
+                    logger.error(
+                        f"Database save failed for {strategy_class.__name__}: {db_error}. "
+                        f"Results will be lost for this strategy!"
+                    )
 
                 logger.info(f"✓ Completed {len(results)} backtests for {strategy_class.__name__}")
 
             except Exception as e:
-                logger.error(f"✗ Failed to optimize {strategy_class.__name__}: {e}")
+                logger.error(
+                    f"✗ Failed to optimize {strategy_class.__name__}: {e}",
+                    exc_info=True  # Log full traceback
+                )
+                strategies_tested += 1  # Count as tested even if failed
                 continue
 
         logger.info(f"\n{'='*80}")

@@ -68,30 +68,39 @@ def _run_single_backtest(
         fixed_params: Fixed parameters (e.g., stop_loss_atr, take_profit_atr)
 
     Returns:
-        BacktestResults object
+        BacktestResults object (or None if failed)
     """
     param_dict = args
 
-    # Merge with fixed params
-    full_params = {**param_dict, **fixed_params}
+    try:
+        # Merge with fixed params
+        full_params = {**param_dict, **fixed_params}
 
-    # Load data
-    symbol, timeframe, start_date, end_date = data_path
-    data = load_data(symbol, timeframe, start_date, end_date)
+        # Load data
+        symbol, timeframe, start_date, end_date = data_path
+        data = load_data(symbol, timeframe, start_date, end_date)
 
-    # Create strategy instance
-    strategy = strategy_class(params=full_params)
+        # Create strategy instance
+        strategy = strategy_class(params=full_params)
 
-    # Run backtest
-    backtester = Backtester(
-        initial_capital=100000,
-        commission_per_side=1.00,
-        slippage_ticks=1.0  # 1 tick slippage per side
-    )
+        # Run backtest
+        backtester = Backtester(
+            initial_capital=100000,
+            commission_per_side=1.00,
+            slippage_ticks=1.0  # 1 tick slippage per side
+        )
 
-    results = backtester.run(strategy, data, symbol)
+        results = backtester.run(strategy, data, symbol)
 
-    return results
+        return results
+
+    except Exception as e:
+        # Log error but don't crash - return None to skip this combination
+        logger.error(
+            f"Backtest failed for {strategy_class.__name__} "
+            f"with params {param_dict}: {e}"
+        )
+        return None
 
 
 class ParameterOptimizer:
@@ -192,19 +201,29 @@ class ParameterOptimizer:
             # Single-threaded (for debugging)
             for params in tqdm(combinations, desc="Backtesting"):
                 result = partial_func(params)
-                results.append(result)
+                if result is not None:  # Filter out failed backtests
+                    results.append(result)
         else:
             # Multi-threaded
             with Pool(processes=self.workers) as pool:
-                results = list(
+                raw_results = list(
                     tqdm(
                         pool.imap(partial_func, combinations),
                         total=len(combinations),
                         desc=f"Backtesting {self.strategy_class.__name__}"
                     )
                 )
+                # Filter out None results (failed backtests)
+                results = [r for r in raw_results if r is not None]
 
-        logger.info(f"Optimization complete: {len(results)} results")
+        failed_count = len(combinations) - len(results)
+        if failed_count > 0:
+            logger.warning(
+                f"{failed_count} backtests failed and were skipped "
+                f"({failed_count/len(combinations)*100:.1f}%)"
+            )
+
+        logger.info(f"Optimization complete: {len(results)} successful results")
 
         return results
 
