@@ -390,7 +390,7 @@ class Backtester:
                 min_bars_held=0,
                 exit_counts={},
                 trades=[],
-                equity_curve=pd.Series(equity_curve)
+                equity_curve=pd.Series([])  # Empty to save memory
             )
 
         # Trade statistics
@@ -465,8 +465,8 @@ class Backtester:
             max_bars_held=max_bars_held,
             min_bars_held=min_bars_held,
             exit_counts=exit_counts,
-            trades=trades,
-            equity_curve=equity_series
+            trades=[],  # Empty to save memory (not saved to DB anyway)
+            equity_curve=pd.Series([])  # Empty to save memory (not saved to DB anyway)
         )
 
     def _calculate_sharpe(self, returns: pd.Series, risk_free_rate: float = 0.0) -> float:
