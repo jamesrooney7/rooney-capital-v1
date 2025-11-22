@@ -69,3 +69,7 @@ requests_local/
 !dashboard/**/*.py
 results/
 test_data/
+
+# Archive directory (old results and logs - NOT documentation)
+archive/
+!docs/archive/  # Keep historical documentation in Git
