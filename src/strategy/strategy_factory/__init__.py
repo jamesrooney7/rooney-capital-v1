@@ -17,7 +17,21 @@ Phase A (Simple Strategies - COMPLETE):
 - Double7sBT: 7-period low/high system
 - MACrossBT: Moving average crossover trend following
 
-Phase B-D (Remaining 49 strategies - IN PROGRESS):
+Phase B (Mean Reversion & Calendar - COMPLETE):
+- GapDownReversalBT: Gap down reversal pattern
+- TurnOfMonthBT: Calendar-based monthly cycle
+- BBIBSReversalBT: Bollinger Band + IBS double confirmation
+- IBSStrategyBT: Classic IBS mean reversion
+- IBSExtremeBT: Extreme IBS levels
+- FourBarMomentumReversalBT: N-bar momentum exhaustion
+- ConsecutiveBearishCandleBT: Consecutive down closes
+- ConsecutiveBarsEMABT: Consecutive bars below MA
+- AvgHLRangeIBSBT: Volatility + IBS combo
+- ThreeDownThreeUpBT: Symmetric entry/exit pattern
+- ConsecutiveCloseLowBT: Aggressive selling pressure detection
+- ATRBuyDipBT: ATR-based dynamic dip buying
+
+Phase C-E (Remaining 42 strategies - IN PROGRESS):
 - Coming soon...
 
 Usage:
@@ -35,27 +49,70 @@ Usage:
                        ml_model_path='models/ES_21_model.pkl')
 """
 
+# Phase A imports
 from .rsi2_mean_reversion_bt import RSI2MeanReversionBT
 from .buy_on_5_bar_low_bt import BuyOn5BarLowBT
 from .three_bar_low_bt import ThreeBarLowBT
 from .double_7s_bt import Double7sBT
 from .ma_cross_bt import MACrossBT
 
+# Phase B imports
+from .gap_down_reversal_bt import GapDownReversalBT
+from .turn_of_month_bt import TurnOfMonthBT
+from .bb_ibs_reversal_bt import BBIBSReversalBT
+from .ibs_strategy_bt import IBSStrategyBT
+from .ibs_extreme_bt import IBSExtremeBT
+from .four_bar_momentum_reversal_bt import FourBarMomentumReversalBT
+from .consecutive_bearish_candle_bt import ConsecutiveBearishCandleBT
+from .consecutive_bars_ema_bt import ConsecutiveBarsEMABT
+from .avg_hl_range_ibs_bt import AvgHLRangeIBSBT
+from .three_down_three_up_bt import ThreeDownThreeUpBT
+from .consecutive_close_low_bt import ConsecutiveCloseLowBT
+from .atr_buy_dip_bt import ATRBuyDipBT
+
 __all__ = [
+    # Phase A
     'RSI2MeanReversionBT',
     'BuyOn5BarLowBT',
     'ThreeBarLowBT',
     'Double7sBT',
     'MACrossBT',
+    # Phase B
+    'GapDownReversalBT',
+    'TurnOfMonthBT',
+    'BBIBSReversalBT',
+    'IBSStrategyBT',
+    'IBSExtremeBT',
+    'FourBarMomentumReversalBT',
+    'ConsecutiveBearishCandleBT',
+    'ConsecutiveBarsEMABT',
+    'AvgHLRangeIBSBT',
+    'ThreeDownThreeUpBT',
+    'ConsecutiveCloseLowBT',
+    'ATRBuyDipBT',
 ]
 
 # Strategy ID mapping (from Strategy Factory)
 STRATEGY_ID_MAP = {
+    # Phase A
+    17: MACrossBT,             # MA Cross
     21: RSI2MeanReversionBT,   # RSI2 Mean Reversion
+    37: Double7sBT,            # Double 7s
     40: BuyOn5BarLowBT,        # Buy on 5 Bar Low
     41: ThreeBarLowBT,         # Three Bar Low
-    37: Double7sBT,            # Double 7s
-    17: MACrossBT,             # MA Cross
+    # Phase B
+    42: GapDownReversalBT,     # Gap Down Reversal
+    43: TurnOfMonthBT,         # Turn of Month
+    44: BBIBSReversalBT,       # BB + IBS Reversal
+    45: IBSStrategyBT,         # IBS Strategy
+    46: FourBarMomentumReversalBT,  # Four Bar Momentum Reversal
+    47: ConsecutiveBearishCandleBT,  # Consecutive Bearish Candle
+    48: ConsecutiveBarsEMABT,  # Consecutive Bars EMA
+    49: AvgHLRangeIBSBT,       # Avg HL Range + IBS
+    50: ThreeDownThreeUpBT,    # Three Down Three Up
+    51: ConsecutiveCloseLowBT,  # Consecutive Close Low
+    52: ATRBuyDipBT,           # ATR Buy Dip
+    53: IBSExtremeBT,          # IBS Extreme
 }
 
 
