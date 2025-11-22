@@ -45,7 +45,21 @@ Phase C (Indicator-based Strategies - COMPLETE):
 - RSI2SMAFilterBT: Larry Connors RSI2 + 200 SMA
 - TenBarHighBreakoutBT: Breakout with IBS filter
 
-Phase D-E (Remaining 25 strategies - IN PROGRESS):
+Phase D (Pattern Recognition & Advanced Indicators - COMPLETE):
+- ThreeBarReversalBT: 3-bar reversal pattern
+- SupportResistanceBounceBT: S/R level bounce strategy
+- EngulfingPatternBT: Bullish engulfing candlestick
+- HammerShootingStarBT: Hammer pattern recognition
+- ParabolicSARBT: Parabolic SAR trend following
+- ADXTrendStrengthBT: ADX trend strength system
+- IchimokuCloudBT: Ichimoku Cloud strategy
+- DojiReversalBT: Doji candlestick reversal
+- TurtleTradingBT: Turtle Trading breakout system
+- FibonacciRetracementBT: Fibonacci retracement levels
+- GapFillBT: Gap fill mean reversion
+- VWAPReversionBT: VWAP deviation strategy
+
+Phase E (Remaining 13 strategies - IN PROGRESS):
 - Coming soon...
 
 Usage:
@@ -98,6 +112,20 @@ from .rsi_divergence_bt import RSIDivergenceBT
 from .rsi2_sma_filter_bt import RSI2SMAFilterBT
 from .ten_bar_high_breakout_bt import TenBarHighBreakoutBT
 
+# Phase D imports
+from .three_bar_reversal_bt import ThreeBarReversalBT
+from .support_resistance_bounce_bt import SupportResistanceBounceBT
+from .engulfing_pattern_bt import EngulfingPatternBT
+from .hammer_shooting_star_bt import HammerShootingStarBT
+from .parabolic_sar_bt import ParabolicSARBT
+from .adx_trend_strength_bt import ADXTrendStrengthBT
+from .ichimoku_cloud_bt import IchimokuCloudBT
+from .doji_reversal_bt import DojiReversalBT
+from .turtle_trading_bt import TurtleTradingBT
+from .fibonacci_retracement_bt import FibonacciRetracementBT
+from .gap_fill_bt import GapFillBT
+from .vwap_reversion_bt import VWAPReversionBT
+
 __all__ = [
     # Phase A
     'RSI2MeanReversionBT',
@@ -131,6 +159,19 @@ __all__ = [
     'RSIDivergenceBT',
     'RSI2SMAFilterBT',
     'TenBarHighBreakoutBT',
+    # Phase D
+    'ThreeBarReversalBT',
+    'SupportResistanceBounceBT',
+    'EngulfingPatternBT',
+    'HammerShootingStarBT',
+    'ParabolicSARBT',
+    'ADXTrendStrengthBT',
+    'IchimokuCloudBT',
+    'DojiReversalBT',
+    'TurtleTradingBT',
+    'FibonacciRetracementBT',
+    'GapFillBT',
+    'VWAPReversionBT',
 ]
 
 # Strategy ID mapping (from Strategy Factory)
@@ -167,6 +208,19 @@ STRATEGY_ID_MAP = {
     22: RSIDivergenceBT,       # RSI Divergence
     36: RSI2SMAFilterBT,       # RSI2 + SMA Filter
     54: TenBarHighBreakoutBT,  # 10 Bar High Breakout
+    # Phase D
+    3: ThreeBarReversalBT,     # Three Bar Reversal
+    4: SupportResistanceBounceBT,  # Support/Resistance Bounce
+    5: EngulfingPatternBT,     # Engulfing Pattern
+    6: HammerShootingStarBT,   # Hammer/Shooting Star
+    8: ParabolicSARBT,         # Parabolic SAR
+    9: ADXTrendStrengthBT,     # ADX Trend Strength
+    10: IchimokuCloudBT,       # Ichimoku Cloud
+    14: DojiReversalBT,        # Doji Reversal
+    16: TurtleTradingBT,       # Turtle Trading
+    20: FibonacciRetracementBT,  # Fibonacci Retracement
+    23: GapFillBT,             # Gap Fill
+    24: VWAPReversionBT,       # VWAP Reversion
 }
 
 
