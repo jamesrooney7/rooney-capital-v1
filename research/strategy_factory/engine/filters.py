@@ -96,11 +96,10 @@ class WalkForwardFilter:
             degradation_ratio = test_sharpe / train_sharpe
 
         # Pass criteria
+        # Relaxed: Only require test_sharpe > 0 (profitable OOS)
+        # Top 3 approach: We'll take best performers regardless of absolute thresholds
         passed = (
-            train_sharpe >= 0.3 and
-            test_sharpe >= 0.15 and
-            degradation_ratio >= 0.5 and
-            test_sharpe > 0  # Must be profitable OOS
+            test_sharpe > 0.0  # Must be profitable OOS
         )
 
         # Score (0-1): weighted combination

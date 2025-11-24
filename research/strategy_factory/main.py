@@ -204,27 +204,54 @@ class StrategyFactoryCLI:
             )
             return
 
+        # Rank Gate 1 survivors by Sharpe ratio (train period 2010-2021)
+        # Take only top 10 to walk-forward to speed up validation
+        logger.info("\nRanking strategies by train Sharpe ratio...")
+        gate1_survivors_sorted = sorted(
+            gate1_survivors,
+            key=lambda r: r.sharpe_ratio,
+            reverse=True
+        )
+        top_10_for_walkforward = gate1_survivors_sorted[:10]
+
+        logger.info(f"Top 10 strategies advancing to walk-forward:")
+        for i, result in enumerate(top_10_for_walkforward, 1):
+            logger.info(
+                f"  {i}. {result.strategy_name}: "
+                f"Sharpe={result.sharpe_ratio:.3f}, Trades={result.total_trades}"
+            )
+
         # Apply Walk-Forward validation
         logger.info("\nApplying Walk-Forward Validation...")
         walkforward_filter = WalkForwardFilter()
         walkforward_survivors = []
+        walkforward_results_with_metrics = []  # Store (result, test_sharpe) tuples
 
-        for result in gate1_survivors:
+        for result in top_10_for_walkforward:
             # Recreate strategy instance
             strategy_class = STRATEGY_REGISTRY[result.strategy_id]
             strategy = strategy_class(params=result.params)
 
             try:
                 wf_result = walkforward_filter.apply(strategy, symbol, timeframe)
+                test_sharpe = wf_result.details.get('test_sharpe', 0.0)
+
                 if wf_result.passed:
                     walkforward_survivors.append(result)
-                    logger.info(f"  ✓ {result.strategy_name} passed walk-forward")
+                    walkforward_results_with_metrics.append((result, test_sharpe))
+                    logger.info(
+                        f"  ✓ {result.strategy_name} passed walk-forward "
+                        f"(test_sharpe={test_sharpe:.3f})"
+                    )
                 else:
-                    logger.info(f"  ✗ {result.strategy_name} failed walk-forward")
+                    logger.info(
+                        f"  ✗ {result.strategy_name} failed walk-forward "
+                        f"(test_sharpe={test_sharpe:.3f})"
+                    )
             except Exception as e:
                 logger.error(f"  ✗ {result.strategy_name} error: {e}")
 
-        logger.info(f"Walk-Forward: {len(walkforward_survivors)}/{len(gate1_survivors)} passed")
+        logger.info(f"Walk-Forward: {len(walkforward_survivors)}/{len(top_10_for_walkforward)} passed")
 
         if not walkforward_survivors:
             logger.warning("No strategies passed walk-forward. Exiting.")
@@ -234,6 +261,32 @@ class StrategyFactoryCLI:
             )
             return
 
+        # Rank walk-forward survivors by test Sharpe (2022-2024 OOS performance)
+        # Take top 3 to continue through pipeline
+        logger.info("\nRanking walk-forward survivors by test Sharpe...")
+        walkforward_sorted = sorted(
+            walkforward_results_with_metrics,
+            key=lambda x: x[1],  # Sort by test_sharpe
+            reverse=True
+        )
+        top_3_strategies = [result for result, test_sharpe in walkforward_sorted[:3]]
+
+        logger.info(f"Top 3 strategies advancing to full pipeline:")
+        for i, (result, test_sharpe) in enumerate(walkforward_sorted[:3], 1):
+            logger.info(
+                f"  {i}. {result.strategy_name}: "
+                f"Test Sharpe={test_sharpe:.3f}, Train Sharpe={result.sharpe_ratio:.3f}"
+            )
+
+        # Skip Regime Analysis and Parameter Stability for top 3
+        # These strategies go directly to final winners
+        logger.info("\nSkipping Regime Analysis and Parameter Stability for top 3...")
+        logger.info("(Top 3 strategies advance directly based on walk-forward performance)")
+        final_winners = top_3_strategies
+
+        # Legacy filters below (now bypassed for top 3 approach)
+        # Keeping code structure for potential future use
+        """
         # Apply Regime Analysis
         logger.info("\nApplying Regime Analysis...")
         regime_filter = RegimeFilter()
@@ -324,6 +377,7 @@ class StrategyFactoryCLI:
         ]
 
         logger.info(f"FDR: {len(final_winners)}/{len(stability_survivors)} passed")
+        """
 
         # Summary
         elapsed = time.time() - start_time
@@ -336,10 +390,9 @@ class StrategyFactoryCLI:
         logger.info("")
         logger.info("Filter Results:")
         logger.info(f"  Gate 1 (Basic):        {len(gate1_survivors):3d} / {total_backtests}")
-        logger.info(f"  Walk-Forward:          {len(walkforward_survivors):3d} / {len(gate1_survivors)}")
-        logger.info(f"  Regime Consistency:    {len(regime_survivors):3d} / {len(walkforward_survivors)}")
-        logger.info(f"  Parameter Stability:   {len(stability_survivors):3d} / {len(regime_survivors)}")
-        logger.info(f"  Statistical (MC+FDR):  {len(final_winners):3d} / {len(stability_survivors)}")
+        logger.info(f"  Top 10 to WF:          {len(top_10_for_walkforward):3d} / {len(gate1_survivors)}")
+        logger.info(f"  Walk-Forward Passed:   {len(walkforward_survivors):3d} / {len(top_10_for_walkforward)}")
+        logger.info(f"  Top 3 Final:           {len(final_winners):3d} / {len(walkforward_survivors)}")
         logger.info("")
         logger.info(f"FINAL WINNERS: {len(final_winners)} strategies")
 

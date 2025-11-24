@@ -71,7 +71,8 @@ class IBSStrategy(BaseStrategy):
         """Parameter grid for optimization."""
         return {
             'ibs_buy_threshold': [0.1, 0.15, 0.2, 0.25],
-            'ibs_sell_threshold': [0.7, 0.75, 0.8, 0.85]
+            'ibs_sell_threshold': [0.7, 0.75, 0.8, 0.85],
+            'use_discretionary_exits': [True, False]  # Test with/without IBS exit
         }
 
     @property
@@ -119,7 +120,7 @@ class IBSStrategy(BaseStrategy):
         current_idx: int
     ) -> TradeExit:
         """
-        Exit when IBS > threshold.
+        Exit when IBS > threshold (if discretionary exits enabled).
 
         Args:
             data: OHLCV dataframe with indicators
@@ -131,16 +132,20 @@ class IBSStrategy(BaseStrategy):
         Returns:
             TradeExit object
         """
-        ibs_sell_threshold = params.get('ibs_sell_threshold', 0.8)
-        current_bar = data.iloc[current_idx]
+        use_discretionary_exits = params.get('use_discretionary_exits', True)
 
-        # Exit when IBS > threshold (close near high)
-        if current_bar['ibs'] > ibs_sell_threshold:
-            return TradeExit(
-                exit=True,
-                exit_type='signal',
-                exit_price=current_bar['Close']
-            )
+        # Only apply discretionary exit if enabled
+        if use_discretionary_exits:
+            ibs_sell_threshold = params.get('ibs_sell_threshold', 0.8)
+            current_bar = data.iloc[current_idx]
 
-        # No strategy-specific exit
+            # Exit when IBS > threshold (close near high)
+            if current_bar['ibs'] > ibs_sell_threshold:
+                return TradeExit(
+                    exit=True,
+                    exit_type='signal',
+                    exit_price=current_bar['Close']
+                )
+
+        # No strategy-specific exit (rely on stop/target/time)
         return TradeExit(exit=False, exit_type='none')

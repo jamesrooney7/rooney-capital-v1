@@ -73,7 +73,8 @@ class AvgHLRangeIBS(BaseStrategy):
             'length': [15, 20, 25],
             'range_multiplier': [2.0, 2.5, 3.0],
             'bars_below_threshold': [1, 2, 3],
-            'ibs_buy_threshold': [0.1, 0.2, 0.3]
+            'ibs_buy_threshold': [0.1, 0.2, 0.3],
+            'use_discretionary_exits': [True, False]  # Test with/without discretionary exit
         }
 
     @property
@@ -167,19 +168,22 @@ class AvgHLRangeIBS(BaseStrategy):
         Returns:
             TradeExit object
         """
+        use_discretionary_exits = params.get('use_discretionary_exits', True)
         current_bar = data.iloc[current_idx]
 
-        # Get previous bar's high
-        if current_idx > 0:
-            prev_high = data.iloc[current_idx - 1]['High']
+        # Only apply discretionary exit if enabled
+        if use_discretionary_exits:
+            # Get previous bar's high
+            if current_idx > 0:
+                prev_high = data.iloc[current_idx - 1]['High']
 
-            # Exit when close > high[1]
-            if current_bar['Close'] > prev_high:
-                return TradeExit(
-                    exit=True,
-                    exit_type='signal',
-                    exit_price=current_bar['Close']
-                )
+                # Exit when close > high[1]
+                if current_bar['Close'] > prev_high:
+                    return TradeExit(
+                        exit=True,
+                        exit_type='signal',
+                        exit_price=current_bar['Close']
+                    )
 
-        # No strategy-specific exit
+        # No strategy-specific exit (rely on stop/target/time)
         return TradeExit(exit=False, exit_type='none')
