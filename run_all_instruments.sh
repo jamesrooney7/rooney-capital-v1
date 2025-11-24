@@ -10,13 +10,13 @@
 # - Top 3 final selection
 # - Discretionary exit testing
 #
-# Expected runtime: 4-8 hours total (8 instruments × 30-60 min each)
-# Expected output: 24 strategies (3 per instrument)
+# Expected runtime: 6.5-13 hours total (13 instruments × 30-60 min each)
+# Expected output: 39 strategies (3 per instrument)
 
 set -e  # Exit on error
 
-# List of instruments to optimize
-INSTRUMENTS=("ES" "NQ" "RTY" "YM" "CL" "GC" "SI" "HG")
+# List of instruments to optimize (in user-specified order)
+INSTRUMENTS=("GC" "CL" "6E" "ES" "NQ" "YM" "RTY" "SI" "HG" "6A" "6B" "6J" "6N")
 
 # Get script directory
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
@@ -102,7 +102,7 @@ echo "  Total instruments: ${#INSTRUMENTS[@]}"
 echo "  Succeeded: ${#SUCCEEDED[@]} - ${SUCCEEDED[@]}"
 echo "  Failed: ${#FAILED[@]} - ${FAILED[@]}"
 echo ""
-echo "Expected strategies: $((${#SUCCEEDED[@]} * 3))"
+echo "Expected strategies: $((${#SUCCEEDED[@]} * 3)) (out of 39 total)"
 echo "=================================================="
 
 # Exit with error if any failed
