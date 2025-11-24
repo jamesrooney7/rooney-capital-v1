@@ -165,10 +165,10 @@ class ParameterOptimizer:
             param_grid = temp_strategy.param_grid
 
         # Add exit parameters to optimization grid
-        # These were previously fixed at 1.0, now we optimize them
+        # Reduced grid for faster optimization (2x3=6 combos instead of 4x5=20)
         exit_params = {
-            'stop_loss_atr': [0.5, 1.0, 1.5, 2.0],
-            'take_profit_atr': [0.5, 1.0, 1.5, 2.0, 3.0]
+            'stop_loss_atr': [1.0, 2.0],
+            'take_profit_atr': [1.0, 2.0, 3.0]
         }
         param_grid = {**param_grid, **exit_params}
 
