@@ -137,7 +137,7 @@ def run_backtest(
     Includes realistic execution:
     - Commissions: $1.00 per side ($2 round trip)
     - Entry slippage: 0.0 points (limit orders at target price)
-    - Exit slippage: 1 tick (market orders, symbol-specific)
+    - Exit slippage: 1 tick (market orders, symbol-specific, 2 ticks round trip)
     - Entry at OPEN of bar following signal (no look-ahead bias)
     - ATR from signal bar used for stops/targets (not entry bar)
     - Stops/targets checked at bar close (not intrabar)
@@ -174,11 +174,11 @@ def run_backtest(
             - max_drawdown_pct: Maximum drawdown as percentage
             - avg_duration_bars: Average trade duration in hours
     """
-    # Auto-calculate exit slippage as 1 tick if not provided
+    # Auto-calculate exit slippage as 1 tick if not provided (2 ticks round trip total)
     if slippage_exit is None:
         spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
         slippage_exit = spec["tick_size"]  # 1 tick slippage for market order exits
-        logger.debug(f"{symbol}: Using 1-tick exit slippage = {slippage_exit} points")
+        logger.debug(f"{symbol}: Using 1-tick exit slippage = {slippage_exit} points (2 ticks round trip)")
 
     # Extract parameters
     ibs_entry_low = params.get('ibs_entry_low', 0.0)

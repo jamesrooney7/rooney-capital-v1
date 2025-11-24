@@ -573,7 +573,7 @@ def extract_training_data(
     # Set commission: $1.00 per side (user requirement)
     cerebro.broker.setcommission(commission=1.00)
 
-    # Set slippage: 1 tick per side (user requirement)
+    # Set slippage: 1 tick per order (2 ticks round trip total)
     from strategy.contract_specs import CONTRACT_SPECS
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]

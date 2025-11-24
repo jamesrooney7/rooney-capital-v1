@@ -368,7 +368,7 @@ def run_backtest_with_trade_logging(
     cerebro.broker.setcash(initial_cash)
     cerebro.broker.setcommission(commission=COMMISSION_PER_SIDE)
 
-    # Set slippage
+    # Set slippage: 1 tick per order (2 ticks round trip total)
     spec = CONTRACT_SPECS.get(symbol.upper(), {"tick_size": 0.25})
     tick_size = spec["tick_size"]
     cerebro.broker.set_slippage_fixed(tick_size)

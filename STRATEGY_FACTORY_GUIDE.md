@@ -10,6 +10,15 @@ The Strategy Factory is a systematic research pipeline designed to identify, val
 - Focus on robustness, diversity, and statistical rigor over raw performance
 - Think portfolio-level, not single-strategy optimization
 
+**Implementation Approach (AGREED - Jan 2025):**
+- **Timeline**: 1 week to production-ready system
+- **Scope**: 10 high-priority strategies from catalogue (Tier 1)
+- **Data**: 15-minute bars, 2010-2024, local file storage
+- **Symbols**: ES (Phase 1) → All symbols (Phase 2): ES, NQ, YM, RTY, GC, SI, HG, CL, NG, 6A, 6B, 6C, 6J, 6M, 6N, 6S, TLT
+- **Exit Strategy**: Fixed exits initially (1.0 ATR stop/take), optimize later
+- **Compute**: 16 CPU cores, local execution, parallel processing
+- **Integration**: Leverage existing backtest_runner.py, extract_training_data.py, train_rf_cpcv_bo.py
+
 ---
 
 ## Table of Contents
@@ -22,8 +31,9 @@ The Strategy Factory is a systematic research pipeline designed to identify, val
 6. [Statistical Rigor Framework](#statistical-rigor-framework)
 7. [Implementation Specifications](#implementation-specifications)
 8. [Integration with ML Pipeline](#integration-with-ml-pipeline)
-9. [Experiment Tracking & Reproducibility](#experiment-tracking--reproducibility)
-10. [Feedback Loop System](#feedback-loop-system)
+9. [Tier 1 Strategy Implementations](#tier-1-strategy-implementations)
+10. [Execution Guide](#execution-guide)
+11. [Experiment Tracking & Reproducibility](#experiment-tracking--reproducibility)
 
 ---
 
@@ -2724,6 +2734,259 @@ def generate_next_cycle_recommendations():
 
 ---
 
+## 9. Tier 1 Strategy Implementations
+
+### 9.1 Pragmatic Implementation Approach
+
+**Philosophy**: Build great infrastructure with 10 high-priority strategies first, then expand.
+
+**Why These 10 Strategies:**
+- ✅ Low-Medium complexity (implementable in 1 week)
+- ✅ High trade volume potential (10k+ trades expected)
+- ✅ Diverse archetypes (mean reversion, momentum, breakout)
+- ✅ Well-documented in literature (less risk of implementation bugs)
+- ✅ Parameter grids manageable (~4-81 combos each with fixed exits)
+
+### 9.2 Selected Strategies
+
+| ID | Name | Archetype | Combos | Expected Trades | Priority |
+|----|------|-----------|--------|-----------------|----------|
+| 21 | **RSI(2) Mean Reversion** | Mean Reversion | 36 | 15,000+ | ⭐️⭐️⭐️ |
+| 1 | **Bollinger Bands** | Mean Reversion | 16 | 12,000+ | ⭐️⭐️⭐️ |
+| 36 | **RSI(2) + 200 SMA Filter** | Mean Reversion | 81 | 15,000+ | ⭐️⭐️⭐️ |
+| 37 | **Double 7s** | Mean Reversion | 27 | 10,000+ | ⭐️⭐️⭐️ |
+| 17 | **MA Cross** | Trend Following | 16 | Variable | ⭐️⭐️ |
+| 24 | **VWAP Reversion** | Mean Reversion | 4 | 8,000+ | ⭐️⭐️ |
+| 23 | **Gap Fill** | Mean Reversion | 7 | 3,000-5,000 | ⭐️⭐️ |
+| 25 | **Opening Range Breakout** | Breakout | 9 | 2,000-4,000 | ⭐️⭐️ |
+| 19 | **MACD** | Momentum | 27 | 4,000-6,000 | ⭐️⭐️ |
+| 15 | **Price Channel Breakout** | Breakout | 12 | 2,000-3,000 | ⭐️⭐️ |
+
+**Total: ~235 parameter combinations** (vs 14,000 if testing all exit combinations)
+
+### 9.3 Fixed Exit Parameters (Phase 1)
+
+To reduce search space in Phase 1, we use **fixed exits**:
+
+```yaml
+stop_loss_atr: 1.0    # 1x ATR(14) stop loss
+take_profit_atr: 1.0  # 1x ATR(14) profit target
+max_bars_held: 20     # Maximum 20 bars in position
+auto_close_time: "16:00 EST"  # Close all positions at 4pm
+```
+
+**Rationale:**
+- Reduces combinations from ~14,000 to ~235 (60x speedup)
+- 1.0 ATR is literature-standard baseline
+- Can optimize exits in Phase 2 for winning strategies
+- Focus Phase 1 on finding signal edges, not exit optimization
+
+### 9.4 Parameter Grids (Fixed Exits)
+
+#### Strategy #21: RSI(2) Mean Reversion
+```yaml
+rsi_length: [2, 3, 4]
+rsi_oversold: [5, 10, 15]
+rsi_overbought: [60, 65, 70, 75]
+# Total: 3 × 3 × 4 = 36 combinations
+```
+
+#### Strategy #1: Bollinger Bands
+```yaml
+bb_length: [15, 20, 25, 30]
+bb_stddev: [1.5, 2.0, 2.5, 3.0]
+# Total: 4 × 4 = 16 combinations
+```
+
+#### Strategy #36: RSI(2) + 200 SMA Filter
+```yaml
+rsi_length: [2, 3, 4]
+rsi_oversold: [3, 5, 10]
+rsi_overbought: [65, 70, 75]
+sma_filter: [150, 200, 250]
+# Total: 3 × 3 × 3 × 3 = 81 combinations
+```
+
+#### Strategy #37: Double 7s
+```yaml
+percentile_window: [5, 7, 10]
+entry_pct: [3, 5, 10]
+exit_pct: [90, 95, 97]
+# Total: 3 × 3 × 3 = 27 combinations
+```
+
+#### Strategy #17: MA Cross
+```yaml
+ma_fast: [5, 10, 15, 20]
+ma_slow: [30, 50, 75, 100]
+# Total: 4 × 4 = 16 combinations (filtered: fast < slow)
+```
+
+#### Strategy #24: VWAP Reversion
+```yaml
+vwap_std_threshold: [1.5, 2.0, 2.5, 3.0]
+# Total: 4 combinations
+```
+
+#### Strategy #23: Gap Fill
+```yaml
+gap_threshold: [0.5, 1.0, 1.5, 2.0]
+gap_fill_target: [0.3, 0.5, 0.7]
+# Total: 4 × 3 = 12 combinations (reduced from original)
+```
+
+#### Strategy #25: Opening Range Breakout
+```yaml
+or_duration_minutes: [15, 30, 60]
+or_breakout_pct: [0.0, 0.1, 0.2]
+# Total: 3 × 3 = 9 combinations
+```
+
+#### Strategy #19: MACD
+```yaml
+macd_fast: [8, 12, 16]
+macd_slow: [21, 26, 31]
+macd_signal: [7, 9, 11]
+# Total: 3 × 3 × 3 = 27 combinations
+```
+
+#### Strategy #15: Price Channel Breakout
+```yaml
+channel_length: [15, 20, 25, 30]
+channel_breakout_pct: [0.0, 0.25, 0.5]
+# Total: 4 × 3 = 12 combinations
+```
+
+### 9.5 Implementation Timeline (1 Week)
+
+**Day 1-2: Infrastructure**
+- ✅ BaseStrategy class with entry/exit/feature interfaces
+- ✅ ParameterGrid generator (itertools.product)
+- ✅ Vectorized backtester (fast numpy operations)
+- ✅ SQLite results database
+- ✅ Parallel execution engine (multiprocessing, 16 workers)
+- ✅ Real-time progress tracking (tqdm)
+
+**Day 3-4: Strategy Implementations**
+- ✅ Implement all 10 strategies
+- ✅ Unit tests for each strategy
+- ✅ Indicator calculations (RSI, Bollinger, MACD, VWAP, ATR)
+- ✅ Data loading integration
+
+**Day 5: Phase 1 Execution**
+- ✅ Run all 235 backtests on ES 15-min (2010-2024)
+- ✅ Apply filters: trade count, Sharpe, walk-forward, regime, stability
+- ✅ Generate Phase 1 report with top 5-10 strategies
+
+**Day 6: Phase 2 Multi-Symbol**
+- ✅ Run winners on all symbols (NQ, YM, RTY, GC, etc.)
+- ✅ Correlation analysis
+- ✅ Portfolio simulation
+- ✅ Select 2-4 strategies for ML
+
+**Day 7: Phase 3 ML Integration**
+- ✅ Pipe winners to extract_training_data.py
+- ✅ Run train_rf_cpcv_bo.py on each
+- ✅ Compare raw vs ML performance
+- ✅ Final report + recommendations
+
+---
+
+## 10. Execution Guide
+
+### 10.1 Phase 1: Raw Strategy Testing
+
+```bash
+# Run Phase 1: Test 10 strategies × ~24 params = 235 backtests on ES
+python research/strategy_factory/main.py \
+    --phase 1 \
+    --symbol ES \
+    --start 2010-01-01 \
+    --end 2024-12-31 \
+    --timeframe 15min \
+    --workers 16 \
+    --output results/strategy_factory_phase1_$(date +%Y%m%d_%H%M%S)
+
+# Expected runtime: ~30-60 minutes with 16 cores
+# Output: SQLite database + markdown report + charts
+```
+
+**Filters Applied (Sequential):**
+1. ✅ Trade count ≥ 10,000
+2. ✅ Sharpe ≥ 0.2
+3. ✅ Profit Factor ≥ 1.15
+4. ✅ Max Drawdown ≤ 30%
+5. ✅ Walk-forward validation (Test Sharpe / Train Sharpe ≥ 0.5)
+6. ✅ Regime consistency (Sharpe ≥ 0.2 in 2 of 3 regimes)
+7. ✅ Parameter stability (variation < 40%)
+8. ✅ Statistical significance (FDR-corrected p < 0.05)
+
+**Expected Output:**
+- 5-10 strategies pass all filters
+- Ranked by composite score (robustness, consistency, diversification)
+
+### 10.2 Phase 2: Multi-Symbol Validation
+
+```bash
+# Run Phase 2: Test Phase 1 winners on all symbols
+python research/strategy_factory/main.py \
+    --phase 2 \
+    --input results/strategy_factory_phase1_TIMESTAMP/phase1_winners.csv \
+    --symbols ES NQ YM RTY GC SI HG CL NG 6A 6B 6C 6J 6M 6N 6S TLT \
+    --start 2010-01-01 \
+    --end 2024-12-31 \
+    --timeframe 15min \
+    --workers 16 \
+    --output results/strategy_factory_phase2_$(date +%Y%m%d_%H%M%S)
+
+# Expected runtime: ~1-2 hours
+# Output: Correlation matrix, portfolio simulations, alpha tests
+```
+
+**Filters Applied:**
+1. ✅ ≥3 of 4 equity symbols (ES/NQ/YM/RTY) with Sharpe ≥ 0.3
+2. ✅ Average Sharpe ≥ 0.5 across all tested symbols
+3. ✅ Max correlation < 0.7 with existing strategies
+4. ✅ Portfolio Sharpe improvement > 0.05
+
+**Expected Output:**
+- 2-4 strategies ready for ML pipeline
+- Recommendation: which strategies to deploy
+
+### 10.3 Phase 3: ML Pipeline Integration
+
+```bash
+# For each Phase 2 winner, run feature extraction
+python research/extract_training_data.py \
+    --strategy RSI2_MeanRev_v1 \
+    --symbol ES \
+    --start 2010-01-01 \
+    --end 2024-12-31
+
+# Then train ML model with existing pipeline
+python research/train_rf_cpcv_bo.py \
+    --symbol ES \
+    --strategy RSI2_MeanRev_v1 \
+    --n_trials 100 \
+    --cv_splits 5
+
+# Backtest with ML filter
+python research/backtest_runner.py \
+    --strategy RSI2_MeanRev_v1 \
+    --symbol ES \
+    --ml_model models/ES_RSI2_MeanRev_v1_rf_model.pkl \
+    --start 2022-01-01 \
+    --end 2024-12-31
+```
+
+**Expected Performance Improvement:**
+- Raw Sharpe: 0.3-0.5
+- ML Sharpe: 1.0-2.0+
+- Improvement: 2-4x
+- Trades kept: 30-40% of raw signals
+
+---
+
 ## Conclusion
 
 This Strategy Factory guide establishes a rigorous, systematic approach to strategy research that feeds your world-class ML pipeline. Key takeaways:
@@ -2732,11 +2995,20 @@ This Strategy Factory guide establishes a rigorous, systematic approach to strat
 2. **Robustness > Raw Performance:** Let ML enhance weak but robust edges
 3. **Portfolio-Level Thinking:** Diversification matters more than single-strategy Sharpe
 4. **Statistical Rigor:** Multiple testing corrections prevent false discoveries
-5. **Feedback Loops:** System gets smarter with each research cycle
+5. **Pragmatic Implementation:** Start with 10 proven strategies, build infrastructure for future expansion
+
+**Implementation Summary (Week 1):**
+- 🎯 10 Tier 1 strategies implemented
+- 🎯 ~235 parameter combinations tested (fixed exits)
+- 🎯 ES 15-min bars (2010-2024) → Multi-symbol validation → ML integration
+- 🎯 16-core parallel execution (~2-3 hours total runtime)
+- 🎯 2-4 production-ready strategies for live trading
 
 **Next Steps:**
-1. Review strategy archetypes and select initial 50 strategies
-2. Adjust `config.yaml` for your server specs
+1. Run data inspection commands to identify data format
+2. Build core infrastructure (Days 1-2)
+3. Implement 10 strategies (Days 3-4)
+4. Execute Phases 1-3 (Days 5-7)
 3. Run Phase 1 screening
 4. Iterate based on meta-learning insights
 

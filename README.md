@@ -24,6 +24,7 @@ This unified guide contains:
 - [System Overview](#system-overview)
   - [End-to-end Flow](#end-to-end-flow)
   - [Supported Markets](#supported-markets)
+- [Documentation Structure](#documentation-structure)
 - [Repository Layout](#repository-layout)
 - [Core Modules](#core-modules)
   - [`src/config.py`](#srcconfigpy)
@@ -80,35 +81,90 @@ The default deployment tracks the following roots: `ES`, `NQ`, `RTY`, `YM`,
 `GC`, `SI`, `HG`, `CL`, `NG`, `6A`, `6B`, and `6E`. Extend the universe by
 updating the contract map and provisioning ML bundles for the new symbols.
 
+## Documentation Structure
+
+### 🚀 Quick Start Guides (Root Level)
+- **[QUICK_START.md](QUICK_START.md)** – Fast-track deployment for experienced users
+- **[SYSTEM_GUIDE.md](SYSTEM_GUIDE.md)** – Complete operations, deployment, and troubleshooting guide
+- **[LIVE_LAUNCH_GUIDE.md](LIVE_LAUNCH_GUIDE.md)** – Production deployment checklist
+- **[STRATEGY_FACTORY_GUIDE.md](STRATEGY_FACTORY_GUIDE.md)** – Strategy research methodology
+- **[STRATEGY_FACTORY_QA_REPORT.md](STRATEGY_FACTORY_QA_REPORT.md)** – QA validation results
+
+### 📚 Detailed Documentation (`docs/`)
+
+#### Machine Learning (`docs/ml/`)
+- **[END_TO_END_OPTIMIZATION_GUIDE.md](docs/ml/END_TO_END_OPTIMIZATION_GUIDE.md)** – Complete ML workflow from data to deployment
+- **[THREE_WAY_SPLIT_GUIDE.md](docs/ml/THREE_WAY_SPLIT_GUIDE.md)** – Training/validation/test split methodology
+- **[BASE_STRATEGY_OPTIMIZATION_README.md](docs/ml/BASE_STRATEGY_OPTIMIZATION_README.md)** – Base strategy parameter tuning
+- **[CLUSTERED_FEATURE_SELECTION_GUIDE.md](docs/ml/CLUSTERED_FEATURE_SELECTION_GUIDE.md)** – Feature engineering and selection
+- **[DATA_TRANSFORMATION_TO_ML_WORKFLOW.md](docs/ml/DATA_TRANSFORMATION_TO_ML_WORKFLOW.md)** – Data pipeline architecture
+- **[STRATEGY_OPTIMIZATION_QUICKSTART.md](docs/ml/STRATEGY_OPTIMIZATION_QUICKSTART.md)** – Quick ML training guide
+
+#### Portfolio Management (`docs/portfolio/`)
+- **[PORTFOLIO_INTEGRATION_GUIDE.md](docs/portfolio/PORTFOLIO_INTEGRATION_GUIDE.md)** – Multi-strategy portfolio construction
+
+#### Operations (`docs/operations/`)
+- **[MONITORING_GUIDE.md](docs/operations/MONITORING_GUIDE.md)** – System monitoring and alerting
+- **[TRANSACTION_COST_CONFIGURATION.md](docs/operations/TRANSACTION_COST_CONFIGURATION.md)** – Commission and slippage settings
+
+#### Configuration (`docs/configuration/`)
+- **[CONFIGURATION_B_SETUP.md](docs/configuration/CONFIGURATION_B_SETUP.md)** – Alternative deployment configuration
+
+#### Reference (`docs/reference/`)
+- **[INDICATOR_PARAMETERS.md](docs/reference/INDICATOR_PARAMETERS.md)** – Complete indicator parameter reference
+
+#### Quality Assurance (`docs/quality_assurance/`)
+- **[LOOK_AHEAD_BIAS_REVIEW.md](docs/quality_assurance/LOOK_AHEAD_BIAS_REVIEW.md)** – Comprehensive bias audit results
+
+#### Historical (`docs/archive/`)
+Historical implementation notes and issue resolutions (preserved for reference)
+
 ## Repository Layout
 
 ```
 src/
-├── strategy/     # Trading logic, feature engineering, risk controls
-├── runner/       # Databento bridge, live worker, TradersPost client
-└── models/       # Instrument-specific Random Forest veto bundles
-tests/            # Integration and unit coverage for live worker & strategy
-Data/             # Contract metadata and roll rules
-docs/             # Deployment notes and historical planning docs
-config.example.yml # Template runtime configuration with environment expansion hints
-.env.example      # Template environment variables (copy to .env with real secrets)
-requirements.txt  # Python dependencies
+├── strategy/            # Trading logic, feature engineering, risk controls
+├── runner/              # Databento bridge, live worker, TradersPost client
+└── models/              # Instrument-specific Random Forest veto bundles
+research/                # Research pipeline and analysis tools
+├── strategy_factory/    # Systematic strategy discovery (54 strategies)
+├── ml_meta_labeling/    # ML training pipeline
+├── portfolio_optimization/ # Multi-strategy portfolio construction
+├── scripts/             # Utility scripts and monitoring tools
+├── analysis/            # Result analysis and diagnostics
+└── validation/          # Feature verification and QA
+tests/                   # Integration and unit test coverage
+Data/                    # Contract metadata and roll rules
+docs/                    # Comprehensive documentation (see Documentation Structure above)
+├── ml/                  # Machine learning guides
+├── portfolio/           # Portfolio optimization
+├── operations/          # Monitoring and operations
+├── configuration/       # System configuration
+├── reference/           # Technical reference docs
+├── quality_assurance/   # QA and validation
+└── archive/             # Historical implementation notes
+deploy/                  # Deployment configurations and systemd services
+dashboard/               # Streamlit monitoring dashboard
+config.example.yml       # Template runtime configuration with environment expansion
+.env.example             # Template environment variables (copy to .env with secrets)
+requirements.txt         # Python dependencies
 ```
 
-Additional context:
+### Key Directories
 
-- **Data/** – Static metadata (`Databento_contract_map.yml`) that drive
-  subscription choices and audit rolls. Reference subscriptions live inside the
-  `reference_feeds` block of this contract map.
-- **docs/** – Includes the deployment roadmap and background notes preserved for
-  operational reference.
-- **tests/** – Validates the live worker orchestration and strategy behaviour,
-  providing integration and unit-level examples contributors can extend.
-- **config.example.yml** – Reference runtime configuration showing required keys
-  and `${VAR}` expansion syntax. Copy to `config.yml` when provisioning a host.
-- **.env.example** – Safe template for Databento and TradersPost credentials
-  plus safety toggles. Duplicate as `.env` and fill with environment-specific
-  secrets.
+- **src/** – Production code running on server (`/opt/pine/rooney-capital-v1/`)
+- **research/** – Local development for strategy research, ML training, and portfolio optimization
+- **tests/** – Automated test suite for CI/CD and local validation
+- **Data/** – Contract metadata (`Databento_contract_map.yml`) defining subscriptions and roll rules
+- **docs/** – Organized documentation (ML guides, operations, reference material, QA reports)
+- **deploy/** – systemd service definitions and deployment configurations
+- **dashboard/** – Streamlit application for real-time monitoring
+
+### Configuration Files
+
+- **config.example.yml** – Template runtime configuration with `${VAR}` expansion syntax
+- **.env.example** – Template for Databento API keys, TradersPost webhooks, and safety toggles
+- **Data/Databento_contract_map.yml** – Contract specifications and reference feed definitions
 
 ## Core Modules
 
@@ -423,19 +479,20 @@ validation, and systemd hardening.
 
 ## Additional References
 
-- `docs/ubuntu_launch_guide.md` – End-to-end Ubuntu provisioning guide covering
-  dependency installation, runtime configuration, validation, and systemd
-  deployment.
-- `docs/supporting_assets_assurance.md` – Catalogue of supporting
-  documentation, deployment runbooks, and test coverage that provide operational
-  context beyond the runtime modules.
-- `docs/deployment_roadmap.md` – Historical production roadmap, monitoring
-  guidance, and operational checklists.
-- `docs/ml_bundle_review.md` – Deep dive into ML bundle metadata, highlighting
-  feature mismatches between saved snapshots and model expectations plus
-  remediation steps.
-- `docs/monitoring_and_health_checks.md` – Operational playbook for configuring
-  heartbeat files, lightweight probes, and staged alert coverage as monitoring
-  matures.
-- `tests/README.md` – Overview of the automated test suite that guards the live
-  worker, strategy behaviour, and supporting loaders.
+### Core Guides
+- **[SYSTEM_GUIDE.md](SYSTEM_GUIDE.md)** – Complete operations and deployment guide
+- **[STRATEGY_FACTORY_GUIDE.md](STRATEGY_FACTORY_GUIDE.md)** – Strategy research methodology
+- **[docs/ml/END_TO_END_OPTIMIZATION_GUIDE.md](docs/ml/END_TO_END_OPTIMIZATION_GUIDE.md)** – Complete ML workflow
+- **[docs/portfolio/PORTFOLIO_INTEGRATION_GUIDE.md](docs/portfolio/PORTFOLIO_INTEGRATION_GUIDE.md)** – Portfolio construction
+
+### Operations & Monitoring
+- **[docs/operations/MONITORING_GUIDE.md](docs/operations/MONITORING_GUIDE.md)** – System monitoring and health checks
+- **[docs/operations/TRANSACTION_COST_CONFIGURATION.md](docs/operations/TRANSACTION_COST_CONFIGURATION.md)** – Transaction cost settings
+
+### Quality Assurance
+- **[STRATEGY_FACTORY_QA_REPORT.md](STRATEGY_FACTORY_QA_REPORT.md)** – QA validation results
+- **[docs/quality_assurance/LOOK_AHEAD_BIAS_REVIEW.md](docs/quality_assurance/LOOK_AHEAD_BIAS_REVIEW.md)** – Bias audit
+
+### Technical Reference
+- **[docs/reference/INDICATOR_PARAMETERS.md](docs/reference/INDICATOR_PARAMETERS.md)** – Indicator parameter reference
+- **[tests/README.md](tests/README.md)** – Test suite overview
