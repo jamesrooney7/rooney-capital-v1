@@ -358,24 +358,28 @@ research/strategy_factory/
 │   ├── __init__.py
 │   ├── base.py                 # BaseStrategy abstract class
 │   ├── rsi2_mean_reversion.py  # ✅ Strategy #21
-│   ├── bollinger_bands.py      # TODO: Strategy #1
-│   ├── rsi2_sma_filter.py      # TODO: Strategy #36
-│   └── ...                     # TODO: 8 more strategies
+│   ├── bollinger_bands.py      # ✅ Strategy #1
+│   ├── rsi2_sma_filter.py      # ✅ Strategy #36
+│   └── ...                     # 50+ strategies implemented
 ├── engine/
 │   ├── __init__.py
 │   ├── data_loader.py          # ✅ Data loading
 │   ├── backtester.py           # ✅ Backtesting engine
 │   ├── optimizer.py            # ✅ Parameter optimization
-│   ├── filters.py              # TODO: Statistical filters
-│   └── statistics.py           # TODO: Monte Carlo, walk-forward
+│   ├── filters.py              # ✅ Statistical filters
+│   └── statistics.py           # Monte Carlo, walk-forward
 ├── database/
 │   ├── __init__.py
 │   ├── schema.sql              # ✅ Database schema
 │   └── manager.py              # ✅ Database operations
+├── ml_integration/             # ✅ ML Pipeline Integration
+│   ├── __init__.py
+│   ├── README.md               # ML integration documentation
+│   ├── feature_extractor.py    # Extract features from strategies
+│   ├── extract_training_data.py # CLI for training data extraction
+│   └── run_ml_pipeline.py      # Full ML pipeline runner
 ├── reporting/
-│   └── ...                     # TODO: Report generation
-├── integration/
-│   └── ...                     # TODO: ML pipeline integration
+│   └── ...                     # Report generation
 └── results/
     └── strategy_factory.db     # SQLite database (created on first run)
 ```
@@ -405,30 +409,30 @@ research/strategy_factory/
 
 ### Phase 3: ML Integration
 
-Once strategies pass Phase 1-2, they feed into your existing ML pipeline:
+Once strategies pass Phase 1-2, use the **ML Integration Layer** to train models:
 
 ```bash
-# 1. Extract features (your existing script)
-python research/extract_training_data.py \
-    --strategy RSI2_MeanRev_v1 \
-    --symbol ES \
-    --start 2010-01-01 \
-    --end 2024-12-31
+# Option 1: Full pipeline for all winners
+# First extract winners from database
+python -m research.strategy_factory.extract_winners \
+    --db results/strategy_factory.db \
+    --output winners.json \
+    --top-n 3
 
-# 2. Train ML model (your existing script)
-python research/train_rf_cpcv_bo.py \
-    --symbol ES \
-    --strategy RSI2_MeanRev_v1 \
-    --n_trials 100
+# Then run ML pipeline for all winners
+python -m research.strategy_factory.ml_integration.run_ml_pipeline \
+    --winners winners.json \
+    --output-dir models/factory \
+    --n-trials 50
 
-# 3. Backtest with ML filter (your existing script)
-python research/backtest_runner.py \
-    --strategy RSI2_MeanRev_v1 \
+# Option 2: Single strategy
+python -m research.strategy_factory.ml_integration.extract_training_data \
+    --strategy RSI2MeanReversion \
     --symbol ES \
-    --ml_model models/ES_RSI2_MeanRev_v1_rf_model.pkl \
-    --start 2022-01-01 \
-    --end 2024-12-31
+    --params '{"rsi_length": 2, "rsi_oversold": 10, "rsi_overbought": 65}'
 ```
+
+See `ml_integration/README.md` for full documentation.
 
 **Expected Improvement**:
 - Raw Sharpe: 0.3-0.5
