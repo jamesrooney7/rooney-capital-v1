@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import ast
 import json
 import sys
 from pathlib import Path
@@ -117,7 +118,7 @@ def extract_top_winners(
                 'run_id': run_id,
                 'strategy_id': winner['strategy_id'],
                 'strategy_name': winner['strategy_name'],
-                'params': json.loads(winner['params']),
+                'params': ast.literal_eval(winner['params']),
                 'sharpe_ratio': winner['sharpe_ratio'],
                 'total_trades': winner['total_trades'],
                 'win_rate': winner['win_rate'],
