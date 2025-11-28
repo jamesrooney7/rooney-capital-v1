@@ -4,7 +4,10 @@
 
 ## Overview
 
-The Strategy Factory uses **vectorized pandas-based strategies** for fast research and backtesting. This ML integration layer bridges the gap between these vectorized strategies and the existing ML training pipeline (`train_rf_cpcv_bo.py`).
+The Strategy Factory uses **vectorized pandas-based strategies** for fast research and backtesting. This ML integration layer bridges the gap between these vectorized strategies and the ML training pipeline.
+
+**Default training method**: `ml_meta_labeling_optimizer.py` (LightGBM + Walk-Forward)
+**Legacy option**: `rf_cpcv_random_then_bo.py` (Random Forest + CPCV)
 
 ### Architecture
 
@@ -29,10 +32,16 @@ The Strategy Factory uses **vectorized pandas-based strategies** for fast resear
 └──────────────────────────────────────────┼───────────────────────┘
                                            │
                                            ▼
-                              ┌────────────────────────┐
-                              │ train_rf_cpcv_bo.py    │
-                              │ (CPCV + Bayesian Opt)  │
-                              └────────────────────────┘
+                    ┌─────────────────────────────────────────┐
+                    │ ml_meta_labeling_optimizer.py           │
+                    │ (LightGBM + Optuna + Walk-Forward)      │
+                    │                                         │
+                    │ Features:                               │
+                    │ - Hierarchical clustering for features  │
+                    │ - Walk-forward validation (2016-2020)   │
+                    │ - Held-out test (2021-2024)            │
+                    │ - Optional ensemble (LGB+CB+XGB)        │
+                    └─────────────────────────────────────────┘
                                            │
                                            ▼
                               ┌────────────────────────┐
@@ -73,18 +82,27 @@ python -m research.strategy_factory.ml_integration.extract_training_data \
 ### 3. Run Full ML Pipeline
 
 ```bash
-# Run extraction + ML training for all winners
+# Run extraction + ML training for all winners (using LightGBM by default)
 python -m research.strategy_factory.ml_integration.run_ml_pipeline \
     --winners winners.json \
     --output-dir models/factory \
-    --n-trials 50 \
-    --n-folds 5
+    --n-trials 100
 
 # Run for specific symbol only
 python -m research.strategy_factory.ml_integration.run_ml_pipeline \
     --winners winners.json \
     --symbol ES \
     --output-dir models/factory
+
+# Disable ensemble for faster training
+python -m research.strategy_factory.ml_integration.run_ml_pipeline \
+    --winners winners.json \
+    --no-ensemble
+
+# Use legacy Random Forest instead of LightGBM
+python -m research.strategy_factory.ml_integration.run_ml_pipeline \
+    --winners winners.json \
+    --use-legacy-rf
 ```
 
 ## Components
@@ -137,12 +155,16 @@ Orchestrates the full ML workflow.
 **Pipeline Steps**:
 1. Load winners from JSON file
 2. Extract training data using vectorized strategies
-3. Run `train_rf_cpcv_bo.py` for each strategy
+3. Run ML training (`ml_meta_labeling_optimizer.py` by default)
 4. Save models and results summary
+
+**Training Methods**:
+- **Default (LightGBM)**: Uses `ml_meta_labeling_optimizer.py` with walk-forward validation
+- **Legacy (RF)**: Uses `rf_cpcv_random_then_bo.py` with CPCV (use `--use-legacy-rf`)
 
 ## Output Format
 
-Training data CSV matches the format expected by `train_rf_cpcv_bo.py`:
+Training data CSV matches the format expected by ML training scripts:
 
 | Column | Description |
 |--------|-------------|
@@ -159,6 +181,28 @@ Training data CSV matches the format expected by `train_rf_cpcv_bo.py`:
 | `returns_1` | 1-bar return |
 | `volatility_5` | 5-bar volatility |
 | ... | Additional features |
+
+## ML Training Options
+
+### LightGBM (Default)
+
+Uses `ml_meta_labeling_optimizer.py`:
+- Hierarchical clustering for feature selection (30 clusters)
+- LightGBM with Optuna hyperparameter optimization
+- Walk-forward validation (2016-2020)
+- Held-out test period (2021-2024)
+- Optional ensemble (LightGBM + CatBoost + XGBoost)
+
+**Runtime**: ~4-8 hours per symbol with 100 trials
+
+### Random Forest (Legacy)
+
+Uses `rf_cpcv_random_then_bo.py`:
+- Feature screening + Random Search + Bayesian Optimization
+- Combinatorial Purged Cross-Validation (CPCV)
+- Random Forest classifier
+
+**Runtime**: ~1-2 hours per symbol
 
 ## Features Extracted
 
@@ -192,11 +236,11 @@ The extractor adds:
 ### 2. Feature Selection
 - Start with strategy-specific indicators
 - Add cross-asset features for diversification
-- Remove highly correlated features
+- Remove highly correlated features (handled by clustering)
 
 ### 3. Walk-Forward Validation
-- Training data should use walk-forward splits
-- Don't train on data that will be used for live trading
+- Default LightGBM approach uses walk-forward validation
+- Evaluate Walk-Forward Efficiency (WFE) - target > 0.4
 
 ## Troubleshooting
 
@@ -216,6 +260,11 @@ python -c "from research.strategy_factory.ml_integration.extract_training_data i
 - Check for NaN values in features
 - Verify target column (y_binary) has both classes
 
+### Training Too Slow
+- Reduce trials: `--n-trials 50`
+- Disable ensemble: `--no-ensemble`
+- Use legacy RF: `--use-legacy-rf`
+
 ## Files
 
 ```
@@ -226,3 +275,10 @@ ml_integration/
 ├── extract_training_data.py # CLI for training data extraction
 └── run_ml_pipeline.py       # Full ML pipeline runner
 ```
+
+## Output Files (from LightGBM training)
+
+After running the pipeline, results are saved to:
+- `models/factory/{symbol}_{strategy}_ml_meta_labeling_final_model.pkl` - Trained model
+- `models/factory/{symbol}_{strategy}_ml_meta_labeling_executive_summary.txt` - Summary
+- `models/factory/pipeline_results.json` - Overall pipeline results
