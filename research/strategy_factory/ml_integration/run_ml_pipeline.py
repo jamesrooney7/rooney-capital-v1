@@ -258,7 +258,26 @@ def run_pipeline_for_winners(
         Dict with results for each strategy
     """
     with open(winners_path, 'r') as f:
-        winners = json.load(f)
+        raw_data = json.load(f)
+
+    # Handle manifest format from extract_winners.py
+    # Manifest has: {"version": ..., "winners": [...], "winners_by_instrument": {...}}
+    # We need to group the full winners list by symbol
+    if 'winners' in raw_data and isinstance(raw_data.get('winners'), list):
+        # This is a manifest - group winners by symbol
+        winners_list = raw_data['winners']
+        winners = {}
+        for w in winners_list:
+            symbol = w['symbol']
+            if symbol not in winners:
+                winners[symbol] = []
+            winners[symbol].append(w)
+        logger.info(f"Loaded manifest with {len(winners_list)} total winners")
+    elif isinstance(raw_data, dict) and all(isinstance(v, list) for v in raw_data.values()):
+        # Already in expected format: {symbol: [winners]}
+        winners = raw_data
+    else:
+        raise ValueError(f"Unrecognized winners.json format. Expected manifest or {{symbol: [winners]}}")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
