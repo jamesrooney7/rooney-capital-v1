@@ -346,10 +346,18 @@ def calculate_additional_features(data: pd.DataFrame) -> pd.DataFrame:
     # Calendar features
     if 'datetime' in df.columns or isinstance(df.index, pd.DatetimeIndex):
         dt = df['datetime'] if 'datetime' in df.columns else df.index
-        df['day_of_week'] = dt.dt.dayofweek
-        df['hour'] = dt.dt.hour
-        df['day_of_month'] = dt.dt.day
-        df['is_month_end'] = dt.dt.is_month_end.astype(int)
-        df['is_month_start'] = dt.dt.is_month_start.astype(int)
+        # DatetimeIndex has properties directly; Series needs .dt accessor
+        if isinstance(dt, pd.DatetimeIndex):
+            df['day_of_week'] = dt.dayofweek
+            df['hour'] = dt.hour
+            df['day_of_month'] = dt.day
+            df['is_month_end'] = dt.is_month_end.astype(int)
+            df['is_month_start'] = dt.is_month_start.astype(int)
+        else:
+            df['day_of_week'] = dt.dt.dayofweek
+            df['hour'] = dt.dt.hour
+            df['day_of_month'] = dt.dt.day
+            df['is_month_end'] = dt.dt.is_month_end.astype(int)
+            df['is_month_start'] = dt.dt.is_month_start.astype(int)
 
     return df

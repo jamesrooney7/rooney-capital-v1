@@ -64,24 +64,10 @@ def register_strategies():
     global STRATEGY_REGISTRY
 
     strategies_path = Path(__file__).parent.parent / 'strategies'
+    # Auto-discover all strategy modules in the strategies directory
     strategy_modules = [
-        'rsi2_mean_reversion',
-        'bollinger_bands',
-        'rsi2_sma_filter',
-        'double_7s',
-        'ma_cross',
-        'vwap_reversion',
-        'gap_fill',
-        'opening_range_breakout',
-        'macd_strategy',
-        'price_channel_breakout',
-        'ibs_extreme',
-        'ibs_strategy',
-        'atr_buy_dip',
-        'consecutive_bearish_candle',
-        'three_bar_reversal',
-        'momentum_fade',
-        # Add more as needed
+        f.stem for f in strategies_path.glob('*.py')
+        if f.stem not in ('__init__', 'base') and not f.stem.startswith('_')
     ]
 
     for module_name in strategy_modules:
