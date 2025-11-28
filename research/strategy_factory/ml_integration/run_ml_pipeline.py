@@ -111,8 +111,10 @@ def run_ml_meta_labeling(
         '--embargo-days', str(embargo_days),
     ]
 
-    if use_ensemble:
-        cmd.append('--use-ensemble')
+    # Ensemble is enabled by default in ml_meta_labeling_optimizer.py
+    # Only add flag when we want to disable it
+    if not use_ensemble:
+        cmd.append('--no-use-ensemble')
 
     logger.info(f"Running: {' '.join(cmd)}")
 
