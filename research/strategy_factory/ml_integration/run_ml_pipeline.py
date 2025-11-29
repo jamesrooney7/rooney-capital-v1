@@ -59,10 +59,11 @@ def run_ml_meta_labeling(
     strategy_name: str,
     output_dir: str,
     n_trials: int = 100,
-    n_clusters: int = 30,
+    n_clusters: int = 10,
     cv_folds: int = 5,
     embargo_days: int = 60,
-    use_ensemble: bool = True
+    use_ensemble: bool = True,
+    min_samples_per_class: int = 200
 ) -> Dict[str, Any]:
     """
     Run ML training using ml_meta_labeling_optimizer.py (LightGBM + Walk-Forward).
@@ -80,10 +81,11 @@ def run_ml_meta_labeling(
         strategy_name: Strategy name (for output naming)
         output_dir: Output directory for models
         n_trials: Number of Optuna trials per walk-forward window
-        n_clusters: Number of feature clusters for selection
+        n_clusters: Number of feature clusters for selection (default 10)
         cv_folds: Number of cross-validation folds
         embargo_days: Embargo period in days
         use_ensemble: Whether to use ensemble model
+        min_samples_per_class: Minimum samples per class (default 200)
 
     Returns:
         Dict with training results
@@ -109,6 +111,7 @@ def run_ml_meta_labeling(
         '--n-clusters', str(n_clusters),
         '--cv-folds', str(cv_folds),
         '--embargo-days', str(embargo_days),
+        '--min-samples-per-class', str(min_samples_per_class),
     ]
 
     # Ensemble is enabled by default in ml_meta_labeling_optimizer.py
@@ -236,10 +239,11 @@ def run_pipeline_for_winners(
     start_date: str = "2010-01-01",
     end_date: str = "2024-12-31",
     n_trials: int = 100,
-    n_clusters: int = 30,
+    n_clusters: int = 10,
     use_ensemble: bool = True,
     use_legacy_rf: bool = False,
-    skip_extraction: bool = False
+    skip_extraction: bool = False,
+    min_samples_per_class: int = 200
 ) -> Dict[str, Any]:
     """
     Run full ML pipeline for all winners.
@@ -251,10 +255,11 @@ def run_pipeline_for_winners(
         start_date: Start date for training data
         end_date: End date for training data
         n_trials: Number of Optuna trials per window
-        n_clusters: Number of feature clusters
+        n_clusters: Number of feature clusters (default 10)
         use_ensemble: Use ensemble model (LightGBM + CatBoost + XGBoost)
         use_legacy_rf: Use legacy Random Forest instead of LightGBM
         skip_extraction: Skip extraction if training data already exists
+        min_samples_per_class: Minimum samples per class (default 200)
 
     Returns:
         Dict with results for each strategy
@@ -352,7 +357,8 @@ def run_pipeline_for_winners(
                         output_dir=str(output_dir),
                         n_trials=n_trials,
                         n_clusters=n_clusters,
-                        use_ensemble=use_ensemble
+                        use_ensemble=use_ensemble,
+                        min_samples_per_class=min_samples_per_class
                     )
 
                 results[f"{symbol}_{strategy_name}"] = ml_result
@@ -392,9 +398,10 @@ def run_pipeline_single(
     start_date: str = "2010-01-01",
     end_date: str = "2024-12-31",
     n_trials: int = 100,
-    n_clusters: int = 30,
+    n_clusters: int = 10,
     use_ensemble: bool = True,
-    use_legacy_rf: bool = False
+    use_legacy_rf: bool = False,
+    min_samples_per_class: int = 200
 ) -> Dict[str, Any]:
     """
     Run ML pipeline for a single strategy.
@@ -407,9 +414,10 @@ def run_pipeline_single(
         start_date: Start date
         end_date: End date
         n_trials: Number of Optuna trials
-        n_clusters: Number of feature clusters
+        n_clusters: Number of feature clusters (default 10)
         use_ensemble: Use ensemble model
         use_legacy_rf: Use legacy Random Forest
+        min_samples_per_class: Minimum samples per class (default 200)
 
     Returns:
         Training result dict
@@ -451,7 +459,8 @@ def run_pipeline_single(
             output_dir=output_dir,
             n_trials=n_trials,
             n_clusters=n_clusters,
-            use_ensemble=use_ensemble
+            use_ensemble=use_ensemble,
+            min_samples_per_class=min_samples_per_class
         )
 
     return result
@@ -474,7 +483,9 @@ def main():
 
     # ML training options
     parser.add_argument('--n-trials', type=int, default=100, help='Number of Optuna trials per window')
-    parser.add_argument('--n-clusters', type=int, default=30, help='Number of feature clusters')
+    parser.add_argument('--n-clusters', type=int, default=10, help='Number of feature clusters (default: 10)')
+    parser.add_argument('--min-samples-per-class', type=int, default=200,
+                       help='Minimum samples per class for ML training (default: 200)')
     parser.add_argument('--use-ensemble', action='store_true', default=True,
                        help='Use ensemble model (default: True)')
     parser.add_argument('--no-ensemble', action='store_true', help='Disable ensemble model')
@@ -508,7 +519,8 @@ def main():
                 n_clusters=args.n_clusters,
                 use_ensemble=use_ensemble,
                 use_legacy_rf=args.use_legacy_rf,
-                skip_extraction=args.skip_extraction
+                skip_extraction=args.skip_extraction,
+                min_samples_per_class=args.min_samples_per_class
             )
 
             success_count = sum(1 for r in results.values() if r.get('success'))
@@ -532,7 +544,8 @@ def main():
                 n_trials=args.n_trials,
                 n_clusters=args.n_clusters,
                 use_ensemble=use_ensemble,
-                use_legacy_rf=args.use_legacy_rf
+                use_legacy_rf=args.use_legacy_rf,
+                min_samples_per_class=args.min_samples_per_class
             )
 
             return 0 if result.get('success') else 1
