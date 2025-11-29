@@ -726,3 +726,256 @@ def calculate_additional_features(data: pd.DataFrame) -> pd.DataFrame:
     df = df.replace([np.inf, -np.inf], np.nan)
 
     return df
+
+
+# Cross-asset symbols (matching IbsStrategy's CROSS_Z_INSTRUMENTS)
+CROSS_ASSET_SYMBOLS = [
+    'ES', 'NQ', 'RTY', 'YM',  # Equity indices
+    'GC', 'SI', 'HG', 'PL',   # Metals
+    'CL', 'NG',               # Energy
+    '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S',  # Currencies
+    'TLT',                    # Bonds
+]
+
+
+def load_cross_asset_data(
+    symbol: str,
+    timeframe: str,
+    data_dir: Optional[Path] = None
+) -> Optional[pd.DataFrame]:
+    """
+    Load cross-asset data for feature generation.
+
+    Args:
+        symbol: Symbol code (e.g., 'ES', 'NQ', 'GC')
+        timeframe: Timeframe ('15min', '1H', '1D')
+        data_dir: Data directory (defaults to data/resampled)
+
+    Returns:
+        DataFrame with OHLCV data or None if not found
+    """
+    if data_dir is None:
+        data_dir = Path(__file__).parent.parent.parent.parent / "data" / "resampled"
+
+    file_path = data_dir / f"{symbol}_{timeframe}.csv"
+
+    if not file_path.exists():
+        logger.debug(f"Cross-asset data not found: {file_path}")
+        return None
+
+    try:
+        df = pd.read_csv(file_path, parse_dates=['datetime'])
+        if 'datetime' in df.columns:
+            df.set_index('datetime', inplace=True)
+        return df
+    except Exception as e:
+        logger.warning(f"Failed to load {file_path}: {e}")
+        return None
+
+
+def calculate_cross_asset_features(
+    main_data: pd.DataFrame,
+    main_symbol: str,
+    data_dir: Optional[Path] = None,
+    zscore_period: int = 20,
+    return_periods: Dict[str, int] = None
+) -> pd.DataFrame:
+    """
+    Calculate cross-asset z-scores and returns for all available symbols.
+
+    Generates features matching IbsStrategy's cross-asset features:
+    - {symbol}_hourly_z_score: Rolling z-score of price (hourly-ish)
+    - {symbol}_daily_z_score: Rolling z-score of price (daily-ish)
+    - {symbol}_hourly_return: Hourly return
+    - {symbol}_daily_return: Daily return
+
+    Args:
+        main_data: Main OHLCV dataframe with datetime index
+        main_symbol: The main symbol being traded (to exclude from cross-assets)
+        data_dir: Directory containing cross-asset data files
+        zscore_period: Period for z-score calculation (default 20)
+        return_periods: Dict mapping timeframe to return period in bars
+
+    Returns:
+        DataFrame with cross-asset feature columns added
+    """
+    if return_periods is None:
+        # For 15-min data: hourly = 4 bars, daily = 96 bars
+        return_periods = {'hourly': 4, 'daily': 96}
+
+    df = main_data.copy()
+
+    # Ensure datetime index
+    if 'datetime' in df.columns:
+        df_datetime = df['datetime']
+    elif isinstance(df.index, pd.DatetimeIndex):
+        df_datetime = df.index
+    else:
+        logger.warning("No datetime found for cross-asset merge")
+        return df
+
+    loaded_count = 0
+    failed_symbols = []
+
+    for symbol in CROSS_ASSET_SYMBOLS:
+        # Skip the main symbol being traded
+        if symbol.upper() == main_symbol.upper():
+            continue
+
+        # Load cross-asset data (assume 15min timeframe)
+        cross_data = load_cross_asset_data(symbol, '15min', data_dir)
+
+        if cross_data is None:
+            failed_symbols.append(symbol)
+            continue
+
+        loaded_count += 1
+        sym_lower = symbol.lower()
+
+        # Ensure cross_data has datetime index
+        if not isinstance(cross_data.index, pd.DatetimeIndex):
+            if 'datetime' in cross_data.columns:
+                cross_data.set_index('datetime', inplace=True)
+            else:
+                logger.warning(f"No datetime index for {symbol}")
+                continue
+
+        # Calculate features on cross-asset data
+        cross_close = cross_data['Close']
+
+        # Z-scores at different effective timeframes
+        # Hourly-ish: use shorter period (20 bars = ~5 hours on 15min)
+        # Daily-ish: use longer period (100 bars = ~1.5 days on 15min)
+        cross_data[f'{sym_lower}_hourly_z_score'] = zscore(cross_close, zscore_period)
+        cross_data[f'{sym_lower}_daily_z_score'] = zscore(cross_close, zscore_period * 5)
+
+        # Returns at different timeframes
+        cross_data[f'{sym_lower}_hourly_return'] = cross_close.pct_change(return_periods['hourly'])
+        # Skip es_daily_return as it's duplicate of prev_day_pct
+        if sym_lower != 'es':
+            cross_data[f'{sym_lower}_daily_return'] = cross_close.pct_change(return_periods['daily'])
+
+        # Also add z_pipeline (same as z_score for our purposes)
+        cross_data[f'{sym_lower}_hourly_z_pipeline'] = cross_data[f'{sym_lower}_hourly_z_score']
+        cross_data[f'{sym_lower}_daily_z_pipeline'] = cross_data[f'{sym_lower}_daily_z_score']
+
+        # Merge to main dataframe by datetime
+        feature_cols = [c for c in cross_data.columns if c.startswith(sym_lower)]
+        cross_features = cross_data[feature_cols]
+
+        # Reindex to main dataframe's datetime
+        if isinstance(df.index, pd.DatetimeIndex):
+            # Use forward fill for missing values (last known value)
+            cross_features_aligned = cross_features.reindex(df.index, method='ffill')
+            for col in feature_cols:
+                df[col] = cross_features_aligned[col].values
+        else:
+            # Manual merge by datetime column
+            for col in feature_cols:
+                df[col] = np.nan
+                for idx, dt in enumerate(df_datetime):
+                    # Find closest prior timestamp
+                    mask = cross_features.index <= dt
+                    if mask.any():
+                        nearest_idx = cross_features.index[mask][-1]
+                        df.iloc[idx, df.columns.get_loc(col)] = cross_features.loc[nearest_idx, col]
+
+    if loaded_count > 0:
+        logger.info(f"Loaded cross-asset features for {loaded_count} symbols")
+    if failed_symbols:
+        logger.debug(f"Cross-asset data not found for: {', '.join(failed_symbols[:5])}...")
+
+    # Replace infinities
+    df = df.replace([np.inf, -np.inf], np.nan)
+
+    return df
+
+
+def calculate_twrc(data: pd.DataFrame, fast_period: int = 10, base_period: int = 100) -> pd.Series:
+    """
+    Calculate Time-Weighted Return Correlation (TWRC) score.
+
+    TWRC measures the ratio of fast ATR to base ATR, indicating
+    recent volatility expansion/contraction.
+
+    Args:
+        data: OHLCV dataframe
+        fast_period: Fast ATR period (default 10)
+        base_period: Base ATR period (default 100)
+
+    Returns:
+        TWRC score series
+    """
+    fast_atr = calculate_atr(data, fast_period)
+    base_atr = calculate_atr(data, base_period)
+
+    # Ratio of fast to base ATR
+    ratio = fast_atr / base_atr.replace(0, np.nan)
+
+    # Normalize to 0-1 range with threshold
+    threshold = 0.7
+    score = (threshold - ratio.clip(upper=threshold)) / threshold
+    score = score.clip(0, 1)
+
+    return score
+
+
+def calculate_atr_percentile(data: pd.DataFrame, period: int = 14, lookback: int = 252) -> pd.Series:
+    """
+    Calculate ATR percentile - where current ATR ranks in recent history.
+
+    Args:
+        data: OHLCV dataframe
+        period: ATR calculation period
+        lookback: Lookback period for percentile calculation
+
+    Returns:
+        ATR percentile (0-100) series
+    """
+    atr = calculate_atr(data, period)
+
+    def percentile_rank(x):
+        if len(x) < 2:
+            return 50.0
+        current = x.iloc[-1]
+        historical = x.iloc[:-1]
+        return (historical < current).mean() * 100
+
+    return atr.rolling(lookback).apply(percentile_rank, raw=False)
+
+
+def calculate_all_features(
+    data: pd.DataFrame,
+    symbol: str,
+    add_cross_asset: bool = True,
+    data_dir: Optional[Path] = None
+) -> pd.DataFrame:
+    """
+    Calculate all ML features including cross-asset features.
+
+    This is the main entry point for comprehensive feature engineering.
+
+    Args:
+        data: OHLCV dataframe
+        symbol: Main symbol being traded
+        add_cross_asset: Whether to add cross-asset features (requires data files)
+        data_dir: Directory containing data files
+
+    Returns:
+        DataFrame with all features added
+    """
+    # First add base features
+    df = calculate_additional_features(data)
+
+    # Add TWRC
+    df['twrc'] = calculate_twrc(df)
+
+    # Add ATR percentile
+    df['atr_percentile'] = calculate_atr_percentile(df)
+    df['hourly_atr_percentile'] = calculate_atr_percentile(df, period=14, lookback=100)
+
+    # Add cross-asset features if requested
+    if add_cross_asset:
+        df = calculate_cross_asset_features(df, symbol, data_dir)
+
+    return df

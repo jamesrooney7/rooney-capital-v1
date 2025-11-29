@@ -44,7 +44,9 @@ sys.path.insert(0, str(project_root / 'src'))
 
 from research.strategy_factory.ml_integration.feature_extractor import (
     FeatureExtractor,
-    calculate_additional_features
+    calculate_additional_features,
+    calculate_all_features,
+    CROSS_ASSET_SYMBOLS
 )
 from research.strategy_factory.engine.data_loader import load_data
 
@@ -149,10 +151,10 @@ def extract_training_data(
     data = load_data(symbol, timeframe, start_date, end_date)
     logger.info(f"Loaded {len(data):,} bars")
 
-    # Add extra features if requested
+    # Add extra features if requested (including cross-asset features)
     if add_extra_features:
-        data = calculate_additional_features(data)
-        logger.info("Added additional ML features")
+        data = calculate_all_features(data, symbol, add_cross_asset=True)
+        logger.info("Added additional ML features (including cross-asset)")
 
     # Extract features and trades
     extractor = FeatureExtractor(
