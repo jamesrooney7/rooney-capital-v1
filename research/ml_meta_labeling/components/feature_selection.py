@@ -106,14 +106,36 @@ class FeatureSelection:
             logger.warning(f"Removing {len(X.columns) - len(valid_features)} zero-variance features")
             X = X[valid_features]
 
+        # Remove features with any NaN/inf values
+        valid_mask = X.notna().all() & np.isfinite(X).all()
+        valid_features = valid_mask[valid_mask].index.tolist()
+
+        if len(valid_features) < len(X.columns):
+            removed = len(X.columns) - len(valid_features)
+            logger.warning(f"Removing {removed} features with NaN/inf values")
+            X = X[valid_features]
+
         # Compute correlation matrix
         self.correlation_matrix = X.corr().abs()
+
+        # Handle NaN values in correlation matrix (can occur with constant columns in subsets)
+        # Replace NaN with 0 (no correlation)
+        nan_count = self.correlation_matrix.isna().sum().sum()
+        if nan_count > 0:
+            logger.warning(f"Replacing {nan_count} NaN values in correlation matrix with 0")
+            self.correlation_matrix = self.correlation_matrix.fillna(0)
 
         # Convert to distance: distance = 1 - |correlation|
         self.distance_matrix = 1 - self.correlation_matrix.values
 
+        # Clip to ensure valid distance range [0, 1] (handles numerical precision issues)
+        self.distance_matrix = np.clip(self.distance_matrix, 0, 1)
+
         # Ensure diagonal is zero (distance to self)
         np.fill_diagonal(self.distance_matrix, 0)
+
+        # Ensure symmetry (numerical precision can cause slight asymmetry)
+        self.distance_matrix = (self.distance_matrix + self.distance_matrix.T) / 2
 
         logger.info(f"Correlation matrix computed: {self.correlation_matrix.shape}")
 
@@ -121,8 +143,21 @@ class FeatureSelection:
         """Perform hierarchical clustering on features."""
         logger.info(f"Performing hierarchical clustering (linkage={self.linkage_method})...")
 
+        # Final validation of distance matrix
+        if np.any(np.isnan(self.distance_matrix)):
+            logger.warning("NaN values found in distance matrix, replacing with 1.0")
+            self.distance_matrix = np.nan_to_num(self.distance_matrix, nan=1.0)
+
+        if np.any(self.distance_matrix < 0):
+            logger.warning("Negative values found in distance matrix, clipping to 0")
+            self.distance_matrix = np.clip(self.distance_matrix, 0, None)
+
         # Convert distance matrix to condensed form for scipy
         condensed_dist = squareform(self.distance_matrix, checks=False)
+
+        # Ensure condensed form has no issues
+        condensed_dist = np.clip(condensed_dist, 0, None)  # No negative distances
+        condensed_dist = np.nan_to_num(condensed_dist, nan=1.0, posinf=1.0, neginf=0.0)
 
         # Perform hierarchical clustering
         self.linkage_matrix = linkage(condensed_dist, method=self.linkage_method)
