@@ -40,29 +40,28 @@ killswitch: ${POLICY_KILLSWITCH}
 # ---------------------------------------------------------------------------
 # Portfolio management
 # ---------------------------------------------------------------------------
-# Optimal portfolio from Strategy Factory ML validation (Dec 2024):
-# Only includes strategies that PASSED ML validation (Sharpe improved after filtering)
-# Note: 6B and RTY were removed - their Sharpe DEGRADED after ML filtering
+# Optimal portfolio from exhaustive optimization (Dec 2024):
+# Train Sharpe: 6.411, Test Sharpe: 3.840, Generalization: 59.9%
+# Max Drawdown: $4,044 (train), $2,853 (test)
 portfolio:
   max_positions: 5
   daily_stop_loss: 3000
   use_factory_strategies: true  # Use Strategy Factory adapter instead of IbsStrategy
   instruments:
-    - symbol: NQ
+    - symbol: 6B
       strategy: ATRBuyDip
-      sharpe: 2.97
     - symbol: CL
       strategy: ATRBuyDip
-      sharpe: 2.15
-    - symbol: HG
-      strategy: MovingAverageEnvelope
-      sharpe: 2.01
-    - symbol: GC
-      strategy: ATRBuyDip
-      sharpe: 1.87
     - symbol: ES
       strategy: AvgHLRangeIBS
-      sharpe: 1.83
+    - symbol: GC
+      strategy: ATRBuyDip
+    - symbol: HG
+      strategy: MovingAverageEnvelope
+    - symbol: NQ
+      strategy: ATRBuyDip
+    - symbol: RTY
+      strategy: ATRBuyDip
 
 # ---------------------------------------------------------------------------
 # Cash management and runtime behaviour
