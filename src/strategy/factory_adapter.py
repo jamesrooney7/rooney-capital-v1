@@ -33,10 +33,44 @@ from typing import Any, Callable, Dict, List, Optional, Type
 import backtrader as bt
 import pandas as pd
 import numpy as np
+from collections import deque as collections_deque
 
 # Import Strategy Factory base and strategies
 import sys
 from pathlib import Path
+
+# Symbols to track for cross-asset features
+CROSS_ASSET_SYMBOLS = [
+    'ES', 'NQ', 'YM', 'RTY',  # Equity indices
+    '6A', '6B', '6C', '6E', '6J', '6M', '6N', '6S',  # Currencies
+    'CL', 'GC', 'SI', 'HG', 'NG', 'PL',  # Commodities
+    'TLT',  # Reference
+]
+
+# Feature name mappings - maps model feature names to calculation keys
+FEATURE_NAME_MAP = {
+    'NQ Hourly Return': ('NQ', 'hourly_return'),
+    'ES Hourly Return': ('ES', 'hourly_return'),
+    'YM Hourly Return': ('YM', 'hourly_return'),
+    'RTY Hourly Return': ('RTY', 'hourly_return'),
+    '6J Hourly Return': ('6J', 'hourly_return'),
+    '6A Hourly Return': ('6A', 'hourly_return'),
+    '6M Hourly Return': ('6M', 'hourly_return'),
+    '6C Hourly Return': ('6C', 'hourly_return'),
+    '6E Hourly Return': ('6E', 'hourly_return'),
+    '6B Hourly Return': ('6B', 'hourly_return'),
+    'nq_hourly_return': ('NQ', 'hourly_return'),
+    'es_hourly_return': ('ES', 'hourly_return'),
+    'ym_hourly_return': ('YM', 'hourly_return'),
+    'rty_hourly_return': ('RTY', 'hourly_return'),
+    'ES Hourly Z Score': ('ES', 'hourly_zscore'),
+    '6B Hourly Z Score': ('6B', 'hourly_zscore'),
+    '6B Daily Z Score': ('6B', 'daily_zscore'),
+    'nq_z_score_hour': ('NQ', 'hourly_zscore'),
+    '6m_z_score_hour': ('6M', 'hourly_zscore'),
+    '6n_daily_z_score': ('6N', 'daily_zscore'),
+    '6a_daily_z_score': ('6A', 'daily_zscore'),
+}
 
 # Add research to path for Strategy Factory imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -139,16 +173,59 @@ class StrategyFactoryAdapter(bt.Strategy):
         # ML filtering
         self._ml_last_score = None
 
-        # Data feeds
+        # Data feeds - build map of symbol -> data feed
         self.hourly_data = self.datas[0]  # Primary hourly data
         self.daily_data = None
+        self._data_feeds: Dict[str, Any] = {}  # symbol -> hourly data feed
+        self._daily_feeds: Dict[str, Any] = {}  # symbol -> daily data feed
 
-        # Find daily data feed if available
+        # Find and map all data feeds
+        # Priority: hourly feeds > base feeds > daily feeds for feature calculation
         for d in self.datas:
             name = getattr(d, '_name', '')
-            if '_daily' in name.lower() or 'daily' in name.lower():
-                self.daily_data = d
-                break
+            if not name:
+                continue
+
+            # Check for daily feed
+            if '_day' in name.lower() or '_daily' in name.lower():
+                if self.symbol.upper() in name.upper():
+                    self.daily_data = d
+                # Extract symbol and store daily feed
+                symbol_part = name.split('_')[0].upper()
+                if symbol_part:
+                    self._daily_feeds[symbol_part] = d
+                continue
+
+            # Extract symbol from feed name (e.g., "ES_hour" -> "ES", "ES" -> "ES")
+            symbol_part = name.split('_')[0].upper()
+            if not symbol_part:
+                continue
+
+            # Prefer hourly feeds for feature calculation
+            is_hourly = '_hour' in name.lower()
+            if is_hourly or symbol_part not in self._data_feeds:
+                self._data_feeds[symbol_part] = d
+
+        # Cross-asset feature calculation
+        # Price buffers for calculating returns and z-scores
+        self._price_buffers: Dict[str, deque] = {}  # symbol -> deque of closes
+        self._daily_price_buffers: Dict[str, deque] = {}  # symbol -> deque of daily closes
+        zscore_window = 20  # Window for z-score calculation
+
+        for sym in CROSS_ASSET_SYMBOLS:
+            self._price_buffers[sym] = collections_deque(maxlen=100)
+            self._daily_price_buffers[sym] = collections_deque(maxlen=60)
+
+        # Feature collector for ML features
+        self._ml_feature_collector = None
+        if self.p.feature_tracker:
+            ml_features = self.p.ml_features if self.p.ml_features else ()
+            self._ml_feature_collector = self.p.feature_tracker.register_bundle(
+                self.symbol, ml_features
+            )
+
+        # Track last bar time to detect new bars
+        self._last_bar_time = None
 
     def notify_order(self, order):
         """Handle order notifications."""
@@ -187,7 +264,20 @@ class StrategyFactoryAdapter(bt.Strategy):
 
     def notify_trade(self, trade):
         """Handle trade notifications."""
+        exit_snapshot = None
         if trade.isclosed:
+            # Capture exit snapshot for callbacks
+            exit_snapshot = {
+                'exit_reason': 'strategy_exit',
+                'strategy_name': self.p.strategy_name,
+                'symbol': self.symbol,
+                'size': trade.size,
+                'price': trade.price,
+                'pnl': trade.pnl,
+                'pnlcomm': trade.pnlcomm,
+                'dt': self.hourly_data.datetime.datetime(0),
+            }
+
             logger.info(
                 f"{self.symbol}: Trade closed, P&L: {trade.pnl:.2f}, "
                 f"Commission: {trade.commission:.2f}"
@@ -200,10 +290,10 @@ class StrategyFactoryAdapter(bt.Strategy):
                     pnl=trade.pnlcomm
                 )
 
-            # Notify callbacks
+            # Notify callbacks with exit_snapshot (matching NotifyingIbsStrategy signature)
             for callback in self.p.trade_callbacks:
                 try:
-                    callback(self, trade)
+                    callback(self, trade, exit_snapshot)
                 except Exception as e:
                     logger.error(f"Trade callback error: {e}")
 
@@ -221,6 +311,9 @@ class StrategyFactoryAdapter(bt.Strategy):
             'volume': self.hourly_data.volume[0] if hasattr(self.hourly_data, 'volume') else 0,
         }
         self._bar_buffer.append(bar)
+
+        # Update cross-asset features for ML filtering
+        self._update_cross_asset_features()
 
         # Wait for warmup
         if self._bars_seen < self.p.warmup_bars:
@@ -367,14 +460,14 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         try:
             # Get feature values from feature tracker or DataFrame
+            features = {}
             if self.p.feature_tracker:
-                features = self.p.feature_tracker.get_features(
-                    self.symbol, self.p.ml_features
-                )
-            else:
-                # Extract features from DataFrame
+                # Use snapshot() method - returns dict of feature name -> value
+                features = dict(self.p.feature_tracker.snapshot(self.symbol))
+
+            # Fallback: Extract features from DataFrame if tracker is empty
+            if not features:
                 current_row = df.iloc[current_idx]
-                features = {}
                 for f in self.p.ml_features:
                     if f in current_row:
                         features[f] = current_row[f]
@@ -383,8 +476,16 @@ class StrategyFactoryAdapter(bt.Strategy):
                 logger.warning(f"{self.symbol}: No ML features available")
                 return None
 
+            # Check if we have all required features
+            missing = [f for f in self.p.ml_features if f not in features or features[f] is None]
+            if missing:
+                logger.debug(
+                    f"{self.symbol}: Missing {len(missing)} ML features: {missing[:5]}..."
+                )
+                return None
+
             # Build feature vector in correct order
-            X = pd.DataFrame([features])[self.p.ml_features]
+            X = pd.DataFrame([{f: features.get(f) for f in self.p.ml_features}])
 
             # Get prediction probability
             if hasattr(self.p.ml_model, 'predict_proba'):
@@ -398,12 +499,154 @@ class StrategyFactoryAdapter(bt.Strategy):
             logger.error(f"{self.symbol}: ML scoring error: {e}")
             return None
 
+    def _update_cross_asset_features(self):
+        """Update cross-asset features from all available data feeds.
+
+        This method:
+        1. Collects close prices from all cross-asset symbols
+        2. Calculates hourly returns
+        3. Calculates z-scores
+        4. Publishes features to the ML feature tracker
+        """
+        if self._ml_feature_collector is None:
+            return
+
+        # Update price buffers from all data feeds
+        for sym in CROSS_ASSET_SYMBOLS:
+            data = self._data_feeds.get(sym)
+            if data is None:
+                continue
+
+            try:
+                # Get current close price
+                close = data.close[0]
+                if close is not None and not np.isnan(close):
+                    self._price_buffers[sym].append(float(close))
+            except (IndexError, AttributeError):
+                continue
+
+        # Calculate and publish features
+        self._calculate_and_publish_features()
+
+    def _calculate_and_publish_features(self):
+        """Calculate features from price buffers and publish to tracker."""
+        if self._ml_feature_collector is None:
+            return
+
+        # Calculate hourly returns for all symbols
+        for sym in CROSS_ASSET_SYMBOLS:
+            buffer = self._price_buffers.get(sym)
+            if buffer is None or len(buffer) < 2:
+                continue
+
+            prices = list(buffer)
+
+            # Hourly return: (current - previous) / previous
+            hourly_return = (prices[-1] - prices[-2]) / prices[-2] if prices[-2] != 0 else 0.0
+
+            # Publish hourly return with various naming conventions
+            feature_names = [
+                f"{sym} Hourly Return",
+                f"{sym.lower()}_hourly_return",
+            ]
+            for fname in feature_names:
+                try:
+                    self._ml_feature_collector.record_feature(fname, hourly_return)
+                except Exception:
+                    pass
+
+            # Calculate z-score if we have enough data (20+ bars)
+            if len(prices) >= 20:
+                recent_prices = prices[-20:]
+                mean_price = sum(recent_prices) / len(recent_prices)
+                std_price = np.std(recent_prices)
+
+                if std_price > 0:
+                    zscore = (prices[-1] - mean_price) / std_price
+
+                    # Publish z-score with various naming conventions
+                    zscore_names = [
+                        f"{sym} Hourly Z Score",
+                        f"{sym.lower()}_z_score_hour",
+                        f"enable{sym}ZScoreHour",
+                    ]
+                    for fname in zscore_names:
+                        try:
+                            self._ml_feature_collector.record_feature(fname, zscore)
+                        except Exception:
+                            pass
+
+        # Calculate and publish strategy-specific features from DataFrame
+        self._publish_strategy_features()
+
+    def _publish_strategy_features(self):
+        """Publish strategy-specific features from the bar buffer."""
+        if self._ml_feature_collector is None or len(self._bar_buffer) < 20:
+            return
+
+        try:
+            # Build DataFrame from buffer for indicator calculation
+            df = pd.DataFrame(list(self._bar_buffer))
+            df['datetime'] = pd.to_datetime(df['datetime'])
+            df = df.sort_values('datetime').reset_index(drop=True)
+
+            if len(df) < 14:
+                return
+
+            # Calculate RSI
+            close = df['Close']
+            delta = close.diff()
+            gain = delta.where(delta > 0, 0).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss.replace(0, np.nan)
+            rsi = 100 - (100 / (1 + rs))
+
+            if not rsi.empty and not np.isnan(rsi.iloc[-1]):
+                self._ml_feature_collector.record_feature('rsi_len14', float(rsi.iloc[-1]))
+                self._ml_feature_collector.record_feature('daily_rsi', float(rsi.iloc[-1]))
+
+            # Calculate IBS (Internal Bar Strength)
+            high = df['High'].iloc[-1]
+            low = df['Low'].iloc[-1]
+            close_val = df['Close'].iloc[-1]
+            if high != low:
+                ibs = (close_val - low) / (high - low)
+                self._ml_feature_collector.record_feature('pair_ibs_daily', float(ibs))
+
+            # Calculate ATR Z-score
+            if len(df) >= 20:
+                tr = np.maximum(
+                    df['High'] - df['Low'],
+                    np.maximum(
+                        abs(df['High'] - df['Close'].shift(1)),
+                        abs(df['Low'] - df['Close'].shift(1))
+                    )
+                )
+                atr = tr.rolling(window=14).mean()
+                atr_mean = atr.rolling(window=20).mean()
+                atr_std = atr.rolling(window=20).std()
+
+                if atr_std.iloc[-1] > 0:
+                    atrz = (atr.iloc[-1] - atr_mean.iloc[-1]) / atr_std.iloc[-1]
+                    self._ml_feature_collector.record_feature('atrz_pct', float(atrz))
+                    self._ml_feature_collector.record_feature('enableDATRZ', float(atrz))
+
+            # RSI percentile (simplified - just use RSI value scaled)
+            if not rsi.empty and not np.isnan(rsi.iloc[-1]):
+                # Approximate percentile based on RSI value
+                rsi_percentile = rsi.iloc[-1] / 100.0
+                self._ml_feature_collector.record_feature('rsi_len_2_percentile', float(rsi_percentile))
+
+        except Exception as e:
+            logger.debug(f"{self.symbol}: Error calculating strategy features: {e}")
+
 
 class NotifyingFactoryAdapter(StrategyFactoryAdapter):
     """
     StrategyFactoryAdapter with notification callbacks for TradersPost/Discord.
 
     This is the production wrapper used by LiveWorker.
+    The base class handles all trade/order notifications and callback invocation.
     """
 
     params = StrategyFactoryAdapter.params + (
@@ -412,25 +655,6 @@ class NotifyingFactoryAdapter(StrategyFactoryAdapter):
 
     def __init__(self):
         super().__init__()
-        self._exit_snapshot = None
 
-    def notify_order(self, order):
-        """Enhanced order notification with TradersPost support."""
-        super().notify_order(order)
-
-        # Additional processing for TradersPost can be added here
-        # The order_callbacks handle the actual webhook posting
-
-    def notify_trade(self, trade):
-        """Enhanced trade notification with snapshot."""
-        # Capture exit snapshot before parent processes
-        if trade.isclosed:
-            self._exit_snapshot = {
-                'exit_reason': 'strategy_exit',
-                'ibs_value': None,  # Could be populated from strategy
-                'size': trade.size,
-                'price': trade.price,
-                'dt': self.hourly_data.datetime.datetime(0),
-            }
-
-        super().notify_trade(trade)
+    # notify_order and notify_trade are handled by the base class
+    # which properly captures exit snapshots and invokes callbacks
