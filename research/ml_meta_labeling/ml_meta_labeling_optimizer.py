@@ -294,8 +294,15 @@ def main(args):
             'y_pred_pnl': y_pred
         })
 
+    # Add additional columns needed for portfolio simulation
     if 'y_return' in test_df.columns:
         held_out_pred_df['y_return'] = test_df['y_return'].values
+
+    if 'Exit Date/Time' in test_df.columns:
+        held_out_pred_df['Exit Date/Time'] = test_df['Exit Date/Time'].values
+
+    if 'y_pnl_usd' in test_df.columns:
+        held_out_pred_df['y_pnl_usd'] = test_df['y_pnl_usd'].values
 
     held_out_pred_df.to_csv(
         output_dir / f"{args.symbol}_ml_meta_labeling_held_out_predictions.csv",
@@ -320,9 +327,19 @@ def main(args):
         if 'y_return' in test_df.columns:
             returns_unfiltered = test_df['y_return'].values
             from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
-            unfiltered_perf = calculate_performance_metrics(returns_unfiltered)
+
+            # Calculate actual trades per year for proper Sharpe annualization
+            # Held-out period is 2021-2024 (4 years)
+            years_in_test = 4.0
+            trades_per_year_unfiltered = len(returns_unfiltered) / years_in_test
+
+            unfiltered_perf = calculate_performance_metrics(
+                returns_unfiltered,
+                periods_per_year=int(max(trades_per_year_unfiltered, 1))
+            )
             unfiltered_metrics['sharpe_ratio'] = unfiltered_perf['sharpe_ratio']
             unfiltered_metrics['profit_factor'] = unfiltered_perf['profit_factor']
+            unfiltered_metrics['trades_per_year'] = trades_per_year_unfiltered
 
         # Filtered metrics (actual ML meta-labeling performance)
         y_test_filtered = y_test[filter_mask]
@@ -346,7 +363,13 @@ def main(args):
             returns_filtered = test_df['y_return'].values[filter_mask]
             from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
 
-            perf_metrics = calculate_performance_metrics(returns_filtered)
+            # Calculate actual trades per year for proper Sharpe annualization
+            trades_per_year_filtered = len(returns_filtered) / years_in_test
+
+            perf_metrics = calculate_performance_metrics(
+                returns_filtered,
+                periods_per_year=int(max(trades_per_year_filtered, 1))
+            )
             held_out_results.update({
                 'sharpe_ratio_unfiltered': unfiltered_metrics['sharpe_ratio'],
                 'sharpe_ratio_filtered': perf_metrics['sharpe_ratio'],
@@ -356,6 +379,8 @@ def main(args):
                 'calmar_ratio': perf_metrics['calmar_ratio'],
                 'max_drawdown': perf_metrics['max_drawdown'],
                 'total_return': perf_metrics['total_return'],
+                'trades_per_year_unfiltered': unfiltered_metrics.get('trades_per_year', 0),
+                'trades_per_year_filtered': trades_per_year_filtered,
             })
 
         logger.info("Held-Out Test Results (2021-2024):")
@@ -393,7 +418,15 @@ def main(args):
             returns = test_df['y_return'].values
             from research.ml_meta_labeling.utils.metrics import calculate_performance_metrics
 
-            perf_metrics = calculate_performance_metrics(returns)
+            # Calculate actual trades per year for proper Sharpe annualization
+            # Held-out period is 2021-2024 (4 years)
+            years_in_test = 4.0
+            trades_per_year = len(returns) / years_in_test
+
+            perf_metrics = calculate_performance_metrics(
+                returns,
+                periods_per_year=int(max(trades_per_year, 1))
+            )
             held_out_results.update({
                 'sharpe_ratio': perf_metrics['sharpe_ratio'],
                 'profit_factor': perf_metrics['profit_factor'],
@@ -401,6 +434,7 @@ def main(args):
                 'calmar_ratio': perf_metrics['calmar_ratio'],
                 'max_drawdown': perf_metrics['max_drawdown'],
                 'total_return': perf_metrics['total_return'],
+                'trades_per_year': trades_per_year,
             })
 
         logger.info("Held-Out Test Results (2021-2024):")

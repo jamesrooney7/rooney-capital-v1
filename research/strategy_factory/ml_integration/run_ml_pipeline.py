@@ -232,6 +232,53 @@ def run_rf_cpcv_training(
         return {'success': False, 'error': str(e)}
 
 
+def filter_best_version_per_strategy(winners: Dict[str, List[Dict]]) -> Dict[str, List[Dict]]:
+    """
+    Filter winners to keep only the best performing version of each strategy per symbol.
+
+    For each (symbol, strategy_name) combination, keeps only the winner with the highest
+    Sharpe ratio (or other ranking metric).
+
+    Args:
+        winners: Dict mapping symbol -> list of winner dicts
+
+    Returns:
+        Filtered winners dict with only best version per strategy
+    """
+    filtered_winners = {}
+
+    for symbol, symbol_winners in winners.items():
+        # Group by strategy name
+        strategy_groups = {}
+        for winner in symbol_winners:
+            strategy_name = winner['strategy_name']
+            if strategy_name not in strategy_groups:
+                strategy_groups[strategy_name] = []
+            strategy_groups[strategy_name].append(winner)
+
+        # Keep only the best version of each strategy
+        best_winners = []
+        for strategy_name, versions in strategy_groups.items():
+            if len(versions) == 1:
+                best_winners.append(versions[0])
+            else:
+                # Sort by Sharpe ratio (descending), then by profit factor
+                def get_score(w):
+                    sharpe = w.get('sharpe_ratio', w.get('sharpe', 0)) or 0
+                    pf = w.get('profit_factor', 0) or 0
+                    return (sharpe, pf)
+
+                sorted_versions = sorted(versions, key=get_score, reverse=True)
+                best = sorted_versions[0]
+                best_winners.append(best)
+                logger.info(f"  {symbol} {strategy_name}: keeping best version "
+                           f"(Sharpe={get_score(best)[0]:.2f}) out of {len(versions)} versions")
+
+        filtered_winners[symbol] = best_winners
+
+    return filtered_winners
+
+
 def run_pipeline_for_winners(
     winners_path: str,
     output_dir: str = "models/factory",
@@ -243,7 +290,8 @@ def run_pipeline_for_winners(
     use_ensemble: bool = True,
     use_legacy_rf: bool = False,
     skip_extraction: bool = False,
-    min_samples_per_class: int = 200
+    min_samples_per_class: int = 200,
+    best_version_only: bool = False
 ) -> Dict[str, Any]:
     """
     Run full ML pipeline for all winners.
@@ -260,6 +308,7 @@ def run_pipeline_for_winners(
         use_legacy_rf: Use legacy Random Forest instead of LightGBM
         skip_extraction: Skip extraction if training data already exists
         min_samples_per_class: Minimum samples per class (default 200)
+        best_version_only: Only run the best performing version of each strategy
 
     Returns:
         Dict with results for each strategy
@@ -299,6 +348,13 @@ def run_pipeline_for_winners(
     # Filter symbols if specified
     if symbol_filter:
         winners = {k: v for k, v in winners.items() if k == symbol_filter}
+
+    # Filter to best version per strategy if specified
+    if best_version_only:
+        original_count = sum(len(w) for w in winners.values())
+        winners = filter_best_version_per_strategy(winners)
+        filtered_count = sum(len(w) for w in winners.values())
+        logger.info(f"Filtered to best version per strategy: {original_count} -> {filtered_count} strategies")
 
     total_strategies = sum(len(w) for w in winners.values())
     logger.info(f"Processing {total_strategies} strategies from {len(winners)} symbols")
@@ -497,6 +553,8 @@ def main():
 
     # Options
     parser.add_argument('--skip-extraction', action='store_true', help='Skip extraction if data exists')
+    parser.add_argument('--best-version-only', action='store_true',
+                       help='Only run the best performing version of each strategy per symbol')
 
     args = parser.parse_args()
 
@@ -520,7 +578,8 @@ def main():
                 use_ensemble=use_ensemble,
                 use_legacy_rf=args.use_legacy_rf,
                 skip_extraction=args.skip_extraction,
-                min_samples_per_class=args.min_samples_per_class
+                min_samples_per_class=args.min_samples_per_class,
+                best_version_only=args.best_version_only
             )
 
             success_count = sum(1 for r in results.values() if r.get('success'))
