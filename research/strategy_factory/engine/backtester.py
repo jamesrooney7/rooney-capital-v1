@@ -418,9 +418,9 @@ class Backtester:
         gross_loss = abs(sum(losses)) if losses else 0
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 0
 
-        # Sharpe ratio (annualized)
+        # Sharpe ratio (annualized based on trading frequency)
         returns = pd.Series(pnls)
-        sharpe_ratio = self._calculate_sharpe(returns)
+        sharpe_ratio = self._calculate_sharpe(returns, data)
 
         # Drawdown
         equity_series = pd.Series(equity_curve)
@@ -469,15 +469,19 @@ class Backtester:
             equity_curve=pd.Series([])  # Empty to save memory (not saved to DB anyway)
         )
 
-    def _calculate_sharpe(self, returns: pd.Series, risk_free_rate: float = 0.0) -> float:
+    def _calculate_sharpe(
+        self,
+        returns: pd.Series,
+        data: pd.DataFrame,
+        risk_free_rate: float = 0.0
+    ) -> float:
         """
-        Calculate Sharpe ratio (annualized).
-
-        Assumes daily returns (adjust for intraday if needed).
+        Calculate annualized Sharpe ratio based on actual trading frequency.
 
         Args:
-            returns: Series of trade returns
-            risk_free_rate: Annual risk-free rate
+            returns: Series of trade P&L (in dollars)
+            data: Price data (used to calculate date range for annualization)
+            risk_free_rate: Annual risk-free rate (default: 0)
 
         Returns:
             Annualized Sharpe ratio
@@ -491,10 +495,18 @@ class Backtester:
         if std_return == 0:
             return 0.0
 
-        # Sharpe = (mean - rf) / std
-        # Annualize: multiply by sqrt(252) for daily, sqrt(12) for monthly
-        # For trades, we don't annualize since frequency varies
-        sharpe = (mean_return - risk_free_rate) / std_return
+        # Calculate years of data to determine trades per year
+        start_date = data['datetime'].iloc[0]
+        end_date = data['datetime'].iloc[-1]
+        days_elapsed = (end_date - start_date).days
+        years_elapsed = max(days_elapsed / 365.25, 0.1)  # Min 0.1 years to avoid div by zero
+
+        # Calculate actual trades per year for proper annualization
+        trades_per_year = len(returns) / years_elapsed
+
+        # Sharpe = (mean - rf) / std * sqrt(trades_per_year)
+        # This annualizes based on actual trading frequency
+        sharpe = ((mean_return - risk_free_rate) / std_return) * np.sqrt(trades_per_year)
 
         return sharpe
 
