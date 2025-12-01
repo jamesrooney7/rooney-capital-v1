@@ -8,7 +8,11 @@
 # Core paths and credentials
 # ---------------------------------------------------------------------------
 contract_map: Data/Databento_contract_map.yml
-models_path: src/models
+
+# ML models path:
+# - For IBS strategies (use_factory_strategies: false): expects {SYMBOL}_rf_model.pkl
+# - For Strategy Factory (use_factory_strategies: true): expects {SYMBOL}_ml_meta_labeling_final_model.pkl
+models_path: models/factory
 
 symbols:  # All symbols to load (for complete ML feature calculation)
   - 6A

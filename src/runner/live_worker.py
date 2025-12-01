@@ -32,7 +32,12 @@ import requests
 from requests import exceptions as requests_exceptions
 
 from config import PAIR_MAP, REQUIRED_REFERENCE_FEEDS
-from models import load_model_bundle, strategy_kwargs_from_bundle
+from models import (
+    load_model_bundle,
+    strategy_kwargs_from_bundle,
+    load_factory_model_bundle,
+    factory_strategy_kwargs_from_bundle,
+)
 from runner.contract_map import ContractMap, ContractMapError, load_contract_map
 from runner.databento_bridge import (
     Bar,
@@ -1163,19 +1168,52 @@ class LiveWorker:
             instrument_cfg = self.config.instrument(symbol)
 
             ml_features: Sequence[str] | None = None
-            try:
-                bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
-                bundle_kwargs = strategy_kwargs_from_bundle(bundle)
-                ml_features = bundle_kwargs.get("ml_features")
-                logger.info("Loaded ML bundle for %s with features=%s", symbol, bundle.features)
-            except FileNotFoundError:
-                logger.warning("No ML bundle found for %s; running without ML filter", symbol)
-                bundle_kwargs = {}
-                ml_features = ()
-            except Exception as exc:  # pragma: no cover - defensive guard
-                logger.exception("Failed to load ML bundle for %s: %s", symbol, exc)
-                bundle_kwargs = {}
-                ml_features = ()
+
+            # Choose model loader based on strategy type
+            if self.config.use_factory_strategies:
+                # Use Strategy Factory model loader for meta-labeling models
+                strategy_name = self.config.factory_strategy_mapping.get(
+                    symbol.upper(),
+                    VALIDATED_STRATEGIES.get(symbol.upper(), {}).get('strategy', 'AvgHLRangeIBS')
+                )
+                try:
+                    bundle = load_factory_model_bundle(
+                        symbol,
+                        strategy_name=strategy_name,
+                        base_dir=self.config.models_path
+                    )
+                    bundle_kwargs = factory_strategy_kwargs_from_bundle(bundle)
+                    ml_features = bundle_kwargs.get("ml_features")
+                    logger.info(
+                        "Loaded Strategy Factory ML bundle for %s (%s) with %d features",
+                        symbol, strategy_name, len(bundle.features)
+                    )
+                except FileNotFoundError:
+                    logger.warning(
+                        "No Strategy Factory ML bundle found for %s; running without ML filter",
+                        symbol
+                    )
+                    bundle_kwargs = {}
+                    ml_features = ()
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    logger.exception("Failed to load Strategy Factory ML bundle for %s: %s", symbol, exc)
+                    bundle_kwargs = {}
+                    ml_features = ()
+            else:
+                # Use original IBS model loader
+                try:
+                    bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
+                    bundle_kwargs = strategy_kwargs_from_bundle(bundle)
+                    ml_features = bundle_kwargs.get("ml_features")
+                    logger.info("Loaded ML bundle for %s with features=%s", symbol, bundle.features)
+                except FileNotFoundError:
+                    logger.warning("No ML bundle found for %s; running without ML filter", symbol)
+                    bundle_kwargs = {}
+                    ml_features = ()
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    logger.exception("Failed to load ML bundle for %s: %s", symbol, exc)
+                    bundle_kwargs = {}
+                    ml_features = ()
 
             strategy_kwargs: Dict[str, Any] = {"symbol": symbol, "size": instrument_cfg.size}
             strategy_kwargs.update(bundle_kwargs)
