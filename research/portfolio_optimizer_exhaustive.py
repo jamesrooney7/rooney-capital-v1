@@ -101,6 +101,9 @@ def evaluate_portfolio(
             avg_positions=0, meets_constraint=False
         )
 
+    # Count total trades across all symbols
+    total_trades = sum(len(df) for df in filtered_trades.values())
+
     equity_df, metrics = simulate_portfolio_intraday(
         symbol_trades=filtered_trades,
         symbol_metadata=filtered_metadata,
@@ -119,7 +122,7 @@ def evaluate_portfolio(
         cagr=metrics['cagr'],
         total_return=metrics['total_return_dollars'],
         profit_factor=metrics['profit_factor'],
-        total_trades=metrics['total_trades'],
+        total_trades=total_trades,
         daily_stops=metrics['daily_stops_hit'],
         avg_positions=metrics['avg_positions'],
         meets_constraint=max_dd < max_dd_limit
