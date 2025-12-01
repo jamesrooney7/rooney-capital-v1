@@ -722,10 +722,41 @@ class LiveWorker:
 
         self.data_symbols = tuple(sorted(set(contract_symbols) | set(self.reference_symbols)))
 
+        # Initialize contract selector for highest OI contract selection
+        # Must be done before building dataset groups so we can subscribe to selected contracts
+        self.contract_selector: Optional[ContractSelector] = None
+        self._selected_contracts: Dict[str, ContractSelection] = {}
+        trading_symbols = list(config.portfolio_instruments or self.symbols)
+
+        if config.databento_api_key and trading_symbols:
+            try:
+                self.contract_selector = ContractSelector(
+                    api_key=config.databento_api_key,
+                    dataset="GLBX.MDP3",
+                )
+                logger.info("Selecting highest OI contracts for %d trading symbols...", len(trading_symbols))
+                self._selected_contracts = self.contract_selector.select_contracts(trading_symbols)
+                for sym, sel in self._selected_contracts.items():
+                    logger.info(
+                        "  %s -> %s (OI=%d, Vol=%d)",
+                        sym, sel.contract_symbol, sel.open_interest, sel.volume
+                    )
+            except Exception:
+                logger.exception("Failed to initialize contract selector; using default contracts")
+                self.contract_selector = None
+
+        # Build dataset groups, using selected contracts for trading symbols
         dataset_groups, symbols_by_group = self._build_dataset_groups(
             contract_symbols, self.reference_symbols
         )
         self._symbols_by_dataset_group = symbols_by_group
+
+        # Update product_to_root mapping to include selected contract symbols
+        for sym, selection in self._selected_contracts.items():
+            # Map the selected contract symbol back to root (e.g., "ESH6" -> "ES")
+            product_to_root[selection.contract_symbol] = sym
+            # Also map full year format (e.g., "ESH2026" -> "ES")
+            product_to_root[selection.contract_symbol.replace("202", "2")] = sym
 
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
@@ -822,20 +853,6 @@ class LiveWorker:
         else:
             logger.info("Discord notifier disabled: no webhook URL configured")
             self.discord_notifier = None
-
-        # Initialize contract selector for highest OI contract selection
-        self.contract_selector: Optional[ContractSelector] = None
-        self._selected_contracts: Dict[str, ContractSelection] = {}
-        if config.databento_api_key:
-            try:
-                self.contract_selector = ContractSelector(
-                    api_key=config.databento_api_key,
-                    dataset="GLBX.MDP3",
-                )
-                logger.info("Contract selector initialized")
-            except Exception:
-                logger.exception("Failed to initialize contract selector")
-                self.contract_selector = None
 
         # Initialize portfolio coordinator for portfolio-wide constraints
         self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
@@ -1031,19 +1048,52 @@ class LiveWorker:
         dict[tuple[str, str], tuple[str, ...]],
         dict[tuple[str, str], tuple[str, ...]],
     ]:
-        """Return grouped subscription codes and their associated symbols."""
+        """Return grouped subscription codes and their associated symbols.
+
+        For trading symbols with selected contracts (highest OI), uses
+        stype_in='raw_symbol' with the specific contract code.
+        For reference symbols, uses the default from contract_map.
+        """
 
         grouped_codes: dict[tuple[str, str], set[str]] = {}
         grouped_symbols: dict[tuple[str, str], set[str]] = {}
 
         for symbol in sorted(set(contract_symbols) | set(reference_symbols)):
-            subscription = self.contract_map.subscription_for(symbol)
-            if not subscription:
-                continue
-            key = (subscription.dataset, subscription.stype_in)
-            if subscription.codes:
-                grouped_codes.setdefault(key, set()).update(subscription.codes)
-            grouped_symbols.setdefault(key, set()).add(symbol)
+            symbol_upper = symbol.upper()
+
+            # Check if we have a selected contract for this symbol
+            selection = self._selected_contracts.get(symbol_upper)
+            if selection:
+                # Use the selected contract with raw_symbol stype
+                subscription = self.contract_map.subscription_for(symbol)
+                if not subscription:
+                    continue
+                dataset = subscription.dataset
+
+                # Convert full year to short format for Databento (ESH2026 -> ESH6)
+                contract_code = selection.contract_symbol
+                # Extract the year part and convert to single digit
+                # ESH2026 -> ESH6, CLZ2025 -> CLZ5
+                if len(contract_code) > 4 and contract_code[-4:].isdigit():
+                    year_digit = contract_code[-1]  # Last digit of year
+                    contract_code = contract_code[:-4] + year_digit
+
+                key = (dataset, "raw_symbol")
+                grouped_codes.setdefault(key, set()).add(contract_code)
+                grouped_symbols.setdefault(key, set()).add(symbol)
+                logger.info(
+                    "Subscribing to selected contract: %s -> %s (stype=raw_symbol)",
+                    symbol, contract_code
+                )
+            else:
+                # Use default subscription from contract map
+                subscription = self.contract_map.subscription_for(symbol)
+                if not subscription:
+                    continue
+                key = (subscription.dataset, subscription.stype_in)
+                if subscription.codes:
+                    grouped_codes.setdefault(key, set()).update(subscription.codes)
+                grouped_symbols.setdefault(key, set()).add(symbol)
 
         dataset_groups = {
             key: tuple(sorted(codes)) for key, codes in grouped_codes.items()
@@ -2456,9 +2506,6 @@ class LiveWorker:
             logger.critical("❌ STARTUP ABORTED: Pre-flight checks failed")
             self._update_heartbeat(status="failed", force=True, details={"stage": "preflight"})
             raise RuntimeError("Pre-flight validation failed")
-
-        # Select contracts with highest OI before starting
-        self._select_contracts()
 
         self._update_heartbeat(status="starting", force=True)
         self.start()
