@@ -53,6 +53,7 @@ from runner.traderspost_client import (
 )
 from strategy.contract_specs import CONTRACT_SPECS
 from strategy.ibs_strategy import IbsStrategy
+from strategy.factory_adapter import NotifyingFactoryAdapter, VALIDATED_STRATEGIES
 from utils.discord_notifier import DiscordNotifier
 
 logger = logging.getLogger(__name__)
@@ -248,6 +249,8 @@ class RuntimeConfig:
     portfolio_max_positions: Optional[int] = None
     portfolio_daily_stop_loss: Optional[float] = None
     portfolio_instruments: Optional[tuple[str, ...]] = None  # Instruments to actually trade
+    use_factory_strategies: bool = False  # Use Strategy Factory adapter instead of IbsStrategy
+    factory_strategy_mapping: Mapping[str, str] = field(default_factory=dict)  # symbol -> strategy name
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
         cfg = self.instruments.get(symbol)
@@ -590,8 +593,11 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     portfolio_max_positions = None
     portfolio_daily_stop_loss = None
     portfolio_instruments = None
+    use_factory_strategies = False
+    factory_strategy_mapping: Dict[str, str] = {}
 
     if portfolio_payload:
+        use_factory_strategies = _coerce_bool(portfolio_payload.get("use_factory_strategies"), False)
         max_pos_raw = portfolio_payload.get("max_positions")
         if max_pos_raw is not None:
             try:
@@ -607,9 +613,25 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
                 logger.warning("Invalid portfolio daily_stop_loss value %r; ignoring", stop_loss_raw)
 
         # Read instruments to actually trade (vs all symbols loaded for features)
+        # Supports two formats:
+        # 1. Simple list: ["ES", "NQ", "CL"]
+        # 2. Strategy-specified list: [{symbol: ES, strategy: AvgHLRangeIBS}, ...]
         instruments_raw = portfolio_payload.get("instruments")
         if instruments_raw:
-            portfolio_instruments = tuple(str(sym).strip().upper() for sym in instruments_raw if sym)
+            parsed_instruments = []
+            for item in instruments_raw:
+                if isinstance(item, str):
+                    # Simple format: just symbol name
+                    parsed_instruments.append(item.strip().upper())
+                elif isinstance(item, Mapping):
+                    # Strategy-specified format
+                    sym = item.get("symbol", "")
+                    if sym:
+                        parsed_instruments.append(str(sym).strip().upper())
+                        strategy_name = item.get("strategy")
+                        if strategy_name:
+                            factory_strategy_mapping[str(sym).strip().upper()] = str(strategy_name)
+            portfolio_instruments = tuple(parsed_instruments) if parsed_instruments else None
 
     return RuntimeConfig(
         databento_api_key=payload.get("databento_api_key") or os.environ.get("DATABENTO_API_KEY"),
@@ -640,6 +662,8 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         portfolio_max_positions=portfolio_max_positions,
         portfolio_daily_stop_loss=portfolio_daily_stop_loss,
         portfolio_instruments=portfolio_instruments,
+        use_factory_strategies=use_factory_strategies,
+        factory_strategy_mapping=factory_strategy_mapping,
     )
 
 
@@ -1125,13 +1149,38 @@ class LiveWorker:
             if self.discord_notifier:
                 trade_callbacks.append(self._discord_trade_callback)
 
-            self.cerebro.addstrategy(
-                NotifyingIbsStrategy,
-                order_callbacks=order_callbacks,
-                trade_callbacks=trade_callbacks,
-                live_worker_ref=weakref.ref(self),
-                **strategy_kwargs,
-            )
+            # Choose strategy class based on configuration
+            if self.config.use_factory_strategies:
+                # Use Strategy Factory adapter with per-symbol strategy
+                strategy_name = self.config.factory_strategy_mapping.get(
+                    symbol.upper(),
+                    VALIDATED_STRATEGIES.get(symbol.upper(), {}).get('strategy', 'AvgHLRangeIBS')
+                )
+                logger.info(
+                    "Using Strategy Factory adapter for %s with strategy=%s",
+                    symbol, strategy_name
+                )
+                self.cerebro.addstrategy(
+                    NotifyingFactoryAdapter,
+                    symbol=symbol,
+                    strategy_name=strategy_name,
+                    strategy_params={},  # Default params; can be extended from config
+                    order_callbacks=order_callbacks,
+                    trade_callbacks=trade_callbacks,
+                    portfolio_coordinator=self.portfolio_coordinator,
+                    feature_tracker=self.ml_feature_tracker,
+                    **{k: v for k, v in strategy_kwargs.items()
+                       if k not in ('symbol', 'portfolio_coordinator')},
+                )
+            else:
+                # Use original IbsStrategy
+                self.cerebro.addstrategy(
+                    NotifyingIbsStrategy,
+                    order_callbacks=order_callbacks,
+                    trade_callbacks=trade_callbacks,
+                    live_worker_ref=weakref.ref(self),
+                    **strategy_kwargs,
+                )
 
             commission_args: Dict[str, Any] = {"name": symbol, "commission": instrument_cfg.commission}
             if instrument_cfg.margin is not None:

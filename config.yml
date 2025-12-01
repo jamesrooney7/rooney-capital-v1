@@ -40,20 +40,29 @@ killswitch: ${POLICY_KILLSWITCH}
 # ---------------------------------------------------------------------------
 # Portfolio management
 # ---------------------------------------------------------------------------
-# Optimal portfolio from exhaustive optimizer (Dec 2024):
-# - Test Sharpe: 3.84, Max DD: $2,853, Daily Stops: 0
-# - 7 symbols with max 5 concurrent positions
+# Optimal portfolio from Strategy Factory ML validation (Dec 2024):
+# Only includes strategies that PASSED ML validation (Sharpe improved after filtering)
+# Note: 6B and RTY were removed - their Sharpe DEGRADED after ML filtering
 portfolio:
   max_positions: 5
   daily_stop_loss: 3000
-  instruments:  # Optimized portfolio from Strategy Factory ML pipeline
-    - 6B   # British Pound
-    - CL   # Crude Oil
-    - ES   # E-mini S&P 500
-    - GC   # Gold
-    - HG   # Copper
-    - NQ   # E-mini Nasdaq 100
-    - RTY  # E-mini Russell 2000
+  use_factory_strategies: true  # Use Strategy Factory adapter instead of IbsStrategy
+  instruments:
+    - symbol: NQ
+      strategy: ATRBuyDip
+      sharpe: 2.97
+    - symbol: CL
+      strategy: ATRBuyDip
+      sharpe: 2.15
+    - symbol: HG
+      strategy: MovingAverageEnvelope
+      sharpe: 2.01
+    - symbol: GC
+      strategy: ATRBuyDip
+      sharpe: 1.87
+    - symbol: ES
+      strategy: AvgHLRangeIBS
+      sharpe: 1.83
 
 # ---------------------------------------------------------------------------
 # Cash management and runtime behaviour
