@@ -7,9 +7,7 @@ simulates portfolio performance with:
 - Intraday overlapping position tracking
 - Max positions constraint (based on actual open positions)
 - Daily stop loss with immediate exit of all positions
-- Slippage correction: Deducts 4-tick round-trip slippage from all trades
-  (backtests didn't include slippage in P&L calculations)
-- Proper P&L calculation with exit costs
+- Proper P&L calculation (slippage already included in strategy factory layer)
 
 Usage:
     python research/portfolio_simulator.py \
@@ -34,29 +32,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Slippage per contract (4 tick round-trip: 2 ticks per fill)
-# Based on CONTRACT_SPECS from src/strategy/contract_specs.py
-# Updated from 1-tick to 4-tick based on real execution experience
-SLIPPAGE_PER_CONTRACT = {
-    "ES": 50.00,    # 1.00 tick × $50/point
-    "NQ": 20.00,    # 1.00 tick × $20/point
-    "RTY": 20.00,   # 0.40 tick × $50/point
-    "YM": 20.00,    # 4.00 tick × $5/point
-    "GC": 40.00,    # 0.40 tick × $100/oz
-    "SI": 100.00,   # 0.020 tick × $5000/contract
-    "PL": 20.00,    # 0.40 tick × $50/oz
-    "HG": 50.00,    # 0.0020 tick × $25000/contract
-    "CL": 40.00,    # 0.04 tick × $1000/contract
-    "NG": 40.00,    # 0.004 tick × $10000/contract
-    "6A": 40.00,    # 0.0004 tick × $100000 AUD
-    "6B": 25.00,    # 0.0004 tick × $62500 GBP
-    "6C": 20.00,    # 0.0004 tick × $50000 CAD
-    "6E": 25.00,    # 0.00020 tick × $125000 EUR
-    "6J": 25.00,    # 0.0000020 tick
-    "6M": 20.00,    # 0.00020 tick × $100000 MXN
-    "6N": 40.00,    # 0.0004 tick × $100000 NZD
-    "6S": 50.00,    # 0.0004 tick × $125000 CHF
-}
 
 
 def discover_available_symbols(results_dir: Path) -> List[str]:
@@ -101,7 +76,7 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
     elif 'selected' in trades_df.columns:
         trades_df = trades_df[trades_df['selected'] == 1].copy()
 
-    # Get P&L in dollars
+    # Get P&L in dollars (slippage already included in strategy factory layer)
     if 'Model_PnL_USD_When_Selected' in trades_df.columns:
         trades_df['pnl_usd'] = trades_df['Model_PnL_USD_When_Selected']
     elif 'pnl_usd_when_selected' in trades_df.columns:
@@ -110,22 +85,6 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
         trades_df['pnl_usd'] = trades_df['Model_PnL_USD']
     else:
         raise ValueError(f"No P&L column found in {symbol} trades")
-
-    # Apply slippage correction (backtests didn't deduct slippage from P&L)
-    # Check if slippage_usd column exists, otherwise use standard slippage
-    if 'slippage_usd' in trades_df.columns:
-        # Use recorded slippage from backtest
-        slippage = trades_df['slippage_usd']
-        total_slippage = slippage.sum()
-    else:
-        # Apply standard 4-tick round-trip slippage
-        slippage_per_trade = SLIPPAGE_PER_CONTRACT.get(symbol, 40.0)  # Default $40 if unknown
-        slippage = slippage_per_trade
-        total_slippage = slippage_per_trade * len(trades_df)
-
-    # Deduct slippage from P&L
-    trades_df['pnl_usd_original'] = trades_df['pnl_usd'].copy()
-    trades_df['pnl_usd'] = trades_df['pnl_usd'] - slippage
 
     # Remove trades with missing data
     trades_df = trades_df.dropna(subset=['entry_time', 'exit_time', 'pnl_usd'])
@@ -146,10 +105,7 @@ def load_symbol_trades(results_dir: Path, symbol: str) -> Tuple[pd.DataFrame, di
             best_meta = json.load(f)
             metadata.update(best_meta)
 
-    # Log trade count and slippage applied
-    avg_slippage = slippage if isinstance(slippage, (int, float)) else slippage.mean()
-    logger.info(f"  {symbol}: Loaded {len(trades_df)} ML-filtered trades "
-                f"(slippage: ${total_slippage:,.0f} total, ${avg_slippage:.2f}/trade)")
+    logger.info(f"  {symbol}: Loaded {len(trades_df)} ML-filtered trades")
 
     return trades_df, metadata
 
@@ -160,7 +116,7 @@ def simulate_portfolio_intraday(
     max_positions: int,
     initial_capital: float = 150000.0,
     daily_stop_loss: float = 2500.0,
-    exit_slippage: float = 0.0002,
+    exit_slippage: float = 0.0,
     ranking_method: str = 'sharpe'
 ) -> Tuple[pd.DataFrame, Dict]:
     """
@@ -172,7 +128,7 @@ def simulate_portfolio_intraday(
         max_positions: Maximum positions open simultaneously
         initial_capital: Starting capital (default $150k to match live account)
         daily_stop_loss: Daily loss limit in dollars
-        exit_slippage: Additional slippage when forced to exit (0.02%)
+        exit_slippage: P&L penalty for forced exits (default 0, slippage already in P&L)
         ranking_method: How to rank symbols when limiting positions
 
     Returns:
