@@ -192,8 +192,12 @@ def main():
 
     # Parameters
     parser.add_argument('--results-dir', type=str, default='results')
-    parser.add_argument('--min-positions', type=int, default=1)
-    parser.add_argument('--max-positions', type=int, default=5)
+    parser.add_argument('--min-symbols', type=int, default=1,
+                       help='Minimum number of symbols to include in portfolio')
+    parser.add_argument('--max-symbols', type=int, default=None,
+                       help='Maximum symbols to include (default: all available)')
+    parser.add_argument('--max-positions', type=int, default=5,
+                       help='Maximum CONCURRENT positions open at any time')
     parser.add_argument('--max-dd-limit', type=float, default=5000.0)
     parser.add_argument('--initial-capital', type=float, default=150000.0)
     parser.add_argument('--daily-stop-loss', type=float, default=2500.0)
@@ -214,7 +218,7 @@ def main():
     logger.info(f"Test:  {args.test_start} to {args.test_end}")
     logger.info(f"Constraint: Max Drawdown < ${args.max_dd_limit:,.0f}")
     logger.info(f"Daily Stop Loss: ${args.daily_stop_loss:,.0f}")
-    logger.info(f"Position range: {args.min_positions} to {args.max_positions}")
+    logger.info(f"Max Concurrent Positions: {args.max_positions}")
     logger.info("")
 
     # Discover and load symbols
@@ -250,11 +254,18 @@ def main():
     logger.info(f"Symbols with train data: {len(symbols)}")
     logger.info(f"Symbols: {', '.join(sorted(symbols))}\n")
 
+    # Determine max symbols to test
+    max_symbols = args.max_symbols if args.max_symbols else len(symbols)
+    max_symbols = min(max_symbols, len(symbols))
+
+    logger.info(f"Symbol combinations: {args.min_symbols} to {max_symbols} symbols")
+    logger.info(f"(Max {args.max_positions} positions open at any time)\n")
+
     # Generate all combinations
     all_combos = generate_all_combinations(
         symbols,
-        args.min_positions,
-        args.max_positions
+        args.min_symbols,
+        max_symbols
     )
 
     logger.info(f"Testing {len(all_combos)} portfolio combinations...")
@@ -267,14 +278,13 @@ def main():
         if (i + 1) % 100 == 0:
             logger.info(f"  Progress: {i + 1}/{len(all_combos)} ({100*(i+1)/len(all_combos):.1f}%)")
 
-        # Test with max_positions = size of combo (use all selected instruments)
-        max_pos = min(len(combo), args.max_positions)
-
+        # Always use max_positions for concurrent position limit
+        # This allows trading more symbols while limiting simultaneous exposure
         result = evaluate_portfolio(
             symbol_trades=train_symbol_trades,
             symbol_metadata=all_symbol_metadata,
             symbols=combo,
-            max_positions=max_pos,
+            max_positions=args.max_positions,
             max_dd_limit=args.max_dd_limit,
             initial_capital=args.initial_capital,
             daily_stop_loss=args.daily_stop_loss
@@ -301,13 +311,13 @@ def main():
 
     # Show top 10
     logger.info("\nTop 10 portfolios by Sharpe (train period):")
-    logger.info("-" * 80)
-    logger.info(f"{'Rank':<5} {'Sharpe':<8} {'MaxDD':<10} {'PF':<6} {'Trades':<8} {'Instruments'}")
-    logger.info("-" * 80)
+    logger.info("-" * 100)
+    logger.info(f"{'Rank':<5} {'Sharpe':<8} {'MaxDD':<10} {'PF':<6} {'Trades':<8} {'#Sym':<6} {'Instruments'}")
+    logger.info("-" * 100)
 
     for i, r in enumerate(valid_results[:10]):
         instruments = ', '.join(sorted(r.symbols))
-        logger.info(f"{i+1:<5} {r.sharpe:<8.3f} ${r.max_dd:<9,.0f} {r.profit_factor:<6.2f} {r.total_trades:<8} {instruments}")
+        logger.info(f"{i+1:<5} {r.sharpe:<8.3f} ${r.max_dd:<9,.0f} {r.profit_factor:<6.2f} {r.total_trades:<8} {len(r.symbols):<6} {instruments}")
 
     # Best portfolio
     best = valid_results[0]
@@ -315,8 +325,8 @@ def main():
     logger.info("\n" + "=" * 80)
     logger.info("BEST PORTFOLIO (TRAIN)")
     logger.info("=" * 80)
-    logger.info(f"Instruments ({len(best.symbols)}): {', '.join(sorted(best.symbols))}")
-    logger.info(f"Max Positions: {best.max_positions}")
+    logger.info(f"Symbols to Trade ({len(best.symbols)}): {', '.join(sorted(best.symbols))}")
+    logger.info(f"Max Concurrent Positions: {args.max_positions}")
     logger.info(f"Sharpe Ratio: {best.sharpe:.3f}")
     logger.info(f"Max Drawdown: ${best.max_dd:,.0f}")
     logger.info(f"CAGR: {best.cagr*100:.2f}%")
@@ -345,7 +355,7 @@ def main():
         symbol_trades=test_symbol_trades,
         symbol_metadata=all_symbol_metadata,
         symbols=best.symbols,
-        max_positions=best.max_positions,
+        max_positions=args.max_positions,
         max_dd_limit=args.max_dd_limit,
         initial_capital=args.initial_capital,
         daily_stop_loss=args.daily_stop_loss
