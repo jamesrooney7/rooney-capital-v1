@@ -111,6 +111,54 @@ def parse_executive_summary(filepath: Path) -> Optional[Dict[str, Any]]:
         return None
 
 
+def populate_database(results_dir: str, db_path: str, quiet: bool = False) -> int:
+    """
+    Populate database from results directory.
+
+    This function can be called programmatically from other scripts.
+
+    Args:
+        results_dir: Directory containing executive summary files
+        db_path: Path to SQLite database
+        quiet: Suppress output
+
+    Returns:
+        Number of results parsed
+    """
+    results_dir = Path(results_dir)
+    db_path = Path(db_path)
+
+    if not results_dir.exists():
+        if not quiet:
+            print(f"Results directory not found: {results_dir}")
+        return 0
+
+    # Create database
+    conn = create_database(str(db_path))
+
+    # Parse all executive summaries (can be in subdirectories)
+    summary_files = list(results_dir.glob('**/*_executive_summary.txt'))
+
+    if not summary_files:
+        if not quiet:
+            print(f"No executive summary files found in {results_dir}")
+        conn.close()
+        return 0
+
+    parsed = 0
+    for filepath in summary_files:
+        data = parse_executive_summary(filepath)
+        if data:
+            insert_result(conn, data)
+            parsed += 1
+            if not quiet:
+                status = "IMPROVED" if data['sharpe_improved'] else "WORSE"
+                print(f"  {data['symbol']}: {status} ({data['sharpe_improvement']:+.3f})")
+
+    conn.close()
+    return parsed
+
+
 def create_database(db_path: str):
     """Create SQLite database with results table."""
     conn = sqlite3.connect(db_path)
@@ -272,10 +320,10 @@ def print_summary(conn: sqlite3.Connection):
 def main():
     parser = argparse.ArgumentParser(description='Parse ML results into SQLite database')
     parser.add_argument('--results-dir', type=str,
-                        default='research/strategy_factory/outputs',
+                        default='research/ml_meta_labeling/results',
                         help='Directory containing executive summary files')
     parser.add_argument('--db-path', type=str,
-                        default='research/strategy_factory/outputs/ml_results.db',
+                        default='research/ml_meta_labeling/results/ml_results.db',
                         help='Path to SQLite database')
     parser.add_argument('--quiet', action='store_true', help='Suppress output')
 
@@ -295,8 +343,8 @@ def main():
     # Create database
     conn = create_database(str(db_path))
 
-    # Parse all executive summaries
-    summary_files = list(results_dir.glob('*_executive_summary.txt'))
+    # Parse all executive summaries (can be in subdirectories)
+    summary_files = list(results_dir.glob('**/*_executive_summary.txt'))
 
     if not summary_files:
         print(f"No executive summary files found in {results_dir}")

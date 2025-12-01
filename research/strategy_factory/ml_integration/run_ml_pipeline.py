@@ -45,6 +45,7 @@ from research.strategy_factory.ml_integration.extract_training_data import (
     extract_from_winners,
     register_strategies
 )
+from research.strategy_factory.ml_integration.results_to_db import populate_database
 
 logging.basicConfig(
     level=logging.INFO,
@@ -291,7 +292,8 @@ def run_pipeline_for_winners(
     use_legacy_rf: bool = False,
     skip_extraction: bool = False,
     min_samples_per_class: int = 200,
-    best_version_only: bool = False
+    best_version_only: bool = False,
+    skip_db: bool = False
 ) -> Dict[str, Any]:
     """
     Run full ML pipeline for all winners.
@@ -309,6 +311,7 @@ def run_pipeline_for_winners(
         skip_extraction: Skip extraction if training data already exists
         min_samples_per_class: Minimum samples per class (default 200)
         best_version_only: Only run the best performing version of each strategy
+        skip_db: Skip database population at the end
 
     Returns:
         Dict with results for each strategy
@@ -443,6 +446,14 @@ def run_pipeline_for_winners(
         json.dump(results, f, indent=2, default=str)
     logger.info(f"Saved results summary to {summary_path}")
 
+    # Populate database with results (unless skipped)
+    if not skip_db:
+        ml_results_dir = project_root / 'research/ml_meta_labeling/results'
+        db_path = ml_results_dir / 'ml_results.db'
+        logger.info(f"\nPopulating results database...")
+        n_parsed = populate_database(str(ml_results_dir), str(db_path), quiet=False)
+        logger.info(f"Database updated with {n_parsed} results: {db_path}")
+
     return results
 
 
@@ -555,6 +566,8 @@ def main():
     parser.add_argument('--skip-extraction', action='store_true', help='Skip extraction if data exists')
     parser.add_argument('--best-version-only', action='store_true',
                        help='Only run the best performing version of each strategy per symbol')
+    parser.add_argument('--no-db', action='store_true',
+                       help='Skip database population at the end')
 
     args = parser.parse_args()
 
@@ -579,7 +592,8 @@ def main():
                 use_legacy_rf=args.use_legacy_rf,
                 skip_extraction=args.skip_extraction,
                 min_samples_per_class=args.min_samples_per_class,
-                best_version_only=args.best_version_only
+                best_version_only=args.best_version_only,
+                skip_db=args.no_db
             )
 
             success_count = sum(1 for r in results.values() if r.get('success'))
