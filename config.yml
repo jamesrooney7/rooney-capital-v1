@@ -40,19 +40,20 @@ killswitch: ${POLICY_KILLSWITCH}
 # ---------------------------------------------------------------------------
 # Portfolio management
 # ---------------------------------------------------------------------------
+# Optimal portfolio from exhaustive optimizer (Dec 2024):
+# - Test Sharpe: 3.84, Max DD: $2,853, Daily Stops: 0
+# - 7 symbols with max 5 concurrent positions
 portfolio:
-  max_positions: 2
-  daily_stop_loss: 2500
-  instruments:  # Only these will be traded (PL excluded due to slippage)
-    - 6A
-    - 6B
-    - 6C
-    - 6M
-    - 6N
-    - 6S
-    - CL
-    - HG
-    - SI
+  max_positions: 5
+  daily_stop_loss: 3000
+  instruments:  # Optimized portfolio from Strategy Factory ML pipeline
+    - 6B   # British Pound
+    - CL   # Crude Oil
+    - ES   # E-mini S&P 500
+    - GC   # Gold
+    - HG   # Copper
+    - NQ   # E-mini Nasdaq 100
+    - RTY  # E-mini Russell 2000
 
 # ---------------------------------------------------------------------------
 # Cash management and runtime behaviour
