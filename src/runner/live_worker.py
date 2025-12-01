@@ -54,6 +54,7 @@ from runner.traderspost_client import (
 from strategy.contract_specs import CONTRACT_SPECS
 from strategy.ibs_strategy import IbsStrategy
 from strategy.factory_adapter import NotifyingFactoryAdapter, VALIDATED_STRATEGIES
+from runner.contract_selector import ContractSelector, ContractSelection
 from utils.discord_notifier import DiscordNotifier
 
 logger = logging.getLogger(__name__)
@@ -821,6 +822,20 @@ class LiveWorker:
         else:
             logger.info("Discord notifier disabled: no webhook URL configured")
             self.discord_notifier = None
+
+        # Initialize contract selector for highest OI contract selection
+        self.contract_selector: Optional[ContractSelector] = None
+        self._selected_contracts: Dict[str, ContractSelection] = {}
+        if config.databento_api_key:
+            try:
+                self.contract_selector = ContractSelector(
+                    api_key=config.databento_api_key,
+                    dataset="GLBX.MDP3",
+                )
+                logger.info("Contract selector initialized")
+            except Exception:
+                logger.exception("Failed to initialize contract selector")
+                self.contract_selector = None
 
         # Initialize portfolio coordinator for portfolio-wide constraints
         self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
@@ -2442,6 +2457,9 @@ class LiveWorker:
             self._update_heartbeat(status="failed", force=True, details={"stage": "preflight"})
             raise RuntimeError("Pre-flight validation failed")
 
+        # Select contracts with highest OI before starting
+        self._select_contracts()
+
         self._update_heartbeat(status="starting", force=True)
         self.start()
 
@@ -2468,7 +2486,52 @@ class LiveWorker:
         sym = symbol.strip().upper()
         if not sym or sym not in self.contract_map:
             return {}
-        return self.contract_map.traderspost_metadata(sym)
+
+        metadata = self.contract_map.traderspost_metadata(sym)
+
+        # Add selected contract info if available
+        selection = self._selected_contracts.get(sym)
+        if selection:
+            metadata["selected_contract"] = selection.contract_symbol
+            metadata["contract_open_interest"] = selection.open_interest
+            metadata["contract_volume"] = selection.volume
+            if selection.selected_at:
+                metadata["contract_selected_at"] = selection.selected_at.isoformat()
+
+        return metadata
+
+    def _select_contracts(self) -> None:
+        """Select highest OI contracts for trading symbols."""
+        if not self.contract_selector:
+            logger.info("Contract selector not available; using default contract selection")
+            return
+
+        # Get trading symbols (from portfolio instruments if specified)
+        trading_symbols = list(self.config.portfolio_instruments or self.symbols)
+
+        if not trading_symbols:
+            logger.warning("No trading symbols to select contracts for")
+            return
+
+        logger.info("Selecting highest OI contracts for %d symbols...", len(trading_symbols))
+
+        try:
+            selections = self.contract_selector.select_contracts(trading_symbols)
+            self._selected_contracts = selections
+
+            for sym, sel in selections.items():
+                logger.info(
+                    "  %s -> %s (OI=%d, Vol=%d)",
+                    sym, sel.contract_symbol, sel.open_interest, sel.volume
+                )
+
+        except Exception as e:
+            logger.error("Failed to select contracts: %s", e)
+
+    def get_selected_contract(self, root_symbol: str) -> Optional[str]:
+        """Get the selected contract symbol for a root."""
+        selection = self._selected_contracts.get(root_symbol.strip().upper())
+        return selection.contract_symbol if selection else None
 
     def _update_heartbeat(
         self,
