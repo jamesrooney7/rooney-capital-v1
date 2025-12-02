@@ -152,6 +152,41 @@ class EnsembleModelWrapper:
         self.xgboost_model = ensemble_data.get('xgboost_model')
         self.meta_learner = ensemble_data.get('meta_learner')
         self.model_weights = ensemble_data.get('model_weights', {})
+        self._features = self._extract_features()
+
+    def _extract_features(self) -> tuple[str, ...]:
+        """Extract feature names from the ensemble models."""
+        # Try XGBoost first (most reliable for feature names)
+        if self.xgboost_model is not None:
+            if hasattr(self.xgboost_model, 'feature_names_in_'):
+                features = self.xgboost_model.feature_names_in_
+                if features is not None:
+                    return tuple(str(f) for f in features)
+
+        # Try CatBoost
+        if self.catboost_model is not None:
+            if hasattr(self.catboost_model, 'feature_names_'):
+                features = self.catboost_model.feature_names_
+                if features is not None:
+                    return tuple(str(f) for f in features)
+
+        # Try LightGBM
+        if self.lightgbm_model is not None:
+            if hasattr(self.lightgbm_model, 'feature_name_'):
+                features = self.lightgbm_model.feature_name_
+                if features is not None:
+                    return tuple(str(f) for f in features)
+            # LightGBMTrainer wrapper
+            if hasattr(self.lightgbm_model, 'model') and hasattr(self.lightgbm_model.model, 'feature_name_'):
+                features = self.lightgbm_model.model.feature_name_
+                if features is not None:
+                    return tuple(str(f) for f in features)
+
+        return ()
+
+    def get_features(self) -> tuple[str, ...]:
+        """Return the feature names used by this ensemble."""
+        return self._features
 
     def predict_proba(self, X):
         """Get probability predictions using ensemble."""
@@ -286,8 +321,19 @@ def load_factory_model_bundle(
     if isinstance(model, lgb.Booster):
         model = LightGBMBoosterWrapper(model)
 
-    # Load features
+    # Load features from file first
     features = _load_features(features_path)
+
+    # If no features file, try to extract from model
+    if not features:
+        if isinstance(model, EnsembleModelWrapper):
+            features = model.get_features()
+            if features:
+                logger.info(f"Extracted {len(features)} features from ensemble model")
+        elif hasattr(model, 'feature_names_in_'):
+            features = tuple(str(f) for f in model.feature_names_in_)
+        elif hasattr(model, 'feature_name_'):
+            features = tuple(str(f) for f in model.feature_name_)
 
     # Load metadata
     metadata = _load_held_out_results(results_path)

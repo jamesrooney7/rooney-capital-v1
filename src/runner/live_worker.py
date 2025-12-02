@@ -2720,27 +2720,41 @@ class LiveWorker:
     # ------------------------------------------------------------------
 
     def validate_ml_models(self) -> bool:
-        total = len(self.symbols)
+        # Only validate trading symbols, not all feature symbols
+        trading_symbols = list(self.config.portfolio_instruments or self.symbols)
+        total = len(trading_symbols)
         logger.info("Validating ML models for %s symbols...", total)
         if not total:
             logger.info("✓ ML models validated for %s symbols", total)
             return True
 
         failed = False
-        for symbol in self.symbols:
-            try:
-                bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
-            except Exception as exc:
-                logger.error("❌ %s: Failed to load model bundle - %s", symbol, exc)
-                failed = True
-                continue
-
-            try:
-                bundle_kwargs = strategy_kwargs_from_bundle(bundle)
-            except Exception as exc:
-                logger.error("❌ %s: Failed to prepare model bundle - %s", symbol, exc)
-                failed = True
-                continue
+        for symbol in trading_symbols:
+            # Use appropriate loader based on strategy type
+            if self.config.use_factory_strategies:
+                strategy_name = self.config.factory_strategy_mapping.get(
+                    symbol.upper(),
+                    VALIDATED_STRATEGIES.get(symbol.upper(), {}).get('strategy', 'AvgHLRangeIBS')
+                )
+                try:
+                    bundle = load_factory_model_bundle(
+                        symbol,
+                        strategy_name=strategy_name,
+                        base_dir=self.config.models_path
+                    )
+                    bundle_kwargs = factory_strategy_kwargs_from_bundle(bundle)
+                except Exception as exc:
+                    logger.error("❌ %s: Failed to load factory model bundle - %s", symbol, exc)
+                    failed = True
+                    continue
+            else:
+                try:
+                    bundle = load_model_bundle(symbol, base_dir=self.config.models_path)
+                    bundle_kwargs = strategy_kwargs_from_bundle(bundle)
+                except Exception as exc:
+                    logger.error("❌ %s: Failed to load model bundle - %s", symbol, exc)
+                    failed = True
+                    continue
 
             model = bundle_kwargs.get("ml_model")
             ml_features = bundle_kwargs.get("ml_features")
