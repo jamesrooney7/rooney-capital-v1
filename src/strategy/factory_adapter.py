@@ -342,6 +342,12 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Log when warmup completes
         if self._bars_seen == self.p.warmup_bars:
             logger.info(f"{self.symbol}: Warmup complete - now evaluating signals")
+            # Log data feeds available for cross-asset features
+            available_feeds = list(self._data_feeds.keys())
+            logger.info(f"{self.symbol}: Data feeds available for features: {sorted(available_feeds)}")
+            # Log expected ML features
+            if self.p.ml_features:
+                logger.info(f"{self.symbol}: ML model expects {len(self.p.ml_features)} features: {list(self.p.ml_features)[:5]}...")
 
         # Skip if order pending
         if self._order_pending:
@@ -565,15 +571,27 @@ class StrategyFactoryAdapter(bt.Strategy):
 
             # Count features that are available and not None/NaN
             available = 0
+            missing = []
             for f in self.p.ml_features:
                 if f in features and features[f] is not None:
                     try:
                         import math
                         if not math.isnan(features[f]):
                             available += 1
+                        else:
+                            missing.append(f)
                     except (TypeError, ValueError):
                         # Not a number, but has a value
                         available += 1
+                else:
+                    missing.append(f)
+
+            # Log missing features periodically (first time or every 100 bars)
+            if missing and (self._bars_seen == self.p.warmup_bars or self._bars_seen % 100 == 0):
+                logger.warning(
+                    f"{self.symbol}: Missing ML features ({len(missing)}/{total_features}): "
+                    f"{missing[:5]}{'...' if len(missing) > 5 else ''}"
+                )
 
             return f"{available}/{total_features}"
         except Exception as e:
