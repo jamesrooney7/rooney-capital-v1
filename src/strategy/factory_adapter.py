@@ -631,23 +631,25 @@ class StrategyFactoryAdapter(bt.Strategy):
         if self._ml_feature_collector is None:
             return
 
-        # Calculate hourly returns for all symbols
+        # Calculate hourly and daily returns/z-scores for all symbols
         for sym in CROSS_ASSET_SYMBOLS:
             buffer = self._price_buffers.get(sym)
             if buffer is None or len(buffer) < 2:
                 continue
 
             prices = list(buffer)
+            sym_lower = sym.lower()
 
             # Hourly return: (current - previous) / previous
             hourly_return = (prices[-1] - prices[-2]) / prices[-2] if prices[-2] != 0 else 0.0
 
-            # Publish hourly return with various naming conventions
-            feature_names = [
+            # Publish hourly return with various naming conventions (model may use any)
+            hourly_return_names = [
                 f"{sym} Hourly Return",
-                f"{sym.lower()}_hourly_return",
+                f"{sym_lower}_hourly_return",
+                f"{sym_lower}_daily_return",  # Some models use this for hourly too
             ]
-            for fname in feature_names:
+            for fname in hourly_return_names:
                 try:
                     self._ml_feature_collector.record_feature(fname, hourly_return)
                 except Exception:
@@ -662,10 +664,14 @@ class StrategyFactoryAdapter(bt.Strategy):
                 if std_price > 0:
                     zscore = (prices[-1] - mean_price) / std_price
 
-                    # Publish z-score with various naming conventions
+                    # Publish z-score with various naming conventions (model may use any)
                     zscore_names = [
                         f"{sym} Hourly Z Score",
-                        f"{sym.lower()}_z_score_hour",
+                        f"{sym_lower}_z_score_hour",
+                        f"{sym_lower}_hourly_z_score",
+                        f"{sym_lower}_hourly_z_pipeline",  # Model uses this format
+                        f"{sym_lower}_daily_z_score",      # Model uses this format
+                        f"{sym_lower}_daily_z_pipeline",   # Model uses this format
                         f"enable{sym}ZScoreHour",
                     ]
                     for fname in zscore_names:
@@ -734,6 +740,41 @@ class StrategyFactoryAdapter(bt.Strategy):
                 # Approximate percentile based on RSI value
                 rsi_percentile = rsi.iloc[-1] / 100.0
                 self._ml_feature_collector.record_feature('rsi_len_2_percentile', float(rsi_percentile))
+
+            # bars_held - always 0 at entry evaluation
+            self._ml_feature_collector.record_feature('bars_held', 0.0)
+
+            # SMA 50
+            if len(df) >= 50:
+                sma_50 = close.rolling(window=50).mean().iloc[-1]
+                if not np.isnan(sma_50):
+                    self._ml_feature_collector.record_feature('sma_50', float(sma_50))
+
+            # EMA 20 and 50 difference
+            if len(df) >= 50:
+                ema_20 = close.ewm(span=20, adjust=False).mean().iloc[-1]
+                ema_50 = close.ewm(span=50, adjust=False).mean().iloc[-1]
+                if not np.isnan(ema_20) and not np.isnan(ema_50):
+                    ema_diff = ema_20 - ema_50
+                    self._ml_feature_collector.record_feature('ema_20_50_diff', float(ema_diff))
+
+            # Momentum 3-period z-score
+            if len(df) >= 23:  # Need 20 + 3 for z-score of 3-period momentum
+                mom3 = close.diff(3)
+                mom3_mean = mom3.rolling(window=20).mean()
+                mom3_std = mom3.rolling(window=20).std()
+                if mom3_std.iloc[-1] > 0:
+                    mom3_z = (mom3.iloc[-1] - mom3_mean.iloc[-1]) / mom3_std.iloc[-1]
+                    self._ml_feature_collector.record_feature('mom3_z', float(mom3_z))
+
+            # Volume z-score (dvolz)
+            if 'volume' in df.columns and len(df) >= 20:
+                vol = df['volume']
+                vol_mean = vol.rolling(window=20).mean()
+                vol_std = vol.rolling(window=20).std()
+                if vol_std.iloc[-1] > 0:
+                    dvolz = (vol.iloc[-1] - vol_mean.iloc[-1]) / vol_std.iloc[-1]
+                    self._ml_feature_collector.record_feature('dvolz', float(dvolz))
 
         except Exception as e:
             logger.debug(f"{self.symbol}: Error calculating strategy features: {e}")
