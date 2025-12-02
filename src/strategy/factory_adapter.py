@@ -497,9 +497,8 @@ class StrategyFactoryAdapter(bt.Strategy):
         if self._order_pending or self._in_position:
             return
 
-        # Reserve position with portfolio coordinator
-        if self.p.portfolio_coordinator:
-            self.p.portfolio_coordinator.reserve_position(self.symbol)
+        # Note: Position slot is already reserved by can_open_position() call in _check_entry()
+        # No need to call reserve_position separately
 
         self._order_pending = True
         self._pending_order = self.buy(size=self.p.size)
