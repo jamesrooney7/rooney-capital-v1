@@ -404,9 +404,14 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Log signal status periodically (every 10 bars after warmup)
         if self._bars_seen % 10 == 0:
             recent_signals = entry_signals.tail(10).sum()
+
+            # Get ML feature status
+            ml_status = self._get_ml_feature_status()
+
             logger.info(
                 f"{self.symbol}: Signal check - current={has_signal}, "
-                f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}"
+                f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}, "
+                f"ml_features={ml_status}"
             )
 
         if not has_signal:
@@ -540,6 +545,39 @@ class StrategyFactoryAdapter(bt.Strategy):
         except Exception as e:
             logger.error(f"{self.symbol}: ML scoring error: {e}")
             return None
+
+    def _get_ml_feature_status(self) -> str:
+        """Get status string showing ML feature availability.
+
+        Returns a string like "10/15" meaning 10 of 15 required features are available.
+        """
+        if not self.p.ml_features:
+            return "no_model"
+
+        total_features = len(self.p.ml_features)
+
+        if self.p.feature_tracker is None:
+            return f"0/{total_features} (no tracker)"
+
+        try:
+            # Get current feature snapshot
+            features = dict(self.p.feature_tracker.snapshot(self.symbol))
+
+            # Count features that are available and not None/NaN
+            available = 0
+            for f in self.p.ml_features:
+                if f in features and features[f] is not None:
+                    try:
+                        import math
+                        if not math.isnan(features[f]):
+                            available += 1
+                    except (TypeError, ValueError):
+                        # Not a number, but has a value
+                        available += 1
+
+            return f"{available}/{total_features}"
+        except Exception as e:
+            return f"error: {e}"
 
     def _update_cross_asset_features(self):
         """Update cross-asset features from all available data feeds.
