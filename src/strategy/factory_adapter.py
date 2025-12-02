@@ -209,6 +209,14 @@ class StrategyFactoryAdapter(bt.Strategy):
             if is_hourly or symbol_part not in self._data_feeds:
                 self._data_feeds[symbol_part] = d
 
+        # Set hourly_data to the correct feed for THIS strategy's symbol
+        symbol_upper = self.symbol.upper()
+        if symbol_upper in self._data_feeds:
+            self.hourly_data = self._data_feeds[symbol_upper]
+            logger.info(f"{self.symbol}: Using data feed '{getattr(self.hourly_data, '_name', 'unknown')}'")
+        else:
+            logger.warning(f"{self.symbol}: No matching hourly feed found, using datas[0]")
+
         # Cross-asset feature calculation
         # Price buffers for calculating returns and z-scores
         self._price_buffers: Dict[str, deque] = {}  # symbol -> deque of closes
