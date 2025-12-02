@@ -144,6 +144,8 @@ class StrategyFactoryAdapter(bt.Strategy):
         ('portfolio_coordinator', None),
         ('feature_tracker', None),
         ('queue_manager', None),  # QueueFanout for contract symbol lookup
+        ('size', 1),  # Position size (number of contracts)
+        ('ml_feature_collector', None),  # Optional feature collector for ML warmup
     )
 
     def __init__(self):
@@ -440,9 +442,9 @@ class StrategyFactoryAdapter(bt.Strategy):
             self.p.portfolio_coordinator.reserve_position(self.symbol)
 
         self._order_pending = True
-        self._pending_order = self.buy()
+        self._pending_order = self.buy(size=self.p.size)
 
-        logger.info(f"{self.symbol}: Entry order placed")
+        logger.info(f"{self.symbol}: Entry order placed (size={self.p.size})")
 
     def _exit_position(self, reason: str):
         """Place exit order."""
