@@ -296,7 +296,7 @@ class StrategyFactoryAdapter(bt.Strategy):
 
             # Notify portfolio coordinator
             if self.p.portfolio_coordinator:
-                self.p.portfolio_coordinator.record_trade_exit(
+                self.p.portfolio_coordinator.register_position_closed(
                     symbol=self.symbol,
                     pnl=trade.pnlcomm
                 )
