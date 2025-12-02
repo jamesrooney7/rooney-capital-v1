@@ -318,9 +318,22 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Update cross-asset features for ML filtering
         self._update_cross_asset_features()
 
+        # Log progress periodically (every 50 bars or first 5 bars)
+        if self._bars_seen <= 5 or self._bars_seen % 50 == 0:
+            logger.info(
+                f"{self.symbol}: Bar {self._bars_seen}/{self.p.warmup_bars} "
+                f"at {bar['datetime']} C={bar['Close']:.2f}"
+            )
+
         # Wait for warmup
         if self._bars_seen < self.p.warmup_bars:
+            if self._bars_seen == 1:
+                logger.info(f"{self.symbol}: Starting warmup (need {self.p.warmup_bars} bars)")
             return
+
+        # Log when warmup completes
+        if self._bars_seen == self.p.warmup_bars:
+            logger.info(f"{self.symbol}: Warmup complete - now evaluating signals")
 
         # Skip if order pending
         if self._order_pending:
@@ -378,13 +391,25 @@ class StrategyFactoryAdapter(bt.Strategy):
             return
 
         # Check if current bar has entry signal
-        if not entry_signals.iloc[current_idx]:
+        has_signal = entry_signals.iloc[current_idx] if current_idx < len(entry_signals) else False
+
+        # Log signal status periodically (every 10 bars after warmup)
+        if self._bars_seen % 10 == 0:
+            recent_signals = entry_signals.tail(10).sum()
+            logger.info(
+                f"{self.symbol}: Signal check - current={has_signal}, "
+                f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}"
+            )
+
+        if not has_signal:
             return
+
+        logger.info(f"{self.symbol}: 📊 ENTRY SIGNAL detected at {df['datetime'].iloc[-1]}")
 
         # Check portfolio coordinator for position limits
         if self.p.portfolio_coordinator:
             if not self.p.portfolio_coordinator.can_open_position(self.symbol):
-                logger.debug(f"{self.symbol}: Position blocked by portfolio coordinator")
+                logger.info(f"{self.symbol}: Position blocked by portfolio coordinator (max positions reached)")
                 return
 
         # ML filtering
@@ -392,16 +417,22 @@ class StrategyFactoryAdapter(bt.Strategy):
             ml_score = self._get_ml_score(df, current_idx)
             self._ml_last_score = ml_score
 
-            if ml_score is None or ml_score < self.p.ml_threshold:
-                logger.debug(
-                    f"{self.symbol}: Entry blocked by ML filter "
-                    f"(score={ml_score:.3f}, threshold={self.p.ml_threshold})"
+            if ml_score is None:
+                logger.warning(f"{self.symbol}: ML score is None - features may be missing")
+                return
+
+            if ml_score < self.p.ml_threshold:
+                logger.info(
+                    f"{self.symbol}: ❌ Entry blocked by ML filter "
+                    f"(score={ml_score:.3f} < threshold={self.p.ml_threshold})"
                 )
                 return
 
             logger.info(
-                f"{self.symbol}: ML approved entry (score={ml_score:.3f})"
+                f"{self.symbol}: ✅ ML approved entry (score={ml_score:.3f} >= {self.p.ml_threshold})"
             )
+        else:
+            logger.info(f"{self.symbol}: No ML model - proceeding without filter")
 
         # Place entry order
         self._enter_position()
