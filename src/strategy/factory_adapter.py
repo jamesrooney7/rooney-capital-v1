@@ -501,7 +501,8 @@ class StrategyFactoryAdapter(bt.Strategy):
         # No need to call reserve_position separately
 
         self._order_pending = True
-        self._pending_order = self.buy(size=self.p.size)
+        # Use self.hourly_data to ensure we trade on the correct symbol's feed
+        self._pending_order = self.buy(data=self.hourly_data, size=self.p.size)
 
         logger.info(f"{self.symbol}: Entry order placed (size={self.p.size})")
 
@@ -511,7 +512,8 @@ class StrategyFactoryAdapter(bt.Strategy):
             return
 
         self._order_pending = True
-        self._pending_order = self.close()
+        # Use self.hourly_data to ensure we close on the correct symbol's feed
+        self._pending_order = self.close(data=self.hourly_data)
 
         logger.info(f"{self.symbol}: Exit order placed (reason: {reason})")
 
