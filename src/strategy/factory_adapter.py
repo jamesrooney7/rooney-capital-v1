@@ -775,6 +775,188 @@ class StrategyFactoryAdapter(bt.Strategy):
                 if vol_std.iloc[-1] > 0:
                     dvolz = (vol.iloc[-1] - vol_mean.iloc[-1]) / vol_std.iloc[-1]
                     self._ml_feature_collector.record_feature('dvolz', float(dvolz))
+                    self._ml_feature_collector.record_feature('volz', float(dvolz))
+
+            # IBS (Internal Bar Strength) features
+            high = df['High']
+            low = df['Low']
+            ibs_series = (close - low) / (high - low).replace(0, np.nan)
+            ibs_val = ibs_series.iloc[-1]
+            if not np.isnan(ibs_val):
+                self._ml_feature_collector.record_feature('ibs', float(ibs_val))
+                # IBS z-score
+                if len(ibs_series) >= 20:
+                    ibs_mean = ibs_series.rolling(window=20).mean()
+                    ibs_std_val = ibs_series.rolling(window=20).std()
+                    if ibs_std_val.iloc[-1] > 0:
+                        ibs_z = (ibs_val - ibs_mean.iloc[-1]) / ibs_std_val.iloc[-1]
+                        self._ml_feature_collector.record_feature('ibs_zscore', float(ibs_z))
+                # IBS SMA 5
+                if len(ibs_series) >= 5:
+                    ibs_sma = ibs_series.rolling(window=5).mean().iloc[-1]
+                    if not np.isnan(ibs_sma):
+                        self._ml_feature_collector.record_feature('ibs_sma_5', float(ibs_sma))
+                # IBS std 10
+                if len(ibs_series) >= 10:
+                    ibs_std_10 = ibs_series.rolling(window=10).std().iloc[-1]
+                    if not np.isnan(ibs_std_10):
+                        self._ml_feature_collector.record_feature('ibs_std_10', float(ibs_std_10))
+                # Previous daily IBS
+                if len(ibs_series) >= 2:
+                    prev_ibs = ibs_series.iloc[-2]
+                    if not np.isnan(prev_ibs):
+                        self._ml_feature_collector.record_feature('prev_daily_ibs', float(prev_ibs))
+
+            # OBV (On Balance Volume)
+            if 'volume' in df.columns and len(df) >= 2:
+                obv = (np.sign(close.diff()) * df['volume']).fillna(0).cumsum()
+                obv_val = obv.iloc[-1]
+                self._ml_feature_collector.record_feature('obv', float(obv_val))
+                # OBV z-score
+                if len(obv) >= 20:
+                    obv_mean = obv.rolling(window=20).mean()
+                    obv_std = obv.rolling(window=20).std()
+                    if obv_std.iloc[-1] > 0:
+                        obv_z = (obv_val - obv_mean.iloc[-1]) / obv_std.iloc[-1]
+                        self._ml_feature_collector.record_feature('obv_zscore', float(obv_z))
+
+            # ATR z-score (datrz/atrz)
+            if len(df) >= 20:
+                tr = np.maximum(
+                    high - low,
+                    np.maximum(abs(high - close.shift(1)), abs(low - close.shift(1)))
+                )
+                atr = tr.rolling(window=14).mean()
+                atr_mean = atr.rolling(window=20).mean()
+                atr_std = atr.rolling(window=20).std()
+                if atr_std.iloc[-1] > 0:
+                    atrz_val = (atr.iloc[-1] - atr_mean.iloc[-1]) / atr_std.iloc[-1]
+                    self._ml_feature_collector.record_feature('atrz', float(atrz_val))
+                    self._ml_feature_collector.record_feature('datrz', float(atrz_val))
+
+            # Previous day percentage change
+            if len(close) >= 3:
+                prev_day_pct = (close.iloc[-2] - close.iloc[-3]) / close.iloc[-3] if close.iloc[-3] != 0 else 0.0
+                self._ml_feature_collector.record_feature('prev_day_pct', float(prev_day_pct))
+
+            # RSI 14 and RSI 21
+            for period in [14, 21]:
+                if len(df) >= period + 1:
+                    rsi_delta = close.diff()
+                    rsi_gain = rsi_delta.where(rsi_delta > 0, 0).rolling(window=period).mean()
+                    rsi_loss = (-rsi_delta.where(rsi_delta < 0, 0)).rolling(window=period).mean()
+                    rs = rsi_gain / rsi_loss.replace(0, np.nan)
+                    rsi_val = 100 - (100 / (1 + rs))
+                    if not np.isnan(rsi_val.iloc[-1]):
+                        self._ml_feature_collector.record_feature(f'rsi_{period}', float(rsi_val.iloc[-1]))
+
+            # MACD
+            if len(df) >= 26:
+                ema_12 = close.ewm(span=12, adjust=False).mean()
+                ema_26 = close.ewm(span=26, adjust=False).mean()
+                macd_line = ema_12 - ema_26
+                signal_line = macd_line.ewm(span=9, adjust=False).mean()
+                macd_hist = macd_line - signal_line
+                self._ml_feature_collector.record_feature('macd', float(macd_line.iloc[-1]))
+                self._ml_feature_collector.record_feature('macd_histogram', float(macd_hist.iloc[-1]))
+
+            # Stochastic
+            if len(df) >= 14:
+                low_14 = low.rolling(window=14).min()
+                high_14 = high.rolling(window=14).max()
+                stoch_k = 100 * (close - low_14) / (high_14 - low_14).replace(0, np.nan)
+                stoch_d = stoch_k.rolling(window=3).mean()
+                if not np.isnan(stoch_k.iloc[-1]):
+                    self._ml_feature_collector.record_feature('stoch_k', float(stoch_k.iloc[-1]))
+                if not np.isnan(stoch_d.iloc[-1]):
+                    self._ml_feature_collector.record_feature('stoch_d', float(stoch_d.iloc[-1]))
+                    stoch_diff = stoch_k.iloc[-1] - stoch_d.iloc[-1]
+                    self._ml_feature_collector.record_feature('stoch_diff', float(stoch_diff))
+
+            # Volatility (5 and 20 period)
+            for period in [5, 20]:
+                if len(close) >= period:
+                    vol_val = close.pct_change().rolling(window=period).std().iloc[-1]
+                    if not np.isnan(vol_val):
+                        self._ml_feature_collector.record_feature(f'volatility_{period}', float(vol_val))
+
+            # Range features
+            range_val = high.iloc[-1] - low.iloc[-1]
+            range_pct = range_val / close.iloc[-1] if close.iloc[-1] != 0 else 0.0
+            self._ml_feature_collector.record_feature('range_pct', float(range_pct))
+            if len(df) >= 5:
+                range_pct_series = (high - low) / close.replace(0, np.nan)
+                range_pct_avg_5 = range_pct_series.rolling(window=5).mean().iloc[-1]
+                if not np.isnan(range_pct_avg_5):
+                    self._ml_feature_collector.record_feature('range_pct_avg_5', float(range_pct_avg_5))
+            if len(df) >= 20:
+                avg_range = (high - low).rolling(window=20).mean().iloc[-1]
+                if avg_range > 0:
+                    range_expansion = range_val / avg_range
+                    self._ml_feature_collector.record_feature('range_expansion', float(range_expansion))
+
+            # EMA 50
+            if len(df) >= 50:
+                ema_50_val = close.ewm(span=50, adjust=False).mean().iloc[-1]
+                self._ml_feature_collector.record_feature('ema_50', float(ema_50_val))
+                self._ml_feature_collector.record_feature('ema', float(ema_50_val))
+
+            # Percent from high/low
+            if len(df) >= 50:
+                high_50 = high.rolling(window=50).max().iloc[-1]
+                low_50 = low.rolling(window=50).min().iloc[-1]
+                pct_from_high_50 = (close.iloc[-1] - high_50) / high_50 if high_50 != 0 else 0.0
+                pct_from_low_50 = (close.iloc[-1] - low_50) / low_50 if low_50 != 0 else 0.0
+                self._ml_feature_collector.record_feature('pct_from_high_50', float(pct_from_high_50))
+                self._ml_feature_collector.record_feature('pct_from_low_50', float(pct_from_low_50))
+            if len(df) >= 20:
+                low_20 = low.rolling(window=20).min().iloc[-1]
+                pct_from_low_20 = (close.iloc[-1] - low_20) / low_20 if low_20 != 0 else 0.0
+                self._ml_feature_collector.record_feature('pct_from_low_20', float(pct_from_low_20))
+
+            # Volume features
+            if 'volume' in df.columns:
+                vol = df['volume']
+                if len(vol) >= 5:
+                    volume_sma_5 = vol.rolling(window=5).mean().iloc[-1]
+                    self._ml_feature_collector.record_feature('volume_sma_5', float(volume_sma_5))
+                if len(vol) >= 20:
+                    vol_sma_5 = vol.rolling(window=5).mean().iloc[-1]
+                    vol_sma_20 = vol.rolling(window=20).mean().iloc[-1]
+                    if vol_sma_20 > 0:
+                        vol_ratio = vol_sma_5 / vol_sma_20
+                        self._ml_feature_collector.record_feature('vol_ratio_5_20', float(vol_ratio))
+                        self._ml_feature_collector.record_feature('volume_ratio', float(vol_ratio))
+
+            # Upper wick percentage
+            if 'Open' in df.columns:
+                upper_wick = high.iloc[-1] - max(close.iloc[-1], df['Open'].iloc[-1])
+                upper_wick_pct = upper_wick / range_val if range_val > 0 else 0.0
+                self._ml_feature_collector.record_feature('upper_wick_pct', float(upper_wick_pct))
+
+            # Returns over different periods
+            if len(close) >= 3:
+                returns_2 = (close.iloc[-1] - close.iloc[-3]) / close.iloc[-3] if close.iloc[-3] != 0 else 0.0
+                self._ml_feature_collector.record_feature('returns_2', float(returns_2))
+            if len(close) >= 61:
+                returns_60 = (close.iloc[-1] - close.iloc[-61]) / close.iloc[-61] if close.iloc[-61] != 0 else 0.0
+                self._ml_feature_collector.record_feature('returns_60', float(returns_60))
+
+            # Distance z-score (dist_z) - distance from SMA as z-score
+            if len(df) >= 20:
+                sma_20 = close.rolling(window=20).mean()
+                dist = close - sma_20
+                dist_std = dist.rolling(window=20).std()
+                if dist_std.iloc[-1] > 0:
+                    dist_z = dist.iloc[-1] / dist_std.iloc[-1]
+                    self._ml_feature_collector.record_feature('dist_z', float(dist_z))
+
+            # Resistance/Support (simple: recent high/low)
+            if len(df) >= 20:
+                resistance = high.rolling(window=20).max().iloc[-1]
+                support = low.rolling(window=20).min().iloc[-1]
+                self._ml_feature_collector.record_feature('resistance', float(resistance))
+                self._ml_feature_collector.record_feature('support', float(support))
 
         except Exception as e:
             logger.debug(f"{self.symbol}: Error calculating strategy features: {e}")
