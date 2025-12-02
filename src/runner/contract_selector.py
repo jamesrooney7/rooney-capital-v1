@@ -212,55 +212,72 @@ class ContractSelector:
         """
         Generate a fallback contract selection based on current date.
 
-        Uses standard futures expiration cycle (H, M, U, Z) and selects
-        the current or next available contract month based on typical
-        expiration timing (contracts expire mid-month).
+        Handles both quarterly (H, M, U, Z) and monthly contract cycles.
+        Monthly commodities like CL, GC, HG expire around the 20th of the
+        prior month, so we use the next month's contract.
         """
         now = datetime.now()
         year = now.year
         month = now.month
         day = now.day
 
-        # Standard quarterly months: H=Mar, M=Jun, U=Sep, Z=Dec
-        quarterly_months = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
-        month_to_quarter = {3: 3, 6: 6, 9: 9, 12: 12}
+        # Products with monthly contracts (expire ~20th of prior month)
+        monthly_products = {'CL', 'GC', 'HG', 'SI', 'NG', 'PL'}
 
-        # Determine which quarterly month we're in or past
-        current_quarter = None
-        for m in [3, 6, 9, 12]:
-            if month <= m:
-                current_quarter = m
-                break
-        if current_quarter is None:
-            current_quarter = 12  # We're in Q4
+        # Month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun
+        #              N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
+        month_codes = {
+            1: 'F', 2: 'G', 3: 'H', 4: 'J', 5: 'K', 6: 'M',
+            7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'
+        }
 
-        # If we're in the expiration month and past mid-month (day > 15),
-        # roll to next quarter. Otherwise use current quarter's contract.
-        if month == current_quarter and day > 15:
-            # Roll to next quarter
-            quarter_index = [3, 6, 9, 12].index(current_quarter)
-            if quarter_index < 3:
-                next_quarter = [3, 6, 9, 12][quarter_index + 1]
-                next_year = year
-            else:
-                # December, roll to March next year
-                next_quarter = 3
-                next_year = year + 1
-        elif month > current_quarter:
-            # We've passed this quarter's expiration, find next
-            quarter_index = [3, 6, 9, 12].index(current_quarter)
-            if quarter_index < 3:
-                next_quarter = [3, 6, 9, 12][quarter_index + 1]
-                next_year = year
-            else:
-                next_quarter = 3
-                next_year = year + 1
-        else:
-            # Use current quarter
-            next_quarter = current_quarter
+        root_upper = root_symbol.upper()
+
+        if root_upper in monthly_products:
+            # Monthly contracts - always use NEXT month since current month
+            # contract typically expired around the 20th of prior month
+            next_month = month + 1
             next_year = year
+            if next_month > 12:
+                next_month = 1
+                next_year = year + 1
+            month_code = month_codes[next_month]
+        else:
+            # Quarterly contracts (H=Mar, M=Jun, U=Sep, Z=Dec)
+            quarterly_months = {3: 'H', 6: 'M', 9: 'U', 12: 'Z'}
 
-        month_code = quarterly_months[next_quarter]
+            # Find current quarter
+            current_quarter = None
+            for m in [3, 6, 9, 12]:
+                if month <= m:
+                    current_quarter = m
+                    break
+            if current_quarter is None:
+                current_quarter = 12
+
+            # If past mid-month of expiration month, roll to next quarter
+            if month == current_quarter and day > 15:
+                quarter_index = [3, 6, 9, 12].index(current_quarter)
+                if quarter_index < 3:
+                    next_quarter = [3, 6, 9, 12][quarter_index + 1]
+                    next_year = year
+                else:
+                    next_quarter = 3
+                    next_year = year + 1
+            elif month > current_quarter:
+                quarter_index = [3, 6, 9, 12].index(current_quarter)
+                if quarter_index < 3:
+                    next_quarter = [3, 6, 9, 12][quarter_index + 1]
+                    next_year = year
+                else:
+                    next_quarter = 3
+                    next_year = year + 1
+            else:
+                next_quarter = current_quarter
+                next_year = year
+
+            month_code = quarterly_months[next_quarter]
+
         contract_symbol = f"{root_symbol}{month_code}{next_year}"
 
         logger.info(
@@ -271,8 +288,8 @@ class ContractSelector:
         return ContractSelection(
             root_symbol=root_symbol,
             contract_symbol=contract_symbol,
-            open_interest=0,  # Unknown
-            volume=0,  # Unknown
+            open_interest=0,
+            volume=0,
             selected_at=datetime.now(),
         )
 
