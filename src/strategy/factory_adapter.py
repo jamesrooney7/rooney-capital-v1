@@ -414,11 +414,21 @@ class StrategyFactoryAdapter(bt.Strategy):
             # Get ML feature status
             ml_status = self._get_ml_feature_status()
 
+            # Debug: show buffer sizes
+            bar_buf_size = len(self._bar_buffer)
+            price_buf_sizes = {k: len(v) for k, v in self._price_buffers.items() if len(v) > 0}
+            feeds_available = len(self._data_feeds)
+
             logger.info(
                 f"{self.symbol}: Signal check - current={has_signal}, "
                 f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}, "
-                f"ml_features={ml_status}"
+                f"ml_features={ml_status}, bar_buf={bar_buf_size}, feeds={feeds_available}"
             )
+
+            # Log detailed debug info every 100 bars
+            if self._bars_seen % 100 == 0:
+                logger.info(f"{self.symbol}: DEBUG - price_buffers: {price_buf_sizes}")
+                logger.info(f"{self.symbol}: DEBUG - data_feeds: {sorted(self._data_feeds.keys())}")
 
         if not has_signal:
             return
@@ -959,7 +969,7 @@ class StrategyFactoryAdapter(bt.Strategy):
                 self._ml_feature_collector.record_feature('support', float(support))
 
         except Exception as e:
-            logger.debug(f"{self.symbol}: Error calculating strategy features: {e}")
+            logger.warning(f"{self.symbol}: Error calculating strategy features: {e}", exc_info=True)
 
 
 class NotifyingFactoryAdapter(StrategyFactoryAdapter):
