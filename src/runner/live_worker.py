@@ -758,10 +758,14 @@ class LiveWorker:
 
         # Update product_to_root mapping to include selected contract symbols
         for sym, selection in self._selected_contracts.items():
-            # Map the selected contract symbol back to root (e.g., "ESH6" -> "ES")
-            product_to_root[selection.contract_symbol] = sym
-            # Also map full year format (e.g., "ESH2026" -> "ES")
-            product_to_root[selection.contract_symbol.replace("202", "2")] = sym
+            contract = selection.contract_symbol
+            # Map the full year format (e.g., "ESZ2025" -> "ES")
+            product_to_root[contract] = sym
+            # Map short year format (e.g., "ESZ5" -> "ES") - Databento uses single digit years
+            if len(contract) >= 4 and contract[-4:].isdigit():
+                short_format = contract[:-4] + contract[-1]  # ESZ2025 -> ESZ5
+                product_to_root[short_format] = sym
+                logger.debug("Mapped contract %s (short: %s) to root %s", contract, short_format, sym)
 
         self.queue_manager = QueueFanout(product_to_root=product_to_root, maxsize=config.queue_maxsize)
         self._data_feeds: Dict[str, bt.feeds.DataBase] = {}
