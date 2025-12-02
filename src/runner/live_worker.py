@@ -1330,11 +1330,34 @@ class LiveWorker:
             hourly_lookback_days,
         )
 
+        # Build historical symbol groups using 'parent' stype for reliable data
+        # Historical data should use continuous/parent symbols, not specific contracts
+        # that may not have enough history (e.g., far-dated contracts like H2026)
+        historical_groups: Dict[str, tuple[str, ...]] = {}
+        for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+            # Convert to root symbols for historical loading
+            root_symbols = set()
+            for sym in symbols:
+                # Extract root from contract code (e.g., ESH6 -> ES, 6BZ5 -> 6B)
+                root = sym.rstrip('0123456789')  # Remove trailing digits
+                if root and root[-1] in 'FGHJKMNQUVXZ':
+                    root = root[:-1]  # Remove month code
+                if root:
+                    root_symbols.add(root)
+            if root_symbols:
+                historical_groups.setdefault(dataset, set()).update(root_symbols)
+
+        # Convert to tuples
+        historical_symbol_groups = {
+            dataset: tuple(sorted(symbols))
+            for dataset, symbols in historical_groups.items()
+        }
+
         self._historical_warmup_counts.clear()
         try:
             # Load daily bars first (252 days for daily z-scores and returns)
             logger.info("Loading daily historical data (%d days)...", daily_lookback_days)
-            for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+            for dataset, symbols in historical_symbol_groups.items():
                 # Use closure factory to avoid lambda capture bug
                 def daily_warmup_callback(sym: str, data: Any) -> None:
                     self._warmup_symbol_indicators(sym, data, compression="1D")
@@ -1343,7 +1366,7 @@ class LiveWorker:
                     api_key=self.config.databento_api_key,
                     dataset=dataset,
                     symbols=symbols,
-                    stype_in=stype_in,
+                    stype_in="parent",  # Use parent for historical - more reliable
                     days=daily_lookback_days,
                     contract_map=self.contract_map,
                     on_symbol_loaded=daily_warmup_callback,
@@ -1351,7 +1374,7 @@ class LiveWorker:
 
             # Load hourly bars second (15 days for hourly indicators)
             logger.info("Loading hourly historical data (%d days)...", hourly_lookback_days)
-            for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
+            for dataset, symbols in historical_symbol_groups.items():
                 # Use closure factory to avoid lambda capture bug
                 def hourly_warmup_callback(sym: str, data: Any) -> None:
                     self._warmup_symbol_indicators(sym, data, compression="1h")
@@ -1360,7 +1383,7 @@ class LiveWorker:
                     api_key=self.config.databento_api_key,
                     dataset=dataset,
                     symbols=symbols,
-                    stype_in=stype_in,
+                    stype_in="parent",  # Use parent for historical - more reliable
                     days=hourly_lookback_days,
                     contract_map=self.contract_map,
                     on_symbol_loaded=hourly_warmup_callback,
