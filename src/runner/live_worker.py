@@ -1337,19 +1337,13 @@ class LiveWorker:
         # Build historical symbol groups using 'parent' stype for reliable data
         # Historical data should use continuous/parent symbols, not specific contracts
         # that may not have enough history (e.g., far-dated contracts like H2026)
+        # NOTE: _symbols_by_dataset_group already contains root symbols (ES, 6B, CL),
+        # not contract codes, so no extraction is needed.
         historical_groups: Dict[str, tuple[str, ...]] = {}
         for (dataset, stype_in), symbols in self._symbols_by_dataset_group.items():
-            # Convert to root symbols for historical loading
-            root_symbols = set()
-            for sym in symbols:
-                # Extract root from contract code (e.g., ESH6 -> ES, 6BZ5 -> 6B)
-                root = sym.rstrip('0123456789')  # Remove trailing digits
-                if root and root[-1] in 'FGHJKMNQUVXZ':
-                    root = root[:-1]  # Remove month code
-                if root:
-                    root_symbols.add(root)
-            if root_symbols:
-                historical_groups.setdefault(dataset, set()).update(root_symbols)
+            # Symbols are already root symbols - just add them directly
+            if symbols:
+                historical_groups.setdefault(dataset, set()).update(symbols)
 
         # Convert to tuples
         historical_symbol_groups = {
