@@ -143,6 +143,7 @@ class StrategyFactoryAdapter(bt.Strategy):
         ('trade_callbacks', []),
         ('portfolio_coordinator', None),
         ('feature_tracker', None),
+        ('queue_manager', None),  # QueueFanout for contract symbol lookup
     )
 
     def __init__(self):
@@ -648,10 +649,6 @@ class NotifyingFactoryAdapter(StrategyFactoryAdapter):
     This is the production wrapper used by LiveWorker.
     The base class handles all trade/order notifications and callback invocation.
     """
-
-    params = StrategyFactoryAdapter.params + (
-        ('queue_manager', None),  # QueueFanout for contract symbol lookup
-    )
 
     def __init__(self):
         super().__init__()
