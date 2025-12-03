@@ -256,15 +256,24 @@ class StrategyFactoryAdapter(bt.Strategy):
                 self._entry_price = order.executed.price
                 self._entry_time = self.hourly_data.datetime.datetime(0)
                 self._entry_idx = self._bars_seen
+                # Diagnostic: log bar data at execution time
+                bar_dt = self.hourly_data.datetime.datetime(0)
+                bar_open = self.hourly_data.open[0]
+                bar_close = self.hourly_data.close[0]
                 logger.info(
-                    f"{self.symbol}: BUY executed at {order.executed.price:.2f}"
+                    f"{self.symbol}: BUY executed at {order.executed.price:.2f} | "
+                    f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
                 )
             else:
                 self._in_position = False
                 pnl = order.executed.price - self._entry_price if self._entry_price else 0
+                # Diagnostic: log bar data at execution time
+                bar_dt = self.hourly_data.datetime.datetime(0)
+                bar_open = self.hourly_data.open[0]
+                bar_close = self.hourly_data.close[0]
                 logger.info(
                     f"{self.symbol}: SELL executed at {order.executed.price:.2f}, "
-                    f"P&L: {pnl:.2f}"
+                    f"P&L: {pnl:.2f} | Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
                 )
                 self._entry_idx = None
                 self._entry_price = None
@@ -540,7 +549,14 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Use self.hourly_data to ensure we trade on the correct symbol's feed
         self._pending_order = self.buy(data=self.hourly_data, size=self.p.size)
 
-        logger.info(f"{self.symbol}: Entry order placed (size={self.p.size})")
+        # Diagnostic: log bar data when order is placed
+        bar_dt = self.hourly_data.datetime.datetime(0)
+        bar_open = self.hourly_data.open[0]
+        bar_close = self.hourly_data.close[0]
+        logger.info(
+            f"{self.symbol}: Entry order placed (size={self.p.size}) | "
+            f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
+        )
 
     def _exit_position(self, reason: str):
         """Place exit order."""
@@ -551,7 +567,14 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Use self.hourly_data to ensure we close on the correct symbol's feed
         self._pending_order = self.close(data=self.hourly_data)
 
-        logger.info(f"{self.symbol}: Exit order placed (reason: {reason})")
+        # Diagnostic: log bar data when order is placed
+        bar_dt = self.hourly_data.datetime.datetime(0)
+        bar_open = self.hourly_data.open[0]
+        bar_close = self.hourly_data.close[0]
+        logger.info(
+            f"{self.symbol}: Exit order placed (reason: {reason}) | "
+            f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
+        )
 
     def _get_ml_score(self, df: pd.DataFrame, current_idx: int) -> Optional[float]:
         """Get ML model prediction score for current entry."""
