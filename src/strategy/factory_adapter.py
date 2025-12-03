@@ -35,6 +35,12 @@ import pandas as pd
 import numpy as np
 from collections import deque as collections_deque
 
+# Import trades database
+try:
+    from utils.trades_db import TradesDB
+except ImportError:
+    TradesDB = None
+
 # Import Strategy Factory base and strategies
 import sys
 from pathlib import Path
@@ -146,6 +152,7 @@ class StrategyFactoryAdapter(bt.Strategy):
         ('queue_manager', None),  # QueueFanout for contract symbol lookup
         ('size', 1),  # Position size (number of contracts)
         ('ml_feature_collector', None),  # Optional feature collector for ML warmup
+        ('trades_db', None),  # TradesDB instance for persisting trades
     )
 
     def __init__(self):
@@ -175,6 +182,11 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         # ML filtering
         self._ml_last_score = None
+        self._latest_ml_score = None  # Alias for compatibility with NotifyingIbsStrategy
+
+        # IBS tracking for Discord notifications
+        self._ibs_latest = None
+        self._latest_ibs_value = None  # Alias for compatibility with NotifyingIbsStrategy
 
         # Data feeds - build map of symbol -> data feed
         self.hourly_data = self.datas[0]  # Primary hourly data
@@ -287,6 +299,8 @@ class StrategyFactoryAdapter(bt.Strategy):
                 'pnl': trade.pnl,
                 'pnlcomm': trade.pnlcomm,
                 'dt': self.hourly_data.datetime.datetime(0),
+                'ibs_value': self._ibs_latest,
+                'ml_score': self._ml_last_score,
             }
 
             logger.info(
@@ -300,6 +314,32 @@ class StrategyFactoryAdapter(bt.Strategy):
                     symbol=self.symbol,
                     pnl=trade.pnlcomm
                 )
+
+            # Persist trade to database
+            if self.p.trades_db is not None:
+                try:
+                    # Calculate P&L percentage
+                    entry_price = self._entry_price or trade.price
+                    exit_price = trade.price
+                    pnl_percent = ((exit_price - entry_price) / entry_price * 100) if entry_price else 0.0
+
+                    self.p.trades_db.insert_trade(
+                        symbol=self.symbol,
+                        side='long',  # Factory strategies are long-only for now
+                        entry_time=self._entry_time or datetime.now(),
+                        entry_price=entry_price,
+                        entry_size=abs(self.p.size),
+                        exit_time=self.hourly_data.datetime.datetime(0),
+                        exit_price=exit_price,
+                        exit_size=abs(self.p.size),
+                        pnl=trade.pnlcomm,
+                        pnl_percent=pnl_percent,
+                        exit_reason=exit_snapshot.get('exit_reason', 'strategy_exit'),
+                        ml_score=self._ml_last_score,
+                    )
+                    logger.info(f"{self.symbol}: Trade persisted to database")
+                except Exception as e:
+                    logger.error(f"{self.symbol}: Failed to persist trade to database: {e}")
 
             # Notify callbacks with exit_snapshot (matching NotifyingIbsStrategy signature)
             for callback in self.p.trade_callbacks:
@@ -445,6 +485,7 @@ class StrategyFactoryAdapter(bt.Strategy):
         if self.p.ml_model is not None:
             ml_score = self._get_ml_score(df, current_idx)
             self._ml_last_score = ml_score
+            self._latest_ml_score = ml_score  # Alias for compatibility
 
             if ml_score is None:
                 logger.warning(f"{self.symbol}: ML score is None - features may be missing")
@@ -795,6 +836,9 @@ class StrategyFactoryAdapter(bt.Strategy):
             ibs_val = ibs_series.iloc[-1]
             if not np.isnan(ibs_val):
                 self._ml_feature_collector.record_feature('ibs', float(ibs_val))
+                # Store for Discord notifications
+                self._ibs_latest = float(ibs_val)
+                self._latest_ibs_value = float(ibs_val)
                 # IBS z-score
                 if len(ibs_series) >= 20:
                     ibs_mean = ibs_series.rolling(window=20).mean()

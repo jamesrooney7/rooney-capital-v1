@@ -213,16 +213,19 @@ class ContractSelector:
         Generate a fallback contract selection based on current date.
 
         Handles both quarterly (H, M, U, Z) and monthly contract cycles.
-        Monthly commodities like CL, GC, HG expire around the 20th of the
-        prior month, so we use the next month's contract.
+        For commodities, we try to select the contract with the most remaining
+        liquidity - typically the front month until close to expiration.
         """
         now = datetime.now()
         year = now.year
         month = now.month
         day = now.day
 
-        # Products with monthly contracts (expire ~20th of prior month)
-        monthly_products = {'CL', 'GC', 'HG', 'SI', 'NG', 'PL'}
+        # Products with monthly contracts - these have specific delivery months
+        # GC, SI, PL: Feb(G), Apr(J), Jun(M), Aug(Q), Oct(V), Dec(Z)
+        # CL, HG, NG: Every month
+        monthly_all_months = {'CL', 'HG', 'NG'}
+        monthly_even_months = {'GC', 'SI', 'PL'}  # Only even months
 
         # Month codes: F=Jan, G=Feb, H=Mar, J=Apr, K=May, M=Jun
         #              N=Jul, Q=Aug, U=Sep, V=Oct, X=Nov, Z=Dec
@@ -231,16 +234,65 @@ class ContractSelector:
             7: 'N', 8: 'Q', 9: 'U', 10: 'V', 11: 'X', 12: 'Z'
         }
 
+        # Even month codes for GC, SI, PL
+        even_months = {2: 'G', 4: 'J', 6: 'M', 8: 'Q', 10: 'V', 12: 'Z'}
+
         root_upper = root_symbol.upper()
 
-        if root_upper in monthly_products:
-            # Monthly contracts - always use NEXT month since current month
-            # contract typically expired around the 20th of prior month
-            next_month = month + 1
-            next_year = year
-            if next_month > 12:
-                next_month = 1
-                next_year = year + 1
+        if root_upper in monthly_even_months:
+            # Products with bi-monthly contracts (Feb, Apr, Jun, Aug, Oct, Dec)
+            # Find the current or next valid month
+            valid_months = [2, 4, 6, 8, 10, 12]
+
+            # Find the current front month
+            front_month = None
+            front_year = year
+            for m in valid_months:
+                if m >= month:
+                    front_month = m
+                    break
+
+            if front_month is None:
+                # We're past December, roll to February next year
+                front_month = 2
+                front_year = year + 1
+
+            # If we're past the 20th of the month before expiration, roll forward
+            # E.g., if front_month=12 and we're in November 21+, roll to Feb
+            if month == front_month - 1 and day > 20:
+                # Roll to next contract
+                idx = valid_months.index(front_month)
+                if idx < len(valid_months) - 1:
+                    front_month = valid_months[idx + 1]
+                else:
+                    front_month = 2
+                    front_year = year + 1
+            elif month == front_month and day > 1:
+                # Already in expiration month, definitely roll
+                idx = valid_months.index(front_month)
+                if idx < len(valid_months) - 1:
+                    front_month = valid_months[idx + 1]
+                else:
+                    front_month = 2
+                    front_year = year + 1
+
+            month_code = even_months[front_month]
+            next_year = front_year
+
+        elif root_upper in monthly_all_months:
+            # Monthly contracts (CL, HG, NG) - every month
+            # Roll around the 20th of the month before expiration
+            if day > 20:
+                # Roll to next month
+                next_month = month + 1
+                next_year = year
+                if next_month > 12:
+                    next_month = 1
+                    next_year = year + 1
+            else:
+                # Use current month's contract (it's still the front month)
+                next_month = month
+                next_year = year
             month_code = month_codes[next_month]
         else:
             # Quarterly contracts (H=Mar, M=Jun, U=Sep, Z=Dec)

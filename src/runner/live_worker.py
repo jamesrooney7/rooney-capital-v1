@@ -61,6 +61,7 @@ from strategy.ibs_strategy import IbsStrategy
 from strategy.factory_adapter import NotifyingFactoryAdapter, VALIDATED_STRATEGIES
 from runner.contract_selector import ContractSelector, ContractSelection
 from utils.discord_notifier import DiscordNotifier
+from utils.trades_db import TradesDB
 
 logger = logging.getLogger(__name__)
 
@@ -863,6 +864,15 @@ class LiveWorker:
             logger.info("Discord notifier disabled: no webhook URL configured")
             self.discord_notifier = None
 
+        # Initialize trades database for persisting trade history
+        self.trades_db: Optional[TradesDB] = None
+        try:
+            self.trades_db = TradesDB()
+            logger.info("Trades database initialized at %s", self.trades_db.db_path)
+        except Exception:
+            logger.exception("Failed to initialize trades database")
+            self.trades_db = None
+
         # Initialize portfolio coordinator for portfolio-wide constraints
         self.portfolio_coordinator: Optional[PortfolioCoordinator] = None
 
@@ -1276,6 +1286,7 @@ class LiveWorker:
                     trade_callbacks=trade_callbacks,
                     portfolio_coordinator=self.portfolio_coordinator,
                     feature_tracker=self.ml_feature_tracker,
+                    trades_db=self.trades_db,
                     **{k: v for k, v in strategy_kwargs.items()
                        if k not in ('symbol', 'portfolio_coordinator')},
                 )
