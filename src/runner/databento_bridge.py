@@ -977,14 +977,20 @@ class ResampledLiveData(bt.feeds.DataBase):
             return hours_diff >= (self.p.bar_interval_minutes / 60)
 
     def _is_bar_complete(self, timestamp: dt.datetime) -> bool:
-        """Check if current bar is complete and should be emitted."""
+        """Check if current bar is complete and should be emitted.
+
+        For hourly bars, we rely on _should_start_new_bar to emit when
+        entering a new hour. This method is primarily for daily bars
+        which need to emit at session end time.
+        """
         if self.p.bar_interval_minutes >= 1440:
             # Daily bar: complete at session end
             return (timestamp.hour == self.p.session_end_hour and
                     timestamp.minute == self.p.session_end_minute)
         else:
-            # Hourly bar: complete at top of next hour
-            return timestamp.minute == 0
+            # Hourly bars: emit via _should_start_new_bar when hour changes
+            # Don't emit here to avoid double-emission at :00 minute
+            return False
 
     def _aggregate_minute_bar(
         self,
