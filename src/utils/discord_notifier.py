@@ -92,7 +92,7 @@ class DiscordNotifier:
         side: str,
         price: float,
         size: float,
-        ibs: Optional[float] = None,
+        strategy_name: Optional[str] = None,
         ml_score: Optional[float] = None,
         timestamp: Optional[datetime] = None,
     ) -> bool:
@@ -103,7 +103,7 @@ class DiscordNotifier:
             side: "long" or "short"
             price: Entry price
             size: Position size (contracts)
-            ibs: IBS value at entry
+            strategy_name: Name of the strategy that triggered the trade
             ml_score: ML filter score
             timestamp: Entry time (defaults to now in market timezone)
 
@@ -132,10 +132,8 @@ class DiscordNotifier:
             "timestamp": timestamp.isoformat(),
         }
 
-        if ibs is not None:
-            embed["fields"].append(
-                {"name": "IBS", "value": f"{ibs:.3f}", "inline": True}
-            )
+        if strategy_name:
+            embed["fields"].insert(2, {"name": "Strategy", "value": strategy_name, "inline": True})
 
         if ml_score is not None:
             embed["fields"].append(
@@ -154,7 +152,7 @@ class DiscordNotifier:
         pnl: float,
         pnl_percent: float,
         exit_reason: str,
-        ibs: Optional[float] = None,
+        strategy_name: Optional[str] = None,
         duration_hours: Optional[float] = None,
         timestamp: Optional[datetime] = None,
     ) -> bool:
@@ -169,7 +167,7 @@ class DiscordNotifier:
             pnl: Profit/loss in dollars
             pnl_percent: P&L as percentage
             exit_reason: Reason for exit
-            ibs: IBS value at exit
+            strategy_name: Name of the strategy
             duration_hours: Trade duration in hours
             timestamp: Exit time (defaults to now in market timezone)
 
@@ -205,10 +203,8 @@ class DiscordNotifier:
             "timestamp": timestamp.isoformat(),
         }
 
-        if ibs is not None:
-            embed["fields"].append(
-                {"name": "IBS at Exit", "value": f"{ibs:.3f}", "inline": True}
-            )
+        if strategy_name:
+            embed["fields"].insert(2, {"name": "Strategy", "value": strategy_name, "inline": True})
 
         if duration_hours is not None:
             embed["fields"].append(

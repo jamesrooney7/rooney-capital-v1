@@ -182,11 +182,7 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         # ML filtering
         self._ml_last_score = None
-        self._latest_ml_score = None  # Alias for compatibility with NotifyingIbsStrategy
-
-        # IBS tracking for Discord notifications
-        self._ibs_latest = None
-        self._latest_ibs_value = None  # Alias for compatibility with NotifyingIbsStrategy
+        self._latest_ml_score = None  # Alias for compatibility with Discord callback
 
         # Data feeds - build map of symbol -> data feed
         self.hourly_data = self.datas[0]  # Primary hourly data
@@ -299,7 +295,6 @@ class StrategyFactoryAdapter(bt.Strategy):
                 'pnl': trade.pnl,
                 'pnlcomm': trade.pnlcomm,
                 'dt': self.hourly_data.datetime.datetime(0),
-                'ibs_value': self._ibs_latest,
                 'ml_score': self._ml_last_score,
             }
 
@@ -836,9 +831,6 @@ class StrategyFactoryAdapter(bt.Strategy):
             ibs_val = ibs_series.iloc[-1]
             if not np.isnan(ibs_val):
                 self._ml_feature_collector.record_feature('ibs', float(ibs_val))
-                # Store for Discord notifications
-                self._ibs_latest = float(ibs_val)
-                self._latest_ibs_value = float(ibs_val)
                 # IBS z-score
                 if len(ibs_series) >= 20:
                     ibs_mean = ibs_series.rolling(window=20).mean()

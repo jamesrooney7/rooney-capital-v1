@@ -2261,13 +2261,13 @@ class LiveWorker:
                 # Get entry details
                 entry_price = float(trade.price) if hasattr(trade, "price") else 0.0
                 size = abs(float(strategy.p.size)) if hasattr(strategy.p, "size") else 1.0
-                side = "long"  # IBS strategy is long-only
+                side = "long"  # Factory strategies are long-only
 
-                # Get IBS and ML score from strategy state
-                ibs_val = None
+                # Get strategy name and ML score
+                strategy_name = None
                 ml_score = None
-                if hasattr(strategy, "_latest_ibs_value"):
-                    ibs_val = strategy._latest_ibs_value
+                if hasattr(strategy.p, "strategy_name"):
+                    strategy_name = strategy.p.strategy_name
                 if hasattr(strategy, "_latest_ml_score"):
                     ml_score = strategy._latest_ml_score
 
@@ -2276,7 +2276,7 @@ class LiveWorker:
                     side=side,
                     price=entry_price,
                     size=size,
-                    ibs=ibs_val,
+                    strategy_name=strategy_name,
                     ml_score=ml_score,
                 )
             except Exception:
@@ -2305,12 +2305,16 @@ class LiveWorker:
                 pnl_usd = trade.pnl * pv - commission_usd if hasattr(trade, "pnl") else 0.0
                 pnl_percent = (trade.pnl / entry_price * 100) if entry_price > 0 and hasattr(trade, "pnl") else 0.0
 
-                # Get exit reason and IBS from exit snapshot
+                # Get exit reason and strategy name from exit snapshot
                 exit_reason = "Unknown"
-                ibs_val = None
+                strategy_name = None
                 if exit_snapshot:
                     exit_reason = exit_snapshot.get("exit_reason", "Unknown")
-                    ibs_val = exit_snapshot.get("ibs_value")
+                    strategy_name = exit_snapshot.get("strategy_name")
+
+                # Fallback to strategy params if not in snapshot
+                if not strategy_name and hasattr(strategy.p, "strategy_name"):
+                    strategy_name = strategy.p.strategy_name
 
                 # Calculate duration
                 duration_hours = None
@@ -2329,7 +2333,7 @@ class LiveWorker:
                     pnl=pnl_usd,
                     pnl_percent=pnl_percent,
                     exit_reason=exit_reason,
-                    ibs=ibs_val,
+                    strategy_name=strategy_name,
                     duration_hours=duration_hours,
                 )
             except Exception:
