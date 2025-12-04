@@ -207,7 +207,7 @@ class QueueFanout:
 
         self._ensure_queue(root)
         self._instrument_to_product[instrument_id] = symbol
-        logger.info(
+        logger.debug(
             "Mapped instrument %s (%s) to root %s", instrument_id, symbol, root
         )
 
@@ -545,8 +545,8 @@ class DatabentoSubscriber:
                     if client_symbol:
                         self.queue_manager.update_raw_symbol(record.instrument_id, client_symbol)
                         self._logged_contract_symbols.add(record.instrument_id)
-                        logger.info("Mapped instrument %s -> %s (root: %s)",
-                                   record.instrument_id, client_symbol, root)
+                        logger.debug("Mapped instrument %s -> %s (root: %s)",
+                                    record.instrument_id, client_symbol, root)
                 except Exception as e:
                     logger.debug("Could not access client symbology for trade: %s", e)
 
