@@ -1007,12 +1007,13 @@ class ResampledLiveData(bt.feeds.DataBase):
                 'volume': volume
             }
         else:
-            # Update existing bar
+            # Update existing bar (keep original timestamp as bar start time)
             self._current_bar['high'] = max(self._current_bar['high'], high_price)
             self._current_bar['low'] = min(self._current_bar['low'], low_price)
             self._current_bar['close'] = close_price
             self._current_bar['volume'] += volume
-            self._current_bar['timestamp'] = timestamp  # Use latest timestamp
+            # Don't update timestamp - it should remain as the bar's START time
+            # This ensures _should_start_new_bar correctly detects period boundaries
 
     def _populate_lines_from_bar(self, bar: Bar) -> bool:
         """Populate feed lines from a Bar object."""
