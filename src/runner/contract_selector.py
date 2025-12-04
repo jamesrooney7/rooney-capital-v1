@@ -281,18 +281,22 @@ class ContractSelector:
 
         elif root_upper in monthly_all_months:
             # Monthly contracts (CL, HG, NG) - every month
-            # Roll around the 20th of the month before expiration
+            # These contracts expire around the 20th of the month BEFORE the contract month
+            # So the front month is always the NEXT month's contract
+            # E.g., in December, CLZ5 already expired (~Nov 20), trade CLF6 (Jan)
+            next_month = month + 1
+            next_year = year
+            if next_month > 12:
+                next_month = 1
+                next_year = year + 1
+
+            # If past ~20th, liquidity shifts to the month after next
             if day > 20:
-                # Roll to next month
-                next_month = month + 1
-                next_year = year
+                next_month = next_month + 1
                 if next_month > 12:
                     next_month = 1
-                    next_year = year + 1
-            else:
-                # Use current month's contract (it's still the front month)
-                next_month = month
-                next_year = year
+                    next_year = next_year + 1
+
             month_code = month_codes[next_month]
         else:
             # Quarterly contracts (H=Mar, M=Jun, U=Sep, Z=Dec)
