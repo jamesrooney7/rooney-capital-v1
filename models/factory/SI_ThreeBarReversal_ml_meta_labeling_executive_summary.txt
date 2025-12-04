@@ -1,0 +1,70 @@
+====================================================================================================
+ML META-LABELING SYSTEM - EXECUTIVE SUMMARY
+Symbol: SI_ThreeBarReversal
+====================================================================================================
+
+FEATURE SELECTION
+----------------------------------------------------------------------------------------------------
+  Selected Features: 10
+
+WALK-FORWARD VALIDATION (2011-2020)
+----------------------------------------------------------------------------------------------------
+  Number of Windows: 5
+  Task Type: Classification
+
+  Window Results:
+    Window 1:
+      Test Period: 2016-01-01 to 2016-12-31
+      Test AUC:    0.7143
+      Test Sharpe: -3.897
+      WFE:         -121.40%
+
+    Window 2:
+      Test Period: 2017-01-01 to 2017-12-31
+      Test AUC:    1.0000
+      Test Sharpe: -5.134
+      WFE:         -172.64%
+
+    Window 3:
+      Test Period: 2018-01-01 to 2018-12-31
+      Test AUC:    nan
+      Test Sharpe: -18.139
+      WFE:         -621.40%
+
+    Window 4:
+      Test Period: 2019-01-01 to 2019-12-31
+      Test AUC:    0.5000
+      Test Sharpe: 2.749
+      WFE:         95.96%
+
+    Window 5:
+      Test Period: 2020-01-01 to 2020-12-31
+      Test AUC:    0.6644
+      Test Sharpe: 2.777
+      WFE:         97.87%
+
+  Aggregate Statistics:
+    Mean Test Sharpe: -4.329 ± 8.546
+    Mean Test AUC:    0.7197 ± 0.2081
+    Mean WFE:         -144.32% ± 293.82%
+    Positive Windows: 2/5
+
+HELD-OUT TEST PERIOD (2021-2024)
+----------------------------------------------------------------------------------------------------
+  Test AUC:             0.7190
+  Threshold:            0.50
+
+  Unfiltered (Primary Strategy):
+    Total Trades:       186
+    Win Rate:           54.84%
+    Sharpe Ratio:       0.883
+    Profit Factor:      1.37
+
+  Filtered (ML Meta-Labeling):
+    Total Trades:       123
+    Filter Rate:        33.9%
+    Win Rate:           66.67%
+    Sharpe Ratio:       1.777
+    Profit Factor:      2.19
+
+====================================================================================================

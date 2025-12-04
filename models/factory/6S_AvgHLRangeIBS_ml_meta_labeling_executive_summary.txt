@@ -1,0 +1,70 @@
+====================================================================================================
+ML META-LABELING SYSTEM - EXECUTIVE SUMMARY
+Symbol: 6S_AvgHLRangeIBS
+====================================================================================================
+
+FEATURE SELECTION
+----------------------------------------------------------------------------------------------------
+  Selected Features: 10
+
+WALK-FORWARD VALIDATION (2011-2020)
+----------------------------------------------------------------------------------------------------
+  Number of Windows: 5
+  Task Type: Classification
+
+  Window Results:
+    Window 1:
+      Test Period: 2016-01-01 to 2016-12-31
+      Test AUC:    0.7444
+      Test Sharpe: 0.349
+      WFE:         57.35%
+
+    Window 2:
+      Test Period: 2017-01-01 to 2017-12-31
+      Test AUC:    0.6079
+      Test Sharpe: -1.666
+      WFE:         -286.70%
+
+    Window 3:
+      Test Period: 2018-01-01 to 2018-12-31
+      Test AUC:    0.6018
+      Test Sharpe: -2.367
+      WFE:         -547.64%
+
+    Window 4:
+      Test Period: 2019-01-01 to 2019-12-31
+      Test AUC:    0.7449
+      Test Sharpe: -3.887
+      WFE:         -1416.41%
+
+    Window 5:
+      Test Period: 2020-01-01 to 2020-12-31
+      Test AUC:    0.7400
+      Test Sharpe: 2.180
+      WFE:         82849.82%
+
+  Aggregate Statistics:
+    Mean Test Sharpe: -1.078 ± 2.374
+    Mean Test AUC:    0.6878 ± 0.0758
+    Mean WFE:         16131.28% ± 37300.78%
+    Positive Windows: 2/5
+
+HELD-OUT TEST PERIOD (2021-2024)
+----------------------------------------------------------------------------------------------------
+  Test AUC:             0.5727
+  Threshold:            0.50
+
+  Unfiltered (Primary Strategy):
+    Total Trades:       163
+    Win Rate:           53.99%
+    Sharpe Ratio:       1.009
+    Profit Factor:      1.49
+
+  Filtered (ML Meta-Labeling):
+    Total Trades:       80
+    Filter Rate:        50.9%
+    Win Rate:           60.00%
+    Sharpe Ratio:       1.134
+    Profit Factor:      1.91
+
+====================================================================================================

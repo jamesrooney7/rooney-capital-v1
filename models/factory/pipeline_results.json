@@ -1,0 +1,84 @@
+{
+  "ES_AvgHLRangeIBS": {
+    "success": true,
+    "model_path": "models/factory/ES_AvgHLRangeIBS_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/ES_AvgHLRangeIBS"
+  },
+  "NQ_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/NQ_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/NQ_ATRBuyDip"
+  },
+  "YM_MovingAverageEnvelope": {
+    "success": false,
+    "error": "ters: {'num_leaves': 71, 'max_depth': 9, 'n_estimators': 1178, 'learning_rate': 0.02290523389048889, 'feature_fraction': 0.4570921210139582, 'bagging_fraction': 0.9399018476391181, 'min_data_in_leaf': 48, 'reg_alpha': 0.0005368851836461387, 'reg_lambda': 1.9766093397952597e-06}. Best is trial 0 with value: 0.5.\nTraceback (most recent call last):\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 546, in <module>\n    main(args)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 159, in main\n    window_results, oos_predictions = walk_forward.run_walk_forward()\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/walk_forward.py\", line 96, in run_walk_forward\n    window_result = self._run_single_window(window, window_idx)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/walk_forward.py\", line 205, in _run_single_window\n    y_pred = trainer.predict_proba(X_test_selected)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/lightgbm_trainer.py\", line 212, in predict_proba\n    return self.model.predict_proba(X)[:, 1]\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/sklearn.py\", line 1627, in predict_proba\n    result = super().predict(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/sklearn.py\", line 1144, in predict\n    return self._Booster.predict(  # type: ignore[union-attr]\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 4767, in predict\n    return predictor.predict(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 1158, in predict\n    data = _data_from_pandas(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 834, in _data_from_pandas\n    raise ValueError(\"Input data must be 2 dimensional and non empty.\")\nValueError: Input data must be 2 dimensional and non empty.\n"
+  },
+  "RTY_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/RTY_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/RTY_ATRBuyDip"
+  },
+  "GC_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/GC_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/GC_ATRBuyDip"
+  },
+  "SI_ThreeBarReversal": {
+    "success": true,
+    "model_path": "models/factory/SI_ThreeBarReversal_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/SI_ThreeBarReversal"
+  },
+  "HG_MovingAverageEnvelope": {
+    "success": true,
+    "model_path": "models/factory/HG_MovingAverageEnvelope_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/HG_MovingAverageEnvelope"
+  },
+  "CL_AvgHLRangeIBS": {
+    "success": true,
+    "model_path": "models/factory/CL_AvgHLRangeIBS_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/CL_AvgHLRangeIBS"
+  },
+  "CL_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/CL_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/CL_ATRBuyDip"
+  },
+  "6A_MovingAverageEnvelope": {
+    "success": false,
+    "error": "eaves': 109, 'max_depth': 6, 'n_estimators': 626, 'learning_rate': 0.021836726998476892, 'feature_fraction': 0.6048990987216785, 'bagging_fraction': 0.5864272427001299, 'min_data_in_leaf': 31, 'reg_alpha': 0.0002633912357897053, 'reg_lambda': 0.3464719042780906}. Best is trial 37 with value: 0.6169840218653929.\nTraceback (most recent call last):\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 546, in <module>\n    main(args)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 159, in main\n    window_results, oos_predictions = walk_forward.run_walk_forward()\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/walk_forward.py\", line 96, in run_walk_forward\n    window_result = self._run_single_window(window, window_idx)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/walk_forward.py\", line 205, in _run_single_window\n    y_pred = trainer.predict_proba(X_test_selected)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/lightgbm_trainer.py\", line 212, in predict_proba\n    return self.model.predict_proba(X)[:, 1]\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/sklearn.py\", line 1627, in predict_proba\n    result = super().predict(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/sklearn.py\", line 1144, in predict\n    return self._Booster.predict(  # type: ignore[union-attr]\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 4767, in predict\n    return predictor.predict(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 1158, in predict\n    data = _data_from_pandas(\n  File \"/home/linuxuser/.local/lib/python3.10/site-packages/lightgbm/basic.py\", line 834, in _data_from_pandas\n    raise ValueError(\"Input data must be 2 dimensional and non empty.\")\nValueError: Input data must be 2 dimensional and non empty.\n"
+  },
+  "6B_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/6B_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6B_ATRBuyDip"
+  },
+  "6E_SupportResistanceBounce": {
+    "success": true,
+    "model_path": "models/factory/6E_SupportResistanceBounce_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6E_SupportResistanceBounce"
+  },
+  "6E_BBIBSReversal": {
+    "success": true,
+    "model_path": "models/factory/6E_BBIBSReversal_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6E_BBIBSReversal"
+  },
+  "6J_ATRBuyDip": {
+    "success": true,
+    "model_path": "models/factory/6J_ATRBuyDip_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6J_ATRBuyDip"
+  },
+  "6N_BollingerBands": {
+    "success": false,
+    "error": "Traceback (most recent call last):\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 546, in <module>\n    main(args)\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/ml_meta_labeling_optimizer.py\", line 88, in main\n    df, feature_columns = data_prep.load_and_prepare()\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/data_preparation.py\", line 95, in load_and_prepare\n    self._validate_data()\n  File \"/opt/pine/rooney-capital-v1/research/ml_meta_labeling/components/data_preparation.py\", line 168, in _validate_data\n    raise ValueError(\nValueError: Insufficient samples for class 1: 186 < 200\n"
+  },
+  "6S_SupportResistanceBounce": {
+    "success": true,
+    "model_path": "models/factory/6S_SupportResistanceBounce_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6S_SupportResistanceBounce"
+  },
+  "6S_AvgHLRangeIBS": {
+    "success": true,
+    "model_path": "models/factory/6S_AvgHLRangeIBS_ml_meta_labeling_final_model.pkl",
+    "results_dir": "/opt/pine/rooney-capital-v1/research/ml_meta_labeling/results/6S_AvgHLRangeIBS"
+  }
+}

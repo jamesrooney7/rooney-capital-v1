@@ -1,0 +1,70 @@
+====================================================================================================
+ML META-LABELING SYSTEM - EXECUTIVE SUMMARY
+Symbol: 6S_SupportResistanceBounce
+====================================================================================================
+
+FEATURE SELECTION
+----------------------------------------------------------------------------------------------------
+  Selected Features: 10
+
+WALK-FORWARD VALIDATION (2011-2020)
+----------------------------------------------------------------------------------------------------
+  Number of Windows: 5
+  Task Type: Classification
+
+  Window Results:
+    Window 1:
+      Test Period: 2016-01-01 to 2016-12-31
+      Test AUC:    0.6515
+      Test Sharpe: -0.250
+      WFE:         -15.15%
+
+    Window 2:
+      Test Period: 2017-01-01 to 2017-12-31
+      Test AUC:    0.6042
+      Test Sharpe: -0.635
+      WFE:         -42.11%
+
+    Window 3:
+      Test Period: 2018-01-01 to 2018-12-31
+      Test AUC:    0.7083
+      Test Sharpe: -9.153
+      WFE:         -645.86%
+
+    Window 4:
+      Test Period: 2019-01-01 to 2019-12-31
+      Test AUC:    0.7333
+      Test Sharpe: -2.824
+      WFE:         -210.08%
+
+    Window 5:
+      Test Period: 2020-01-01 to 2020-12-31
+      Test AUC:    0.5432
+      Test Sharpe: -0.105
+      WFE:         -8.12%
+
+  Aggregate Statistics:
+    Mean Test Sharpe: -2.593 ± 3.828
+    Mean Test AUC:    0.6481 ± 0.0772
+    Mean WFE:         -184.27% ± 270.91%
+    Positive Windows: 0/5
+
+HELD-OUT TEST PERIOD (2021-2024)
+----------------------------------------------------------------------------------------------------
+  Test AUC:             0.5565
+  Threshold:            0.50
+
+  Unfiltered (Primary Strategy):
+    Total Trades:       179
+    Win Rate:           38.55%
+    Sharpe Ratio:       -1.054
+    Profit Factor:      0.66
+
+  Filtered (ML Meta-Labeling):
+    Total Trades:       57
+    Filter Rate:        68.2%
+    Win Rate:           43.86%
+    Sharpe Ratio:       -0.138
+    Profit Factor:      0.91
+
+====================================================================================================

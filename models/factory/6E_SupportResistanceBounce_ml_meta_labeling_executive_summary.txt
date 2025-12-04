@@ -1,0 +1,70 @@
+====================================================================================================
+ML META-LABELING SYSTEM - EXECUTIVE SUMMARY
+Symbol: 6E_SupportResistanceBounce
+====================================================================================================
+
+FEATURE SELECTION
+----------------------------------------------------------------------------------------------------
+  Selected Features: 10
+
+WALK-FORWARD VALIDATION (2011-2020)
+----------------------------------------------------------------------------------------------------
+  Number of Windows: 5
+  Task Type: Classification
+
+  Window Results:
+    Window 1:
+      Test Period: 2016-01-01 to 2016-12-31
+      Test AUC:    0.5710
+      Test Sharpe: 1.032
+      WFE:         36.73%
+
+    Window 2:
+      Test Period: 2017-01-01 to 2017-12-31
+      Test AUC:    0.6370
+      Test Sharpe: 0.147
+      WFE:         6.25%
+
+    Window 3:
+      Test Period: 2018-01-01 to 2018-12-31
+      Test AUC:    0.6300
+      Test Sharpe: -1.788
+      WFE:         -81.19%
+
+    Window 4:
+      Test Period: 2019-01-01 to 2019-12-31
+      Test AUC:    0.6818
+      Test Sharpe: 10.064
+      WFE:         500.16%
+
+    Window 5:
+      Test Period: 2020-01-01 to 2020-12-31
+      Test AUC:    0.5085
+      Test Sharpe: -5.990
+      WFE:         -285.16%
+
+  Aggregate Statistics:
+    Mean Test Sharpe: 0.693 ± 5.896
+    Mean Test AUC:    0.6057 ± 0.0671
+    Mean WFE:         35.36% ± 288.62%
+    Positive Windows: 3/5
+
+HELD-OUT TEST PERIOD (2021-2024)
+----------------------------------------------------------------------------------------------------
+  Test AUC:             0.5338
+  Threshold:            0.50
+
+  Unfiltered (Primary Strategy):
+    Total Trades:       156
+    Win Rate:           43.59%
+    Sharpe Ratio:       0.098
+    Profit Factor:      1.04
+
+  Filtered (ML Meta-Labeling):
+    Total Trades:       51
+    Filter Rate:        67.3%
+    Win Rate:           41.18%
+    Sharpe Ratio:       -0.696
+    Profit Factor:      0.61
+
+====================================================================================================

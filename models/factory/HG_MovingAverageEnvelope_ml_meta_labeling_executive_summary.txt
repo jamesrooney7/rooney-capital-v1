@@ -1,0 +1,70 @@
+====================================================================================================
+ML META-LABELING SYSTEM - EXECUTIVE SUMMARY
+Symbol: HG_MovingAverageEnvelope
+====================================================================================================
+
+FEATURE SELECTION
+----------------------------------------------------------------------------------------------------
+  Selected Features: 10
+
+WALK-FORWARD VALIDATION (2011-2020)
+----------------------------------------------------------------------------------------------------
+  Number of Windows: 5
+  Task Type: Classification
+
+  Window Results:
+    Window 1:
+      Test Period: 2016-01-01 to 2016-12-31
+      Test AUC:    0.6494
+      Test Sharpe: 3.740
+      WFE:         86.42%
+
+    Window 2:
+      Test Period: 2017-01-01 to 2017-12-31
+      Test AUC:    0.7000
+      Test Sharpe: -1.625
+      WFE:         -38.19%
+
+    Window 3:
+      Test Period: 2018-01-01 to 2018-12-31
+      Test AUC:    0.9216
+      Test Sharpe: -2.862
+      WFE:         -72.62%
+
+    Window 4:
+      Test Period: 2019-01-01 to 2019-12-31
+      Test AUC:    0.8519
+      Test Sharpe: 3.937
+      WFE:         118.14%
+
+    Window 5:
+      Test Period: 2020-01-01 to 2020-12-31
+      Test AUC:    0.7536
+      Test Sharpe: -1.320
+      WFE:         -39.34%
+
+  Aggregate Statistics:
+    Mean Test Sharpe: 0.374 ± 3.216
+    Mean Test AUC:    0.7753 ± 0.1110
+    Mean WFE:         10.88% ± 85.31%
+    Positive Windows: 2/5
+
+HELD-OUT TEST PERIOD (2021-2024)
+----------------------------------------------------------------------------------------------------
+  Test AUC:             0.6746
+  Threshold:            0.50
+
+  Unfiltered (Primary Strategy):
+    Total Trades:       310
+    Win Rate:           45.48%
+    Sharpe Ratio:       1.053
+    Profit Factor:      1.36
+
+  Filtered (ML Meta-Labeling):
+    Total Trades:       132
+    Filter Rate:        57.4%
+    Win Rate:           58.33%
+    Sharpe Ratio:       2.013
+    Profit Factor:      2.44
+
+====================================================================================================
