@@ -1,6 +1,6 @@
 # Rooney Capital Trading System - Complete Guide
 
-**Last Updated:** 2025-11-05
+**Last Updated:** 2025-12-04
 **Current Configuration:** 9 instruments, max 2 positions, $2,500 daily stop loss
 
 ---
@@ -16,6 +16,7 @@
 7. [Operations & Monitoring](#operations--monitoring)
 8. [Troubleshooting](#troubleshooting)
 9. [Key Files Reference](#key-files-reference)
+10. [Live Operations (Strategy Factory)](#live-operations-strategy-factory)
 
 ---
 
@@ -708,6 +709,214 @@ python3 research/portfolio_optimizer_greedy_train_test.py \
 
 ---
 
+## Live Operations (Strategy Factory)
+
+This section covers day-to-day operations for running the Strategy Factory live trading system.
+
+### Quick Start: Deploy and Run
+
+```bash
+# 1. SSH to server
+ssh linuxuser@your-server
+
+# 2. Navigate to project
+cd /opt/pine/rooney-capital-v1
+
+# 3. Pull latest changes
+git pull origin <branch-name>
+
+# 4. Verify code is updated (check for recent commit)
+git log --oneline -1
+
+# 5. Start the worker
+./run_live.sh start
+
+# 6. Verify it's running
+ps aux | grep "runner.main" | grep -v grep
+```
+
+### run_live.sh Commands
+
+```bash
+# Start the worker
+./run_live.sh start
+
+# Stop the worker
+./run_live.sh stop
+
+# Restart (stop + start)
+./run_live.sh restart
+
+# Check if running
+./run_live.sh status
+
+# Stream logs (Ctrl+C to exit)
+./run_live.sh logs
+```
+
+### Monitoring Logs
+
+```bash
+# Stream all logs in real-time
+tail -f /opt/pine/rooney-capital-v1/logs/worker.log
+
+# View recent trade executions
+grep -a -E "BUY executed|SELL executed" logs/worker.log | tail -20
+
+# View entry/exit orders with diagnostic info (Bar[0] shows bar data at execution)
+grep -a -E "executed at|order placed" logs/worker.log | tail -30
+
+# View entry signals (including ML-blocked ones)
+grep -a -E "ENTRY SIGNAL|Entry blocked" logs/worker.log | tail -30
+
+# View signal checks for specific symbol
+grep -a "CL: Signal check" logs/worker.log | tail -20
+
+# View errors only
+grep -a -i "error" logs/worker.log | tail -50
+
+# View factory_adapter logs only
+grep -a "factory_adapter" logs/worker.log | tail -50
+```
+
+### Checking Worker Status
+
+```bash
+# Check if process is running (shows PID and start time)
+ps aux | grep "runner.main" | grep -v grep
+
+# Example output:
+# linuxus+ 1629144  3.0  0.4 6950576 546836 ?  Sl  14:37  0:04 python3 -m runner.main
+#                                                          ^^^^^^ start time
+
+# Check PID file
+cat /opt/pine/rooney-capital-v1/logs/worker.pid
+
+# Check log file modification time (should be recent if worker is active)
+stat /opt/pine/rooney-capital-v1/logs/worker.log | grep Modify
+```
+
+### Force Killing a Stuck Worker
+
+If `./run_live.sh stop` doesn't work:
+
+```bash
+# 1. Find the PID
+ps aux | grep "runner.main" | grep -v grep
+
+# 2. Force kill by PID
+kill -9 <PID>
+
+# 3. Verify it's dead
+ps aux | grep "runner.main" | grep -v grep
+# (should show nothing)
+
+# 4. Clean up PID file
+rm /opt/pine/rooney-capital-v1/logs/worker.pid
+
+# 5. Start fresh
+./run_live.sh start
+```
+
+### Full Redeploy Workflow
+
+When you need to update code and restart:
+
+```bash
+# 1. Stop current worker
+./run_live.sh stop
+
+# 2. If that doesn't work, force kill
+kill -9 $(ps aux | grep "runner.main" | grep -v grep | awk '{print $2}')
+
+# 3. Pull latest code
+git pull origin <branch-name>
+
+# 4. Verify the update (e.g., check for specific code change)
+grep -n "Bar\[0\]" src/strategy/factory_adapter.py
+
+# 5. Start fresh
+./run_live.sh start
+
+# 6. Verify new process is running with today's date
+ps aux | grep "runner.main" | grep -v grep
+
+# 7. Monitor logs for errors
+tail -f logs/worker.log
+```
+
+### Common Issues and Solutions
+
+#### Issue: "Failed to resolve symbol: CLZ5" (or similar)
+
+**Cause:** Contract has expired. CL/HG/NG contracts expire around the 20th of the month BEFORE the contract month.
+
+**Solution:** The contract selector should auto-select the correct contract. If not:
+1. Check `src/runner/contract_selector.py` has latest fixes
+2. Pull latest code and restart
+
+#### Issue: Worker shows old start date after restart
+
+**Cause:** Old process wasn't killed before starting new one.
+
+**Solution:**
+```bash
+# Force kill ALL runner processes
+pkill -9 -f "runner.main"
+# Start fresh
+./run_live.sh start
+```
+
+#### Issue: Logs show "binary file matches" with grep
+
+**Cause:** Log file contains some binary content.
+
+**Solution:** Use `-a` flag with grep:
+```bash
+grep -a "pattern" /opt/pine/rooney-capital-v1/logs/worker.log
+```
+
+#### Issue: No diagnostic output in logs (missing Bar[0] info)
+
+**Cause:** Running old code that doesn't have diagnostic logging.
+
+**Solution:**
+1. Pull latest code: `git pull`
+2. Kill old process: `kill -9 <PID>`
+3. Verify code has diagnostic logging: `grep -n "Bar\[0\]" src/strategy/factory_adapter.py`
+4. Restart: `./run_live.sh start`
+
+#### Issue: Orders filling at wrong prices
+
+**Diagnostic steps:**
+1. Check the diagnostic logs for order execution:
+   ```bash
+   grep -a "executed at.*Bar\[0\]" logs/worker.log | tail -10
+   ```
+2. Compare executed price vs Bar[0] open/close
+3. If executed price matches Bar open instead of previous bar close, there may be a timing issue
+
+### Log File Locations
+
+| File | Purpose |
+|------|---------|
+| `/opt/pine/rooney-capital-v1/logs/worker.log` | Main worker log (trades, signals, errors) |
+| `/opt/pine/rooney-capital-v1/logs/worker.pid` | PID of running worker |
+
+### Diagnostic Log Format
+
+After deploying diagnostic logging, trade executions show:
+```
+CL: BUY executed at 59.13 | Bar[0]: dt=2025-12-04 12:00:00, O=59.10, C=59.15
+CL: SELL executed at 59.50, P&L: 0.37 | Bar[0]: dt=2025-12-04 14:00:00, O=59.48, C=59.52
+```
+
+This helps diagnose:
+- **Executed price** vs **Bar[0] Open** vs **Bar[0] Close**
+- Whether orders are filling at the expected price
+
+---
+
 ## Next Steps
 
 1. **Monitor first few days:** Watch for any issues with new 9-instrument portfolio
@@ -726,5 +935,5 @@ python3 research/portfolio_optimizer_greedy_train_test.py \
 - **Model Training:** See `research/train_rf_three_way_split.py`
 - **Portfolio Optimization:** See `research/portfolio_optimizer_greedy_train_test.py`
 
-**Last Updated:** 2025-11-05
+**Last Updated:** 2025-12-04
 **Configuration:** 9 instruments, 2 max positions, $2,500 daily stop
