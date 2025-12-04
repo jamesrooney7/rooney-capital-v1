@@ -48,16 +48,17 @@ Databento API → Live Data Bridge → Backtrader Engine → IBS Strategy + ML V
    - Aggregates ticks into 1-minute bars
    - Feeds data into Backtrader
 
-2. **Strategy Logic** (`src/strategy/ibs_strategy.py`)
-   - Calculates IBS indicator
-   - Generates long/short signals
-   - Applies ML veto filter
-   - Manages position entry/exit
+2. **Strategy Logic** (`src/strategy/factory_adapter.py`)
+   - Implements Strategy Factory patterns (ATRBuyDip, AvgHLRangeIBS, etc.)
+   - Calculates technical indicators and features
+   - Applies ML meta-labeling filter
+   - Manages position entry/exit on 15-minute bars
 
-3. **ML Models** (`src/models/`)
-   - One Random Forest model per instrument
-   - Trained on historical features
-   - Vetos low-confidence signals
+3. **ML Models** (`models/factory/`)
+   - ML meta-labeling models per symbol/strategy combination
+   - Naming: `{SYMBOL}_{STRATEGY}_ml_meta_labeling_final_model.pkl`
+   - Trained using walk-forward optimization
+   - Filter signals with probability threshold (typically 0.5)
 
 4. **Portfolio Coordinator** (`src/runner/portfolio_coordinator.py`)
    - Enforces max_positions limit (currently 2)
@@ -123,10 +124,11 @@ Databento API → Live Data Bridge → Backtrader Engine → IBS Strategy + ML V
 ├── .env                                # Environment variables (API keys, webhooks)
 ├── Data/
 │   └── Databento_contract_map.yml      # Contract specifications (tick sizes, datasets)
-└── src/models/
-    ├── 6A/6A_rf_model.pkl             # ML model files (one per instrument)
-    ├── 6A/6A_best.json                # Optimization metadata
-    └── ...
+└── models/factory/
+    ├── CL_ATRBuyDip_ml_meta_labeling_final_model.pkl      # ML model per symbol/strategy
+    ├── CL_ATRBuyDip_ml_meta_labeling_executive_summary.txt
+    ├── ES_AvgHLRangeIBS_ml_meta_labeling_final_model.pkl
+    └── ... (14 models total)
 ```
 
 **IMPORTANT:** `config/portfolio_optimization.json` has been **REMOVED**. All configuration is now in `config.yml`.
@@ -141,10 +143,12 @@ src/
 │   ├── databento_bridge.py            # Live data ingestion from Databento
 │   └── traderspost_client.py          # Order routing to TradersPost
 ├── strategy/
-│   ├── ibs_strategy.py                # IBS trading logic + ML filtering
+│   ├── factory_adapter.py             # Strategy Factory adapter for live trading
+│   ├── ibs_strategy.py                # Legacy IBS strategy (deprecated)
 │   └── contract_specs.py              # Tick sizes and values per instrument
 ├── models/
-│   └── loader.py                      # ML model loading utilities
+│   ├── factory_loader.py              # Strategy Factory model loading
+│   └── loader.py                      # Legacy model loading utilities
 └── utils/
     ├── discord_notifier.py            # Discord alerts and summaries
     └── trades_db.py                   # SQLite trade database
@@ -152,7 +156,8 @@ src/
 research/
 ├── portfolio_optimizer_greedy_train_test.py  # Portfolio optimizer with --update-config
 ├── portfolio_simulator.py             # Portfolio backtesting using actual trades
-└── train_rf_three_way_split.py       # ML model training script
+├── train_rf_three_way_split.py       # Legacy IBS model training (deprecated)
+└── ml_meta_labeling/                  # Strategy Factory ML training pipeline
 
 scripts/
 ├── launch_worker.py                   # Worker launcher (used by systemd)
@@ -181,7 +186,7 @@ dashboard/
 ```yaml
 # Core paths
 contract_map: Data/Databento_contract_map.yml
-models_path: src/models
+models_path: models/factory  # Strategy Factory ML models
 
 # Instruments to trade
 symbols:
@@ -352,11 +357,11 @@ sudo journalctl -u pine-runner.service -f
 Watch for these log messages:
 
 ```
-✅ Portfolio config loaded from config.yml: max_positions=2, daily_stop_loss=$2500
+✅ Portfolio config loaded from config.yml: max_positions=X, daily_stop_loss=$XXXX
 ✅ Portfolio coordinator initialized successfully
-✅ Loaded 9 symbols: 6A, 6B, 6C, 6M, 6N, 6S, CL, HG, SI
-✅ Model loaded for 6A (Sharpe: X.XX, confidence threshold: 0.XX)
-... (should see 9 models loaded)
+✅ Loaded N symbols from config
+✅ Strategy Factory model loaded for CL_ATRBuyDip (threshold: 0.5)
+... (should see model loaded for each portfolio instrument)
 ✅ Discord notifier initialized
 ✅ TradersPost client initialized
 ```
@@ -469,8 +474,8 @@ cat /var/run/pine/worker_heartbeat.json
 # Should show recent timestamp
 
 # Verify models loaded
-sudo journalctl -u pine-runner.service -n 200 | grep "Model loaded" | wc -l
-# Should return 9 (one per instrument)
+sudo journalctl -u pine-runner.service -n 200 | grep -i "model loaded" | wc -l
+# Should match the number of portfolio instruments
 
 # Check portfolio coordinator
 sudo journalctl -u pine-runner.service -n 100 | grep -i "portfolio"
@@ -480,7 +485,7 @@ sudo journalctl -u pine-runner.service -n 100 | grep -i "portfolio"
 ### Daily Checklist
 
 1. ✅ **Service running:** `sudo systemctl status pine-runner`
-2. ✅ **All 9 models loaded:** Check logs for "Model loaded" x9
+2. ✅ **All models loaded:** Check logs for "model loaded" messages (one per portfolio instrument)
 3. ✅ **No errors:** `sudo journalctl -u pine-runner -n 200 | grep -i error`
 4. ✅ **Max 2 positions:** Check dashboard or Discord
 5. ✅ **Dashboard accessible:** Open in browser
@@ -530,8 +535,8 @@ ls /opt/pine/rooney-capital-v1/.env
 python3 -c "import yaml; yaml.safe_load(open('config.yml'))"
 
 # 3. Missing models
-ls src/models/*/`*_rf_model.pkl | wc -l
-# Should return 9
+ls models/factory/*_ml_meta_labeling_final_model.pkl | wc -l
+# Should return 14 (one per symbol/strategy combination)
 
 # 4. Port already in use (if running multiple instances)
 ps aux | grep launch_worker | grep -v grep
@@ -546,13 +551,17 @@ ps aux | grep launch_worker | grep -v grep
 **Fix:**
 ```bash
 # Check which models exist
-ls -lh src/models/*/`*_rf_model.pkl
+ls -lh models/factory/*_ml_meta_labeling_final_model.pkl
 
 # Verify model directory structure
-# Should have: src/models/6A/6A_rf_model.pkl, src/models/6A/6A_best.json, etc.
+# Should have: models/factory/{SYMBOL}_{STRATEGY}_ml_meta_labeling_final_model.pkl
+# Example: models/factory/CL_ATRBuyDip_ml_meta_labeling_final_model.pkl
 
-# If missing, you need to run model training:
-python3 research/train_rf_three_way_split.py --symbol 6A --rs-trials 25 --bo-trials 65
+# Check model count (should be 14)
+ls models/factory/*_ml_meta_labeling_final_model.pkl | wc -l
+
+# If missing, check git status or re-pull from GitHub
+git status models/factory/
 ```
 
 ### Issue: TradersPost Orders Not Appearing
@@ -637,10 +646,11 @@ sqlite3 /opt/pine/runtime/trades.db "DELETE FROM trades WHERE entry_time < date(
 |------|---------|
 | `src/runner/live_worker.py` | Main orchestrator, loads config, starts strategies |
 | `src/runner/portfolio_coordinator.py` | Portfolio risk management (max positions, daily stop) |
-| `src/strategy/ibs_strategy.py` | IBS indicator and trading logic |
-| `src/models/loader.py` | ML model loading |
+| `src/strategy/factory_adapter.py` | Strategy Factory trading logic (15-min bars) |
+| `src/models/factory_loader.py` | Strategy Factory ML model loading |
 | `src/runner/traderspost_client.py` | Order routing to TradersPost |
 | `src/utils/discord_notifier.py` | Discord notifications |
+| `models/factory/` | Production ML meta-labeling models (14 total) |
 
 ### Scripts (Operations)
 
@@ -694,7 +704,7 @@ sudo systemctl start pine-runner.service
 # === MONITORING ===
 ps aux | grep launch_worker | grep -v grep  # Should show ONE process
 sqlite3 /opt/pine/runtime/trades.db "SELECT COUNT(*) FROM trades;"
-sudo journalctl -u pine-runner.service -n 100 | grep "Model loaded" | wc -l  # Should be 9
+sudo journalctl -u pine-runner.service -n 100 | grep -i "model loaded" | wc -l  # Should match portfolio instruments
 
 # === DASHBOARD ===
 cd dashboard && streamlit run app.py --server.port 8501 --server.address 0.0.0.0
@@ -932,7 +942,7 @@ This helps diagnose:
 - **GitHub Issues:** Report bugs or request features
 - **Documentation:** This file (SYSTEM_GUIDE.md) is the single source of truth
 - **Configuration:** All settings in `config.yml` (no more JSON files!)
-- **Model Training:** See `research/train_rf_three_way_split.py`
+- **Model Training:** See `research/ml_meta_labeling/` for Strategy Factory models
 - **Portfolio Optimization:** See `research/portfolio_optimizer_greedy_train_test.py`
 
 **Last Updated:** 2025-12-04
