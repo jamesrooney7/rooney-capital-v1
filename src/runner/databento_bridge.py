@@ -981,8 +981,10 @@ class ResampledLiveData(bt.feeds.DataBase):
             # Hourly bar: complete at top of next hour
             return timestamp.minute == 0
         else:
-            # Sub-hourly bars (e.g., 15-min): complete at interval boundary
-            return timestamp.minute % self.p.bar_interval_minutes == 0
+            # Sub-hourly bars (e.g., 15-min): don't complete at interval boundary
+            # Let _should_start_new_bar handle completion when the next period starts.
+            # This prevents emitting a 1-minute bar at :00, :15, :30, :45 boundaries.
+            return False
 
     def _aggregate_minute_bar(
         self,
