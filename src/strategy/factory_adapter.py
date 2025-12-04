@@ -601,16 +601,19 @@ class StrategyFactoryAdapter(bt.Strategy):
                 logger.warning(f"{self.symbol}: No ML features available")
                 return None
 
-            # Check if we have all required features
+            # Check for missing features - fill with 0 for unavailable data (e.g., VIX)
             missing = [f for f in self.p.ml_features if f not in features or features[f] is None]
             if missing:
                 logger.debug(
-                    f"{self.symbol}: Missing {len(missing)} ML features: {missing[:5]}..."
+                    f"{self.symbol}: Filling {len(missing)} missing ML features with 0: {missing[:5]}..."
                 )
-                return None
+                # Fill missing features with 0 (neutral value) - allows model to run
+                # even when some data feeds (like VIX) aren't available
+                for f in missing:
+                    features[f] = 0.0
 
             # Build feature vector in correct order
-            X = pd.DataFrame([{f: features.get(f) for f in self.p.ml_features}])
+            X = pd.DataFrame([{f: features.get(f, 0.0) for f in self.p.ml_features}])
 
             # Get prediction probability
             if hasattr(self.p.ml_model, 'predict_proba'):
@@ -732,6 +735,7 @@ class StrategyFactoryAdapter(bt.Strategy):
             hourly_return_names = [
                 f"{sym} Hourly Return",
                 f"{sym_lower}_hourly_return",
+                f"{sym_lower}_hourly_return_pipeline",  # Some models use this format (e.g., ng_hourly_return_pipeline)
                 f"{sym_lower}_daily_return",  # Some models use this for hourly too
             ]
             for fname in hourly_return_names:
@@ -802,7 +806,7 @@ class StrategyFactoryAdapter(bt.Strategy):
                 ibs = (close_val - low) / (high - low)
                 self._ml_feature_collector.record_feature('pair_ibs_daily', float(ibs))
 
-            # Calculate ATR Z-score
+            # Calculate ATR Z-score and percentile
             if len(df) >= 20:
                 tr = np.maximum(
                     df['High'] - df['Low'],
@@ -820,14 +824,35 @@ class StrategyFactoryAdapter(bt.Strategy):
                     self._ml_feature_collector.record_feature('atrz_pct', float(atrz))
                     self._ml_feature_collector.record_feature('enableDATRZ', float(atrz))
 
+                # ATR percentile (rank current ATR within lookback window)
+                if len(atr.dropna()) >= 20:
+                    atr_values = atr.dropna().tail(100)  # Last 100 valid ATR values
+                    current_atr = atr.iloc[-1]
+                    if not np.isnan(current_atr) and len(atr_values) > 0:
+                        atr_percentile = (atr_values < current_atr).sum() / len(atr_values)
+                        self._ml_feature_collector.record_feature('hourly_atr_percentile', float(atr_percentile))
+
             # RSI percentile (simplified - just use RSI value scaled)
             if not rsi.empty and not np.isnan(rsi.iloc[-1]):
                 # Approximate percentile based on RSI value
                 rsi_percentile = rsi.iloc[-1] / 100.0
                 self._ml_feature_collector.record_feature('rsi_len_2_percentile', float(rsi_percentile))
+                # Also publish as daily_rsi_len_14 (model-specific naming)
+                self._ml_feature_collector.record_feature('daily_rsi_len_14', float(rsi.iloc[-1]))
 
             # bars_held - always 0 at entry evaluation
             self._ml_feature_collector.record_feature('bars_held', 0.0)
+
+            # Previous bar percentage change
+            if len(close) >= 2:
+                prev_bar_pct = (close.iloc[-1] - close.iloc[-2]) / close.iloc[-2] if close.iloc[-2] != 0 else 0.0
+                self._ml_feature_collector.record_feature('prev_bar_pct', float(prev_bar_pct))
+
+                # prev_bar_pct_pct - rate of change of the percentage change
+                if len(close) >= 3:
+                    prev_prev_pct = (close.iloc[-2] - close.iloc[-3]) / close.iloc[-3] if close.iloc[-3] != 0 else 0.0
+                    prev_bar_pct_pct = prev_bar_pct - prev_prev_pct
+                    self._ml_feature_collector.record_feature('prev_bar_pct_pct', float(prev_bar_pct_pct))
 
             # SMA 50
             if len(df) >= 50:
@@ -852,7 +877,7 @@ class StrategyFactoryAdapter(bt.Strategy):
                     mom3_z = (mom3.iloc[-1] - mom3_mean.iloc[-1]) / mom3_std.iloc[-1]
                     self._ml_feature_collector.record_feature('mom3_z', float(mom3_z))
 
-            # Volume z-score (dvolz)
+            # Volume z-score (dvolz) and percentile
             if 'volume' in df.columns and len(df) >= 20:
                 vol = df['volume']
                 vol_mean = vol.rolling(window=20).mean()
@@ -861,6 +886,13 @@ class StrategyFactoryAdapter(bt.Strategy):
                     dvolz = (vol.iloc[-1] - vol_mean.iloc[-1]) / vol_std.iloc[-1]
                     self._ml_feature_collector.record_feature('dvolz', float(dvolz))
                     self._ml_feature_collector.record_feature('volz', float(dvolz))
+
+                # Volume percentile (rank current volume within lookback window)
+                vol_values = vol.dropna().tail(100)  # Last 100 valid volume values
+                current_vol = vol.iloc[-1]
+                if not np.isnan(current_vol) and len(vol_values) > 0:
+                    vol_percentile = (vol_values < current_vol).sum() / len(vol_values)
+                    self._ml_feature_collector.record_feature('volz_pct', float(vol_percentile))
 
             # IBS (Internal Bar Strength) features
             high = df['High']
@@ -1042,6 +1074,36 @@ class StrategyFactoryAdapter(bt.Strategy):
                 support = low.rolling(window=20).min().iloc[-1]
                 self._ml_feature_collector.record_feature('resistance', float(resistance))
                 self._ml_feature_collector.record_feature('support', float(support))
+
+            # Donchian channel proximity features
+            # Donchian channels: upper = highest high, lower = lowest low over N periods
+            # Proximity = how close price is to nearest band (0 = at band, 0.5 = middle)
+            if len(df) >= 20:
+                donchian_upper = high.rolling(window=20).max().iloc[-1]
+                donchian_lower = low.rolling(window=20).min().iloc[-1]
+                donchian_range = donchian_upper - donchian_lower
+                current_close = close.iloc[-1]
+
+                if donchian_range > 0:
+                    # Proximity to nearest band: 0 = at a band, 0.5 = middle
+                    dist_to_upper = abs(current_close - donchian_upper)
+                    dist_to_lower = abs(current_close - donchian_lower)
+                    proximity_to_nearest = min(dist_to_upper, dist_to_lower) / donchian_range
+                    self._ml_feature_collector.record_feature('donchian_proximity_to_nearest_band', float(proximity_to_nearest))
+
+            # Daily Donchian (use longer lookback as proxy for daily)
+            # 96 bars of 15-min data = 24 hours = 1 day
+            if len(df) >= 96:
+                donchian_daily_upper = high.rolling(window=96).max().iloc[-1]
+                donchian_daily_lower = low.rolling(window=96).min().iloc[-1]
+                donchian_daily_range = donchian_daily_upper - donchian_daily_lower
+                current_close = close.iloc[-1]
+
+                if donchian_daily_range > 0:
+                    dist_to_upper = abs(current_close - donchian_daily_upper)
+                    dist_to_lower = abs(current_close - donchian_daily_lower)
+                    proximity_daily = min(dist_to_upper, dist_to_lower) / donchian_daily_range
+                    self._ml_feature_collector.record_feature('donchian_proximity_daily_to_nearest_band', float(proximity_daily))
 
         except Exception as e:
             logger.warning(f"{self.symbol}: Error calculating strategy features: {e}", exc_info=True)
