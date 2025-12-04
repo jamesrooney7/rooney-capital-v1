@@ -318,6 +318,7 @@ class DatabentoSubscriber:
         self._last_connect_time: Optional[dt.datetime] = None
         self._last_disconnect_time: Optional[dt.datetime] = None
         self._instrument_roots: Dict[int, Optional[str]] = {}
+        self._logged_contract_symbols: set[int] = set()  # Track which instruments we've already logged
 
     # ------------------------------------------------------------------
     # Public lifecycle
@@ -409,13 +410,13 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
-                logger.info("Metadata mapping: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
                 if raw_symbol:
                     self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
-                    logger.info("Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
+                    self._logged_contract_symbols.add(instrument_id)
+                    logger.debug("Metadata: %s -> %s (root: %s)", instrument_id, raw_symbol or symbol, root)
 
             for entry in getattr(metadata, "symbols", []) or []:
                 instrument_id = getattr(entry, "instrument_id", None)
@@ -426,13 +427,13 @@ class DatabentoSubscriber:
                 if instrument_id is None:
                     continue
                 self.queue_manager.update_mapping(instrument_id, symbol)
-                logger.info("Metadata symbol: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
                 if raw_symbol:
                     self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
-                    logger.info("Recorded raw_symbol %s for instrument %s", raw_symbol, instrument_id)
                 root = self.queue_manager.resolve_root(instrument_id)
                 if root:
                     self._instrument_roots[instrument_id] = root
+                    self._logged_contract_symbols.add(instrument_id)
+                    logger.debug("Metadata symbol: %s -> %s (root: %s)", instrument_id, raw_symbol or symbol, root)
 
         sym_map = getattr(client, "symbology_map", None)
         if isinstance(sym_map, dict):
@@ -479,22 +480,16 @@ class DatabentoSubscriber:
             # Try to extract contract symbol from Databento client's internal mappings
             if self._client and hasattr(self._client, '_session'):
                 try:
-                    # The Databento client maintains symbology mappings internally
-                    # Try to resolve the instrument_id to its contract symbol
                     client_symbol = self._client.symbology_map.get(instrument_id)
                     if client_symbol and not raw_symbol:
                         raw_symbol = client_symbol
-                        logger.info("Extracted contract symbol %s from Databento client mapping for instrument %s",
-                                   raw_symbol, instrument_id)
                 except Exception as e:
                     logger.debug("Could not access Databento client symbology: %s", e)
 
             previous_root = self._instrument_roots.get(instrument_id)
             self.queue_manager.update_mapping(instrument_id, symbol)
-            logger.info("SymbolMappingMsg: instrument_id=%s symbol=%s raw_symbol=%s", instrument_id, symbol, raw_symbol)
             if raw_symbol:
                 self.queue_manager.update_raw_symbol(instrument_id, raw_symbol)
-                logger.info("Recorded raw_symbol %s for instrument %s from SymbolMappingMsg", raw_symbol, instrument_id)
             root = self.queue_manager.resolve_root(instrument_id)
             if not root:
                 self._instrument_roots.pop(instrument_id, None)
@@ -543,13 +538,15 @@ class DatabentoSubscriber:
                 return
 
             # Try to get contract symbol from Databento client's internal symbology
-            if self._client:
+            # Only log once per instrument to avoid noise
+            if self._client and record.instrument_id not in self._logged_contract_symbols:
                 try:
                     client_symbol = self._client.symbology_map.get(record.instrument_id)
                     if client_symbol:
                         self.queue_manager.update_raw_symbol(record.instrument_id, client_symbol)
-                        logger.info("Extracted contract symbol %s from client for instrument %s (root: %s)",
-                                   client_symbol, record.instrument_id, root)
+                        self._logged_contract_symbols.add(record.instrument_id)
+                        logger.info("Mapped instrument %s -> %s (root: %s)",
+                                   record.instrument_id, client_symbol, root)
                 except Exception as e:
                     logger.debug("Could not access client symbology for trade: %s", e)
 
@@ -629,7 +626,6 @@ class DatabentoSubscriber:
         contract_symbol = None
         if isinstance(instrument_id, int):
             contract_symbol = self.queue_manager.resolve_contract_symbol(instrument_id)
-            logger.info("Resolving contract for root=%s instrument_id=%s -> contract_symbol=%s", root, instrument_id, contract_symbol)
 
         bar = Bar(
             symbol=root,
@@ -642,9 +638,8 @@ class DatabentoSubscriber:
             instrument_id=instrument_id if isinstance(instrument_id, int) else None,
             contract_symbol=contract_symbol,
         )
-        logger.info("Emitting bar %s %s (contract: %s) O=%.2f H=%.2f L=%.2f C=%.2f V=%.0f",
-                   root, payload["minute"], contract_symbol or "unknown",
-                   bar.open, bar.high, bar.low, bar.close, bar.volume)
+        logger.debug("Bar %s %s C=%.2f V=%.0f",
+                    root, payload["minute"], bar.close, bar.volume)
         self.queue_manager.publish_bar(bar)
         self._last_emitted_minute[root] = bar.timestamp
         self._last_close[root] = bar.close
