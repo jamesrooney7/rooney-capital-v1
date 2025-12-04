@@ -1,7 +1,7 @@
 # Rooney Capital Trading Strategy v1.0
 
-Automated futures trading system using the Internal Bar Strength (IBS) edge with
-machine-learning veto models and live order routing through TradersPost.
+Automated futures trading system using the Strategy Factory methodology with
+ML meta-labeling models and live order routing through TradersPost.
 
 ---
 
@@ -48,10 +48,10 @@ This unified guide contains:
 ## System Overview
 
 The Rooney Capital stack ingests live CME Globex data from Databento, evaluates
-multi-asset IBS signals inside Backtrader, and routes execution events to
-TradersPost for Tradovate brokerage accounts. Each futures root has a dedicated
-Random Forest model that can veto discretionary signals when confidence falls
-below a trained threshold.
+multi-asset strategy signals on 15-minute bars inside Backtrader, and routes
+execution events to TradersPost for Tradovate brokerage accounts. Each symbol/
+strategy combination has a dedicated ML meta-labeling model that filters signals
+based on probability thresholds trained via walk-forward optimization.
 
 ### End-to-end Flow
 
@@ -63,10 +63,11 @@ below a trained threshold.
    pushes them into per-symbol queues that behave like Backtrader feeds.
 3. **Strategy orchestration** – `src/runner/live_worker.py` creates the
    Backtrader `Cerebro` instance, wires a `DatabentoLiveData` feed per symbol,
-   and attaches `IbsStrategy` with instrument-specific overrides.
-4. **ML veto models** – `src/models/loader.py` loads instrument bundles so the
-   strategy can filter trades based on ML probability scores.
-5. **Trading logic** – `src/strategy/ibs_strategy.py` implements signal
+   and attaches `StrategyFactoryAdapter` with instrument-specific overrides.
+4. **ML meta-labeling models** – `src/models/factory_loader.py` loads models
+   from `models/factory/` so the strategy can filter trades based on ML
+   probability scores.
+5. **Trading logic** – `src/strategy/factory_adapter.py` implements signal
    generation, position management, and portfolio-level risk controls.
 6. **Execution webhook** – `src/runner/traderspost_client.py` serialises order
    and trade notifications and posts them to TradersPost with retry logic.
@@ -86,10 +87,13 @@ updating the contract map and provisioning ML bundles for the new symbols.
 src/
 ├── strategy/     # Trading logic, feature engineering, risk controls
 ├── runner/       # Databento bridge, live worker, TradersPost client
-└── models/       # Instrument-specific Random Forest veto bundles
+└── models/       # Model loader utilities
+models/
+└── factory/      # ML meta-labeling models per symbol/strategy combination
 tests/            # Integration and unit coverage for live worker & strategy
 Data/             # Contract metadata and roll rules
-docs/             # Deployment notes and historical planning docs
+docs/             # Deployment notes and operational documentation
+research/         # Strategy Factory research pipeline and ML training
 config.example.yml # Template runtime configuration with environment expansion hints
 .env.example      # Template environment variables (copy to .env with real secrets)
 requirements.txt  # Python dependencies
@@ -122,22 +126,20 @@ exports include:
   before the strategy initialises.
 
 ### `src/models`
-Holds Random Forest artefacts (`*_rf_model.pkl`) and optimisation metadata
-(`*_best.json`) for each supported symbol. The loader (`loader.py`):
+Contains model loader utilities. The production models reside in `models/factory/`:
 
-- Hydrates the scikit-learn model, feature list, and veto probability threshold.
-- Normalises filesystem paths so workers can resolve artefacts locally or from a
-  mounted models directory.
-- Provides `strategy_kwargs_from_bundle` to translate a bundle into keyword
-  arguments consumed by `IbsStrategy` (including the ML veto hook).
+- `factory_loader.py` – Loads ML meta-labeling models from `models/factory/`.
+- Models are named `{SYMBOL}_{STRATEGY}_ml_meta_labeling_final_model.pkl`.
+- Each model is trained via walk-forward optimization on 15-minute bar data.
+- Provides probability-based signal filtering with configurable thresholds.
 
 ### `src/strategy`
 
-- **`ibs_strategy.py`** – Core Backtrader strategy implementing the IBS system.
-  It consumes intraday and reference data feeds per symbol, computes indicators
-  via `feature_utils.py`, `filter_column.py`, and `safe_div.py`, and applies
-  multiple risk controls (ML veto, pair IBS thresholds, time-of-day gating,
-  cooldowns). Notification hooks forward order/trade events to the live worker.
+- **`factory_adapter.py`** – Core Backtrader strategy implementing the Strategy
+  Factory system. It consumes intraday and reference data feeds per symbol,
+  computes indicators via `feature_utils.py`, and applies ML meta-labeling
+  probability filters along with portfolio-level risk controls. Notification
+  hooks forward order/trade events to the live worker.
 - **`feature_utils.py`, `filter_column.py`, `safe_div.py`** – Encapsulate shared
   indicator calculations, safe math primitives, and column filtering used during
   feature selection.
@@ -163,18 +165,15 @@ Holds Random Forest artefacts (`*_rf_model.pkl`) and optimisation metadata
 
 ## Machine Learning Artefacts
 
-Each instrument has a dedicated Random Forest model trained on
-instrument-specific features (e.g. `ES_rf_model.pkl`, `NQ_rf_model.pkl`). Use
-`src.models.load_model_bundle` to hydrate the trained estimator and associated
-strategy kwargs:
+Each symbol/strategy combination has a dedicated ML meta-labeling model trained
+via walk-forward optimization. Models are stored in `models/factory/` with naming
+convention `{SYMBOL}_{STRATEGY}_ml_meta_labeling_final_model.pkl`.
 
-```python
-from models import load_model_bundle
-from strategy.ibs_strategy import IbsStrategy
-
-bundle = load_model_bundle("ES")
-cerebro.addstrategy(IbsStrategy, **bundle.strategy_kwargs())
-```
+Current production models (14 total):
+- Energy: `CL_ATRBuyDip`, `CL_MomentumBreakout`, `NG_RangeReversion`
+- Metals: `GC_VolatilityBreakout`, `HG_OpeningRangeBreakout`, `SI_MomentumBreakout`
+- Indices: `ES_OpeningRangeBreakout`, `NQ_OpeningRangeBreakout`, `RTY_RangeReversion`, `YM_RangeReversion`
+- Currencies: `6A_VolatilityBreakout`, `6B_MomentumBreakout`, `6E_MomentumBreakout`, `6E_TrendFollowing`
 
 > **Note:** Model artefacts are stored with Git LFS. Run `git lfs pull` after
 > cloning to ensure large files are available before attempting to load them.
@@ -265,7 +264,7 @@ validation so secrets can remain outside the configuration file.
 - `contract_map` – Path to the Databento contract metadata file.
 - `symbols` – Iterable of root symbols to trade (e.g. `["ES", "NQ"]`).
 - `databento_api_key` – API key if not provided via `DATABENTO_API_KEY`.
-- `models_path` – Directory containing ML bundles (defaults to `src/models`).
+- `models_path` – Directory containing ML models (defaults to `models/factory`).
 - `traderspost_webhook` – URL for order/trade notifications (or set
   `TRADERSPOST_WEBHOOK_URL`).
 - `contracts` – Instrument-level overrides keyed by symbol (size, commission,
@@ -285,7 +284,7 @@ validation so secrets can remain outside the configuration file.
 
 ```yaml
 contract_map: Data/Databento_contract_map.yml
-models_path: src/models
+models_path: models/factory
 symbols: ["ES", "NQ", "RTY"]
 databento_api_key: ${DATABENTO_API_KEY}
 traderspost_webhook: ${TRADERSPOST_WEBHOOK_URL}
@@ -396,9 +395,9 @@ On the production host the workflow is:
 orders are sent. The checks run in the following order and abort the launch if a
 failure is detected (unless `preflight.fail_fast` is set to `false`):
 
-1. **ML Models** – Ensure each configured symbol has a loadable model bundle,
-   exposes `predict_proba`, defines at least one feature, and includes a veto
-   threshold. A smoke `predict_proba` call guards against serialization drift.
+1. **ML Models** – Ensure each configured symbol/strategy combination has a
+   loadable model in `models/factory/`, exposes `predict_proba`, and meets
+   probability threshold requirements for signal filtering.
 2. **TradersPost Connection** – POST a health-check payload to the configured
    webhook and surface HTTP/connection/timeout errors with actionable log
    messages.
