@@ -27,8 +27,9 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Type
+from zoneinfo import ZoneInfo
 
 import backtrader as bt
 import pandas as pd
@@ -41,9 +42,27 @@ try:
 except ImportError:
     TradesDB = None
 
+# Import contract specifications for P&L calculations
+from strategy.contract_specs import point_value
+
 # Import Strategy Factory base and strategies
 import sys
 from pathlib import Path
+
+# Timezone for log display (EST/EDT)
+EST = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
+
+
+def to_est(dt: datetime) -> str:
+    """Convert datetime to EST string for logging."""
+    if dt is None:
+        return "N/A"
+    # If naive datetime, assume UTC
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(EST).strftime("%Y-%m-%d %H:%M EST")
+
 
 # Symbols to track for cross-asset features
 CROSS_ASSET_SYMBOLS = [
@@ -264,18 +283,19 @@ class StrategyFactoryAdapter(bt.Strategy):
                 bar_close = self.hourly_data.close[0]
                 logger.info(
                     f"{self.symbol}: BUY executed at {order.executed.price:.2f} | "
-                    f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
+                    f"Bar[0]: {to_est(bar_dt)}, O={bar_open:.2f}, C={bar_close:.2f}"
                 )
             else:
                 self._in_position = False
-                pnl = order.executed.price - self._entry_price if self._entry_price else 0
+                pnl_points = order.executed.price - self._entry_price if self._entry_price else 0
+                pnl_usd = pnl_points * point_value(self.symbol)
                 # Diagnostic: log bar data at execution time
                 bar_dt = self.hourly_data.datetime.datetime(0)
                 bar_open = self.hourly_data.open[0]
                 bar_close = self.hourly_data.close[0]
                 logger.info(
                     f"{self.symbol}: SELL executed at {order.executed.price:.2f}, "
-                    f"P&L: {pnl:.2f} | Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
+                    f"P&L: ${pnl_usd:,.2f} ({pnl_points:+.2f} pts) | Bar[0]: {to_est(bar_dt)}, O={bar_open:.2f}, C={bar_close:.2f}"
                 )
                 self._entry_idx = None
                 self._entry_price = None
@@ -296,6 +316,11 @@ class StrategyFactoryAdapter(bt.Strategy):
         """Handle trade notifications."""
         exit_snapshot = None
         if trade.isclosed:
+            # Calculate P&L in dollars using contract multiplier
+            pv = point_value(self.symbol)
+            pnl_usd = trade.pnl * pv
+            pnlcomm_usd = trade.pnlcomm * pv
+
             # Capture exit snapshot for callbacks
             exit_snapshot = {
                 'exit_reason': 'strategy_exit',
@@ -303,22 +328,23 @@ class StrategyFactoryAdapter(bt.Strategy):
                 'symbol': self.symbol,
                 'size': trade.size,
                 'price': trade.price,
-                'pnl': trade.pnl,
-                'pnlcomm': trade.pnlcomm,
+                'pnl': pnl_usd,  # Now in dollars
+                'pnl_points': trade.pnl,  # Keep raw points for reference
+                'pnlcomm': pnlcomm_usd,  # Now in dollars
                 'dt': self.hourly_data.datetime.datetime(0),
                 'ml_score': self._ml_last_score,
             }
 
             logger.info(
-                f"{self.symbol}: Trade closed, P&L: {trade.pnl:.2f}, "
-                f"Commission: {trade.commission:.2f}"
+                f"{self.symbol}: Trade closed, P&L: ${pnl_usd:,.2f} ({trade.pnl:+.2f} pts), "
+                f"Commission: ${trade.commission * pv:,.2f}"
             )
 
-            # Notify portfolio coordinator
+            # Notify portfolio coordinator (with dollar P&L)
             if self.p.portfolio_coordinator:
                 self.p.portfolio_coordinator.register_position_closed(
                     symbol=self.symbol,
-                    pnl=trade.pnlcomm
+                    pnl=pnlcomm_usd
                 )
 
             # Persist trade to database
@@ -338,12 +364,12 @@ class StrategyFactoryAdapter(bt.Strategy):
                         exit_time=self.hourly_data.datetime.datetime(0),
                         exit_price=exit_price,
                         exit_size=abs(self.p.size),
-                        pnl=trade.pnlcomm,
+                        pnl=pnlcomm_usd,  # Dollar P&L (after commission)
                         pnl_percent=pnl_percent,
                         exit_reason=exit_snapshot.get('exit_reason', 'strategy_exit'),
                         ml_score=self._ml_last_score,
                     )
-                    logger.info(f"{self.symbol}: Trade persisted to database")
+                    logger.info(f"{self.symbol}: Trade persisted to database | P&L: ${pnlcomm_usd:,.2f}")
                 except Exception as e:
                     logger.error(f"{self.symbol}: Failed to persist trade to database: {e}")
 
