@@ -8,7 +8,7 @@
 
 ## 📋 Quick Links
 
-- **[STRATEGY_FACTORY_GUIDE.md](../../STRATEGY_FACTORY_GUIDE.md)**: Comprehensive methodology and philosophy
+- **[STRATEGY_FACTORY_GUIDE.md](../../docs/archived/STRATEGY_FACTORY_GUIDE.md)**: Comprehensive methodology and philosophy
 - **[STATUS.md](STATUS.md)**: Detailed implementation status
 - **[Strategy Catalogue](../strategy_catalogue.csv)**: All 39 strategies
 - **[Parameter Grids](../strategy_parameter_grids.yaml)**: Parameter configurations
