@@ -982,9 +982,12 @@ class ResampledLiveData(bt.feeds.DataBase):
             # Daily bar: complete at session end
             return (timestamp.hour == self.p.session_end_hour and
                     timestamp.minute == self.p.session_end_minute)
-        else:
+        elif self.p.bar_interval_minutes == 60:
             # Hourly bar: complete at top of next hour
             return timestamp.minute == 0
+        else:
+            # Sub-hourly bars (e.g., 15-min): complete at interval boundary
+            return timestamp.minute % self.p.bar_interval_minutes == 0
 
     def _aggregate_minute_bar(
         self,
@@ -1074,5 +1077,21 @@ class HourlyResampledLiveData(ResampledLiveData):
         ("session_end_hour", 23),
         ("session_end_minute", 0),
         ("bar_interval_minutes", 60),  # 1 hour = 60 minutes
+        ("qcheck", 0.5),
+    )
+
+
+class FifteenMinResampledLiveData(ResampledLiveData):
+    """15-minute resolution feed with warmup support and minute bar aggregation.
+
+    Used for Strategy Factory strategies trained on 15-minute bars.
+    """
+
+    params = (
+        ("symbol", None),
+        ("source_feed", None),
+        ("session_end_hour", 23),
+        ("session_end_minute", 0),
+        ("bar_interval_minutes", 15),  # 15 minutes
         ("qcheck", 0.5),
     )

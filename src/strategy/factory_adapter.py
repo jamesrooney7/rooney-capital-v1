@@ -185,13 +185,14 @@ class StrategyFactoryAdapter(bt.Strategy):
         self._latest_ml_score = None  # Alias for compatibility with Discord callback
 
         # Data feeds - build map of symbol -> data feed
-        self.hourly_data = self.datas[0]  # Primary hourly data
+        # NOTE: Using 15-minute bars to match Strategy Factory training
+        self.hourly_data = self.datas[0]  # Primary 15-min data (named hourly_data for compatibility)
         self.daily_data = None
-        self._data_feeds: Dict[str, Any] = {}  # symbol -> hourly data feed
+        self._data_feeds: Dict[str, Any] = {}  # symbol -> 15-min data feed
         self._daily_feeds: Dict[str, Any] = {}  # symbol -> daily data feed
 
         # Find and map all data feeds
-        # Priority: hourly feeds > base feeds > daily feeds for feature calculation
+        # Priority: 15-min feeds > base feeds > daily feeds for feature calculation
         for d in self.datas:
             name = getattr(d, '_name', '')
             if not name:
@@ -207,23 +208,24 @@ class StrategyFactoryAdapter(bt.Strategy):
                     self._daily_feeds[symbol_part] = d
                 continue
 
-            # Extract symbol from feed name (e.g., "ES_hour" -> "ES", "ES" -> "ES")
+            # Extract symbol from feed name (e.g., "ES_15min" -> "ES", "ES" -> "ES")
             symbol_part = name.split('_')[0].upper()
             if not symbol_part:
                 continue
 
-            # Prefer hourly feeds for feature calculation
-            is_hourly = '_hour' in name.lower()
-            if is_hourly or symbol_part not in self._data_feeds:
+            # Prefer 15-min feeds for feature calculation (also check for _hour for backwards compat)
+            is_15min = '_15min' in name.lower() or '_hour' in name.lower()
+            if is_15min or symbol_part not in self._data_feeds:
                 self._data_feeds[symbol_part] = d
 
         # Set hourly_data to the correct feed for THIS strategy's symbol
+        # (kept as hourly_data for compatibility, but actually uses 15-min bars)
         symbol_upper = self.symbol.upper()
         if symbol_upper in self._data_feeds:
             self.hourly_data = self._data_feeds[symbol_upper]
             logger.info(f"{self.symbol}: Using data feed '{getattr(self.hourly_data, '_name', 'unknown')}'")
         else:
-            logger.warning(f"{self.symbol}: No matching hourly feed found, using datas[0]")
+            logger.warning(f"{self.symbol}: No matching 15-min feed found, using datas[0]")
 
         # Cross-asset feature calculation
         # Price buffers for calculating returns and z-scores
@@ -697,21 +699,34 @@ class StrategyFactoryAdapter(bt.Strategy):
         self._calculate_and_publish_features()
 
     def _calculate_and_publish_features(self):
-        """Calculate features from price buffers and publish to tracker."""
+        """Calculate features from price buffers and publish to tracker.
+
+        IMPORTANT: Features are calculated to match Strategy Factory training:
+        - Using 15-minute bars
+        - hourly_return = 4-bar return (4 * 15min = 60min = 1 hour)
+        - hourly_z_score = 20-bar z-score (~5 hours on 15min data)
+        """
         if self._ml_feature_collector is None:
             return
+
+        # Return periods to match training: hourly=4 bars, daily=96 bars on 15-min data
+        HOURLY_BARS = 4  # 4 * 15min = 60min = 1 hour
+        DAILY_BARS = 96  # 96 * 15min = 1440min = 24 hours
 
         # Calculate hourly and daily returns/z-scores for all symbols
         for sym in CROSS_ASSET_SYMBOLS:
             buffer = self._price_buffers.get(sym)
-            if buffer is None or len(buffer) < 2:
+            if buffer is None or len(buffer) < HOURLY_BARS + 1:
                 continue
 
             prices = list(buffer)
             sym_lower = sym.lower()
 
-            # Hourly return: (current - previous) / previous
-            hourly_return = (prices[-1] - prices[-2]) / prices[-2] if prices[-2] != 0 else 0.0
+            # Hourly return: 4-bar return to match training (4 * 15min = 1 hour)
+            if len(prices) >= HOURLY_BARS + 1:
+                hourly_return = (prices[-1] - prices[-HOURLY_BARS - 1]) / prices[-HOURLY_BARS - 1] if prices[-HOURLY_BARS - 1] != 0 else 0.0
+            else:
+                hourly_return = 0.0
 
             # Publish hourly return with various naming conventions (model may use any)
             hourly_return_names = [

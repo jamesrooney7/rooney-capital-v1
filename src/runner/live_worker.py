@@ -44,6 +44,7 @@ from runner.databento_bridge import (
     DailyResampledLiveData,
     DatabentoLiveData,
     DatabentoSubscriber,
+    FifteenMinResampledLiveData,
     HourlyResampledLiveData,
     QueueFanout,
 )
@@ -68,7 +69,7 @@ logger = logging.getLogger(__name__)
 
 LIVE_BACKFILL_MAX_DAYS = 4
 
-_VALID_WARMUP_COMPRESSIONS = {"1min", "1h", "1d"}
+_VALID_WARMUP_COMPRESSIONS = {"1min", "15min", "1h", "1d"}
 _WARMUP_COMPRESSION_ALIASES = {
     "minute": "1min",
     "minutes": "1min",
@@ -76,6 +77,10 @@ _WARMUP_COMPRESSION_ALIASES = {
     "1m": "1min",
     "min": "1min",
     "mins": "1min",
+    "15m": "15min",
+    "15minute": "15min",
+    "15minutes": "15min",
+    "quarter": "15min",
     "hour": "1h",
     "hours": "1h",
     "1hour": "1h",
@@ -372,8 +377,10 @@ def _normalise_warmup_compression(value: Any) -> str:
         mapped = _WARMUP_COMPRESSION_ALIASES.get(raw, raw)
         return mapped if mapped in _VALID_WARMUP_COMPRESSIONS else "1min"
     if isinstance(value, (int, float)):
-        # Treat common numeric aliases (e.g. 60 -> 1h, 1440 -> 1d).
+        # Treat common numeric aliases (e.g. 15 -> 15min, 60 -> 1h, 1440 -> 1d).
         numeric = int(value)
+        if numeric == 15:
+            return "15min"
         if numeric == 60:
             return "1h"
         if numeric == 1440:
@@ -1129,9 +1136,10 @@ class LiveWorker:
 
     def _setup_data_and_strategies(self) -> None:
         session_start = self.config.resample_session_start
-        hour_kwargs: Dict[str, Any] = {
+        # 15-minute bars to match Strategy Factory training
+        fifteen_min_kwargs: Dict[str, Any] = {
             "timeframe": bt.TimeFrame.Minutes,
-            "compression": 60,
+            "compression": 15,
             "bar2edge": True,
             "adjbartime": True,
             "rightedge": False,
@@ -1156,16 +1164,17 @@ class LiveWorker:
             self.cerebro.adddata(data, name=symbol)
             self._data_feeds[symbol] = data
 
-            # Create custom hourly feed that aggregates from base feed
-            # During warmup: consumes pre-aggregated hourly bars
-            # During live: aggregates minute bars from 'data' into hourly bars
-            hourly_feed = HourlyResampledLiveData(
+            # Create 15-minute feed that aggregates from base feed
+            # During warmup: consumes pre-aggregated 15-min bars
+            # During live: aggregates minute bars from 'data' into 15-min bars
+            # NOTE: Using 15-min bars to match Strategy Factory training
+            fifteen_min_feed = FifteenMinResampledLiveData(
                 symbol=symbol,
                 source_feed=data,  # Aggregate from minute feed
                 session_end_hour=session_start.hour if session_start else 23,
                 session_end_minute=session_start.minute if session_start else 0,
             )
-            self.cerebro.adddata(hourly_feed, name=f"{symbol}_hour")
+            self.cerebro.adddata(fifteen_min_feed, name=f"{symbol}_15min")
 
             # Create custom daily feed that aggregates from base feed
             # During warmup: consumes pre-aggregated daily bars
@@ -1381,12 +1390,13 @@ class LiveWorker:
                     on_symbol_loaded=daily_warmup_callback,
                 )
 
-            # Load hourly bars second (15 days for hourly indicators)
-            logger.info("Loading hourly historical data (%d days)...", hourly_lookback_days)
+            # Load 15-min bars second (for Strategy Factory training consistency)
+            # NOTE: Using 15-min bars to match Strategy Factory training
+            logger.info("Loading 15-min historical data (%d days)...", hourly_lookback_days)
             for dataset, symbols in historical_symbol_groups.items():
                 # Use closure factory to avoid lambda capture bug
-                def hourly_warmup_callback(sym: str, data: Any) -> None:
-                    self._warmup_symbol_indicators(sym, data, compression="1h")
+                def fifteen_min_warmup_callback(sym: str, data: Any) -> None:
+                    self._warmup_symbol_indicators(sym, data, compression="15min")
 
                 load_historical_data(
                     api_key=self.config.databento_api_key,
@@ -1395,7 +1405,7 @@ class LiveWorker:
                     stype_in="parent",  # Use parent for historical - more reliable
                     days=hourly_lookback_days,
                     contract_map=self.contract_map,
-                    on_symbol_loaded=hourly_warmup_callback,
+                    on_symbol_loaded=fifteen_min_warmup_callback,
                 )
         except Exception:
             logger.exception("Failed to load historical data for warmup")
@@ -1447,9 +1457,14 @@ class LiveWorker:
         if compression == "1d":
             feed_name = f"{symbol}_day"
             feed = self._get_resampled_feed(symbol, "_day")
-        elif compression == "1h":
-            feed_name = f"{symbol}_hour"
-            feed = self._get_resampled_feed(symbol, "_hour")
+        elif compression in ("1h", "15min"):
+            # Use 15-min feed to match Strategy Factory training
+            feed_name = f"{symbol}_15min"
+            feed = self._get_resampled_feed(symbol, "_15min")
+            if feed is None:
+                # Fallback to _hour for backwards compatibility
+                feed_name = f"{symbol}_hour"
+                feed = self._get_resampled_feed(symbol, "_hour")
         else:
             # Minute data goes to base feed
             feed_name = symbol
@@ -2004,7 +2019,7 @@ class LiveWorker:
             for data in self.cerebro.datas:
                 if hasattr(data, 'warmup_backlog_size'):
                     feed_name = getattr(data, '_name', None)
-                    if feed_name and (feed_name.endswith('_day') or feed_name.endswith('_hour')):
+                    if feed_name and (feed_name.endswith('_day') or feed_name.endswith('_hour') or feed_name.endswith('_15min')):
                         tracked_feeds.append(data)
         except Exception as exc:
             logger.debug("Error checking resampled feeds for warmup monitoring: %s", exc)
@@ -2418,7 +2433,7 @@ class LiveWorker:
             if not base:
                 continue
             feeds.add(f"{base}_day")
-            feeds.add(f"{base}_hour")
+            feeds.add(f"{base}_15min")  # Use 15-min to match Strategy Factory training
         return feeds
 
     def _run_cerebro(self) -> None:
@@ -2456,6 +2471,8 @@ class LiveWorker:
                 continue
             if feed.endswith("_day"):
                 feed = feed[: -len("_day")]
+            elif feed.endswith("_15min"):
+                feed = feed[: -len("_15min")]
             elif feed.endswith("_hour"):
                 feed = feed[: -len("_hour")]
             if feed:
@@ -2945,6 +2962,8 @@ class LiveWorker:
             base = feed
             if base.endswith("_day"):
                 base = base[: -len("_day")]
+            elif base.endswith("_15min"):
+                base = base[: -len("_15min")]
             elif base.endswith("_hour"):
                 base = base[: -len("_hour")]
             base_upper = base.upper()
@@ -2968,7 +2987,7 @@ class LiveWorker:
                 and pair_upper not in available_symbols
             ):
                 logger.error(
-                    "❌ Pair data feed missing for %s (expected %s_day/%s_hour)",
+                    "❌ Pair data feed missing for %s (expected %s_day/%s_15min)",
                     symbol,
                     pair_upper,
                     pair_upper,
@@ -3000,10 +3019,11 @@ class LiveWorker:
         failed = False
 
         for symbol in self.symbols:
-            hour_name = f"{symbol}_hour"
+            fifteen_min_name = f"{symbol}_15min"
+            hour_name = f"{symbol}_hour"  # Backwards compatibility check
             day_name = f"{symbol}_day"
-            if hour_name not in available_names:
-                logger.error("❌ Hourly feed not configured: %s", hour_name)
+            if fifteen_min_name not in available_names and hour_name not in available_names:
+                logger.error("❌ 15-min feed not configured: %s", fifteen_min_name)
                 failed = True
             if day_name not in available_names:
                 logger.error("❌ Daily feed not configured: %s", day_name)
