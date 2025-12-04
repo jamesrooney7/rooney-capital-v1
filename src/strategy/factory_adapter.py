@@ -549,7 +549,12 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         self._order_pending = True
         # Use self.hourly_data to ensure we trade on the correct symbol's feed
-        self._pending_order = self.buy(data=self.hourly_data, size=self.p.size)
+        # exectype=Market ensures execution at next bar's open (not current bar's close)
+        self._pending_order = self.buy(
+            data=self.hourly_data,
+            size=self.p.size,
+            exectype=bt.Order.Market,
+        )
 
         # Diagnostic: log bar data when order is placed
         bar_dt = self.hourly_data.datetime.datetime(0)
@@ -567,7 +572,8 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         self._order_pending = True
         # Use self.hourly_data to ensure we close on the correct symbol's feed
-        self._pending_order = self.close(data=self.hourly_data)
+        # exectype=Market ensures execution at next bar's open (not current bar's close)
+        self._pending_order = self.close(data=self.hourly_data, exectype=bt.Order.Market)
 
         # Diagnostic: log bar data when order is placed
         bar_dt = self.hourly_data.datetime.datetime(0)
