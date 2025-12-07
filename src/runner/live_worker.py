@@ -2508,7 +2508,7 @@ class LiveWorker:
 
         return False, ""
 
-    def _wait_for_initial_data(self, max_wait_seconds: int = 60) -> bool:
+    def _wait_for_initial_data(self, max_wait_seconds: int = 300) -> bool:
         required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
         for feed_name in self._required_reference_feed_names():
             feed = str(feed_name or "").strip()
@@ -2527,6 +2527,7 @@ class LiveWorker:
         countdown_start: Optional[float] = None
         live_seen = False
         last_market_closed_log = 0.0
+        last_progress_log = 0.0
 
         def _has_warmup(symbol: str) -> bool:
             feed = self._data_feeds.get(symbol)
@@ -2590,6 +2591,16 @@ class LiveWorker:
                     ", ".join(sorted(missing_queues)),
                 )
                 return False
+
+            # Log progress every 30 seconds while waiting
+            if missing_queues and now - last_progress_log >= 30:
+                received = len(required_queues) - len(missing_queues)
+                elapsed = int(now - start_time)
+                logger.info(
+                    "Waiting for data: %d/%d symbols received (%ds elapsed), missing: %s",
+                    received, len(required_queues), elapsed, ", ".join(sorted(missing_queues))
+                )
+                last_progress_log = now
 
             time.sleep(1)
 
