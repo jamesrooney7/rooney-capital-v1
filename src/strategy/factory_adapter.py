@@ -467,6 +467,11 @@ class StrategyFactoryAdapter(bt.Strategy):
 
     def _check_entry(self, df: pd.DataFrame, current_idx: int):
         """Check if entry conditions are met."""
+        # Block entries on Saturday (5) and Sunday (6) - futures markets closed
+        current_dt = df['datetime'].iloc[current_idx]
+        if current_dt.weekday() >= 5:  # Saturday=5, Sunday=6
+            return
+
         # Get entry signals from Strategy Factory
         try:
             entry_signals = self.factory_strategy.entry_logic(
