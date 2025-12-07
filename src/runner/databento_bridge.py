@@ -646,11 +646,34 @@ class DatabentoSubscriber:
         return bar
 
     def _fill_quiet_minutes(
-        self, root: str, last_close: float, next_minute: dt.datetime
+        self, root: str, last_close: float, next_minute: dt.datetime,
+        max_gap_minutes: int = 120
     ) -> None:
+        """Fill quiet minutes with flat bars using last close price.
+
+        Args:
+            root: Symbol root (e.g., 'ES')
+            last_close: Last known close price to use for flat bars
+            next_minute: Next minute timestamp to fill up to
+            max_gap_minutes: Maximum gap to fill (default 120 minutes / 2 hours).
+                            Gaps larger than this are skipped to avoid flooding
+                            with bars during extended market closures (weekends).
+        """
         last_minute = self._last_emitted_minute.get(root)
         if last_minute is None:
             return
+
+        # Calculate gap size and skip if too large (e.g., weekend closure)
+        gap_minutes = (next_minute - last_minute).total_seconds() / 60
+        if gap_minutes > max_gap_minutes:
+            logger.debug(
+                "Skipping gap fill for %s: gap of %.0f minutes exceeds max %d",
+                root, gap_minutes, max_gap_minutes
+            )
+            # Update last_emitted_minute to prevent re-attempting this gap
+            self._last_emitted_minute[root] = next_minute - dt.timedelta(minutes=1)
+            return
+
         tzinfo = last_minute.tzinfo
         if tzinfo is None and next_minute.tzinfo is not None:
             tzinfo = next_minute.tzinfo

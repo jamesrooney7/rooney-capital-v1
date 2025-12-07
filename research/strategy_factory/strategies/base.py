@@ -68,7 +68,7 @@ class BaseStrategy(ABC):
         self.stop_loss_atr = self.params.get('stop_loss_atr', 1.0)
         self.take_profit_atr = self.params.get('take_profit_atr', 1.0)
         self.max_bars_held = self.params.get('max_bars_held', 20)
-        self.auto_close_time = self.params.get('auto_close_time', '16:00')  # 4pm EST
+        self.auto_close_time = self.params.get('auto_close_time', '21:00')  # 4pm EST = 21:00 UTC
 
         # Data
         self.data: Optional[pd.DataFrame] = None
