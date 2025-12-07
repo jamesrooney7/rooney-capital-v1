@@ -297,9 +297,10 @@ class StrategyFactoryAdapter(bt.Strategy):
                     f"{self.symbol}: SELL executed at {order.executed.price:.2f}, "
                     f"P&L: ${pnl_usd:,.2f} ({pnl_points:+.2f} pts) | Bar[0]: {to_est(bar_dt)}, O={bar_open:.2f}, C={bar_close:.2f}"
                 )
+                # Note: Don't reset _entry_price/_entry_time here!
+                # notify_trade runs AFTER notify_order and needs these values.
+                # They get reset at the end of notify_trade instead.
                 self._entry_idx = None
-                self._entry_price = None
-                self._entry_time = None
 
             # Notify callbacks
             for callback in self.p.order_callbacks:
@@ -379,6 +380,10 @@ class StrategyFactoryAdapter(bt.Strategy):
                     callback(self, trade, exit_snapshot)
                 except Exception as e:
                     logger.error(f"Trade callback error: {e}")
+
+            # Reset entry state AFTER trade is logged and callbacks are done
+            self._entry_price = None
+            self._entry_time = None
 
     def next(self):
         """Process each bar."""
