@@ -2508,7 +2508,12 @@ class LiveWorker:
 
         return False, ""
 
-    def _wait_for_initial_data(self, max_wait_seconds: int = 300) -> bool:
+    def _wait_for_initial_data(self) -> bool:
+        """Wait indefinitely for initial data from all required feeds.
+
+        Returns True when data is available, False only if stop_event is set.
+        Waits patiently during market closed hours and logs progress periodically.
+        """
         required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
         for feed_name in self._required_reference_feed_names():
             feed = str(feed_name or "").strip()
@@ -2524,8 +2529,6 @@ class LiveWorker:
                 required_queues.add(feed)
 
         start_time = time.monotonic()
-        countdown_start: Optional[float] = None
-        live_seen = False
         last_market_closed_log = 0.0
         last_progress_log = 0.0
 
@@ -2546,18 +2549,15 @@ class LiveWorker:
                 logger.info("Stop event received while waiting for initial data")
                 return False
 
-            warmup_pending = False
             missing_queues: set[str] = set()
 
             for queue_name in required_queues:
                 queue_obj = self.queue_manager.get_queue(queue_name)
                 if queue_obj.qsize() > 0:
-                    live_seen = True
-                    continue
+                    continue  # This queue has data
 
                 if _has_warmup(queue_name):
-                    warmup_pending = True
-                    continue
+                    continue  # This queue has warmup data pending
 
                 missing_queues.add(queue_name)
 
@@ -2568,32 +2568,18 @@ class LiveWorker:
 
             now = time.monotonic()
 
-            # Check if market is closed - if so, wait patiently without countdown
+            # Check if market is closed - if so, log and wait patiently
             market_closed, close_reason = self._is_market_closed()
             if market_closed:
                 # Log every 5 minutes while waiting for market to open
                 if now - last_market_closed_log >= 300:
                     logger.info("Waiting for market to open (%s)...", close_reason)
                     last_market_closed_log = now
-                countdown_start = None  # Reset countdown while market is closed
                 time.sleep(10)  # Check less frequently during market close
                 continue
 
-            if warmup_pending and not live_seen:
-                countdown_start = None
-            elif countdown_start is None:
-                countdown_start = now
-
-            if countdown_start is not None and now - countdown_start >= max_wait_seconds:
-                logger.error(
-                    "Timeout waiting for initial data after %s seconds; missing queues: %s",
-                    max_wait_seconds,
-                    ", ".join(sorted(missing_queues)),
-                )
-                return False
-
-            # Log progress every 30 seconds while waiting
-            if missing_queues and now - last_progress_log >= 30:
+            # Log progress every 60 seconds while waiting (no timeout - wait indefinitely)
+            if missing_queues and now - last_progress_log >= 60:
                 received = len(required_queues) - len(missing_queues)
                 elapsed = int(now - start_time)
                 logger.info(
