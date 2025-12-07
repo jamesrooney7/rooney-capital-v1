@@ -54,18 +54,56 @@ portfolio:
   instruments:
     - symbol: 6B
       strategy: ATRBuyDip
+      params:
+        atr_period: 28
+        atr_multiplier: 2.0
+        smoothing_period: 5
+        ema_period: 200
+        use_ema_filter: true
     - symbol: CL
       strategy: ATRBuyDip
+      params:
+        atr_period: 28
+        atr_multiplier: 2.0
+        smoothing_period: 15
+        ema_period: 200
+        use_ema_filter: true
     - symbol: ES
       strategy: AvgHLRangeIBS
+      params:
+        length: 25
+        range_multiplier: 3.0
+        bars_below_threshold: 1
+        ibs_buy_threshold: 0.1
     - symbol: GC
       strategy: ATRBuyDip
+      params:
+        atr_period: 28
+        atr_multiplier: 2.0
+        smoothing_period: 15
+        ema_period: 200
+        use_ema_filter: true
     - symbol: HG
       strategy: MovingAverageEnvelope
+      params:
+        mae_length: 200
+        mae_envelope_pct: 3.0
     - symbol: NQ
       strategy: ATRBuyDip
+      params:
+        atr_period: 28
+        atr_multiplier: 2.0
+        smoothing_period: 5
+        ema_period: 200
+        use_ema_filter: true
     - symbol: RTY
       strategy: ATRBuyDip
+      params:
+        atr_period: 28
+        atr_multiplier: 2.0
+        smoothing_period: 5
+        ema_period: 150
+        use_ema_filter: true
 
 # ---------------------------------------------------------------------------
 # Cash management and runtime behaviour

@@ -263,6 +263,7 @@ class RuntimeConfig:
     portfolio_instruments: Optional[tuple[str, ...]] = None  # Instruments to actually trade
     use_factory_strategies: bool = False  # Use Strategy Factory adapter instead of IbsStrategy
     factory_strategy_mapping: Mapping[str, str] = field(default_factory=dict)  # symbol -> strategy name
+    factory_strategy_params: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)  # symbol -> strategy params
 
     def instrument(self, symbol: str) -> InstrumentRuntimeConfig:
         cfg = self.instruments.get(symbol)
@@ -609,6 +610,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
     portfolio_instruments = None
     use_factory_strategies = False
     factory_strategy_mapping: Dict[str, str] = {}
+    factory_strategy_params: Dict[str, Dict[str, Any]] = {}
 
     if portfolio_payload:
         use_factory_strategies = _coerce_bool(portfolio_payload.get("use_factory_strategies"), False)
@@ -629,7 +631,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         # Read instruments to actually trade (vs all symbols loaded for features)
         # Supports two formats:
         # 1. Simple list: ["ES", "NQ", "CL"]
-        # 2. Strategy-specified list: [{symbol: ES, strategy: AvgHLRangeIBS}, ...]
+        # 2. Strategy-specified list: [{symbol: ES, strategy: AvgHLRangeIBS, params: {...}}, ...]
         instruments_raw = portfolio_payload.get("instruments")
         if instruments_raw:
             parsed_instruments = []
@@ -641,10 +643,15 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
                     # Strategy-specified format
                     sym = item.get("symbol", "")
                     if sym:
-                        parsed_instruments.append(str(sym).strip().upper())
+                        sym_upper = str(sym).strip().upper()
+                        parsed_instruments.append(sym_upper)
                         strategy_name = item.get("strategy")
                         if strategy_name:
-                            factory_strategy_mapping[str(sym).strip().upper()] = str(strategy_name)
+                            factory_strategy_mapping[sym_upper] = str(strategy_name)
+                        # Parse strategy params if provided
+                        params = item.get("params")
+                        if params and isinstance(params, Mapping):
+                            factory_strategy_params[sym_upper] = dict(params)
             portfolio_instruments = tuple(parsed_instruments) if parsed_instruments else None
 
     return RuntimeConfig(
@@ -678,6 +685,7 @@ def load_runtime_config(path: str | Path | None = None) -> RuntimeConfig:
         portfolio_instruments=portfolio_instruments,
         use_factory_strategies=use_factory_strategies,
         factory_strategy_mapping=factory_strategy_mapping,
+        factory_strategy_params=factory_strategy_params,
     )
 
 
@@ -1282,15 +1290,17 @@ class LiveWorker:
                     symbol.upper(),
                     VALIDATED_STRATEGIES.get(symbol.upper(), {}).get('strategy', 'AvgHLRangeIBS')
                 )
+                # Get symbol-specific strategy params from config (winning params from optimization)
+                strategy_params = self.config.factory_strategy_params.get(symbol.upper(), {})
                 logger.info(
-                    "Using Strategy Factory adapter for %s with strategy=%s",
-                    symbol, strategy_name
+                    "Using Strategy Factory adapter for %s with strategy=%s, params=%s",
+                    symbol, strategy_name, strategy_params
                 )
                 self.cerebro.addstrategy(
                     NotifyingFactoryAdapter,
                     symbol=symbol,
                     strategy_name=strategy_name,
-                    strategy_params={},  # Default params; can be extended from config
+                    strategy_params=strategy_params,
                     order_callbacks=order_callbacks,
                     trade_callbacks=trade_callbacks,
                     portfolio_coordinator=self.portfolio_coordinator,
