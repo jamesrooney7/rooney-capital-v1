@@ -2473,6 +2473,41 @@ class LiveWorker:
             self._stop_event.set()
             logger.info("Cerebro runtime stopped")
 
+    def _is_market_closed(self) -> tuple[bool, str]:
+        """Check if futures market is currently closed.
+
+        Returns (is_closed, reason) tuple.
+
+        Futures market hours (all times EST):
+        - Saturday: closed all day
+        - Sunday: opens at 6pm EST
+        - Mon-Thu: closed 5pm-6pm EST daily maintenance
+        - Friday: closes at 5pm EST for weekend
+        """
+        from zoneinfo import ZoneInfo
+        est = ZoneInfo("America/New_York")
+        now_est = dt.datetime.now(est)
+        weekday = now_est.weekday()
+        hour = now_est.hour
+
+        # Saturday - fully closed
+        if weekday == 5:
+            return True, "Saturday (market closed)"
+
+        # Sunday - opens at 6pm EST
+        if weekday == 6 and hour < 18:
+            return True, f"Sunday before 6pm EST (opens at 6pm, currently {hour}:{now_est.minute:02d})"
+
+        # Monday-Thursday: closed 5pm-6pm EST
+        if weekday in (0, 1, 2, 3) and hour == 17:
+            return True, "daily maintenance (5pm-6pm EST)"
+
+        # Friday: closed after 5pm EST
+        if weekday == 4 and hour >= 17:
+            return True, "Friday after 5pm EST (weekend close)"
+
+        return False, ""
+
     def _wait_for_initial_data(self, max_wait_seconds: int = 60) -> bool:
         required_queues: set[str] = {str(symbol) for symbol in self.data_symbols}
         for feed_name in self._required_reference_feed_names():
@@ -2491,6 +2526,7 @@ class LiveWorker:
         start_time = time.monotonic()
         countdown_start: Optional[float] = None
         live_seen = False
+        last_market_closed_log = 0.0
 
         def _has_warmup(symbol: str) -> bool:
             feed = self._data_feeds.get(symbol)
@@ -2504,6 +2540,11 @@ class LiveWorker:
             return backlog > 0
 
         while True:
+            # Check if we should stop
+            if self._stop_event.is_set():
+                logger.info("Stop event received while waiting for initial data")
+                return False
+
             warmup_pending = False
             missing_queues: set[str] = set()
 
@@ -2525,6 +2566,17 @@ class LiveWorker:
                 return True
 
             now = time.monotonic()
+
+            # Check if market is closed - if so, wait patiently without countdown
+            market_closed, close_reason = self._is_market_closed()
+            if market_closed:
+                # Log every 5 minutes while waiting for market to open
+                if now - last_market_closed_log >= 300:
+                    logger.info("Waiting for market to open (%s)...", close_reason)
+                    last_market_closed_log = now
+                countdown_start = None  # Reset countdown while market is closed
+                time.sleep(10)  # Check less frequently during market close
+                continue
 
             if warmup_pending and not live_seen:
                 countdown_start = None
