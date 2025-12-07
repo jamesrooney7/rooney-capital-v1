@@ -465,6 +465,92 @@ class StrategyFactoryAdapter(bt.Strategy):
 
         return df
 
+    def _get_indicator_summary(self, df: pd.DataFrame, idx: int) -> str:
+        """Get a summary of strategy-specific indicator values for logging."""
+        row = df.iloc[idx]
+        parts = []
+
+        # Common indicators
+        if 'atr' in df.columns:
+            parts.append(f"ATR={row['atr']:.4f}")
+
+        # Strategy-specific indicators
+        strategy_name = self.p.strategy_name
+
+        if strategy_name == 'ATRBuyDip':
+            if 'lower_trigger' in df.columns:
+                parts.append(f"lower_trigger={row['lower_trigger']:.2f}")
+            if 'ema' in df.columns:
+                parts.append(f"EMA={row['ema']:.2f}")
+            parts.append(f"Close={row['Close']:.2f}")
+            if idx > 0:
+                parts.append(f"High[-1]={df.iloc[idx-1]['High']:.2f}")
+
+        elif strategy_name == 'AvgHLRangeIBS':
+            if 'ibs' in df.columns:
+                parts.append(f"IBS={row['ibs']:.3f}")
+            if 'avg_hl_range' in df.columns:
+                parts.append(f"AvgHLRange={row['avg_hl_range']:.4f}")
+            if 'range_threshold' in df.columns:
+                parts.append(f"RangeThresh={row['range_threshold']:.4f}")
+
+        elif strategy_name == 'MovingAverageEnvelope':
+            if 'ma' in df.columns:
+                parts.append(f"MA={row['ma']:.2f}")
+            if 'lower_band' in df.columns:
+                parts.append(f"LowerBand={row['lower_band']:.2f}")
+            if 'upper_band' in df.columns:
+                parts.append(f"UpperBand={row['upper_band']:.2f}")
+
+        elif strategy_name == 'IBSStrategy':
+            if 'ibs' in df.columns:
+                parts.append(f"IBS={row['ibs']:.3f}")
+
+        # Always include OHLC
+        parts.append(f"O={row['Open']:.2f} H={row['High']:.2f} L={row['Low']:.2f} C={row['Close']:.2f}")
+
+        return " | ".join(parts)
+
+    def _get_exit_details(self, df: pd.DataFrame, current_idx: int, entry_idx: int,
+                          entry_price: float, exit_type: str) -> str:
+        """Get detailed exit information for logging."""
+        row = df.iloc[current_idx]
+        current_price = row['Close']
+        atr = row.get('atr', 0)
+
+        parts = [f"exit_type={exit_type}"]
+        parts.append(f"entry_price={entry_price:.2f}")
+        parts.append(f"current_price={current_price:.2f}")
+        parts.append(f"bars_held={current_idx - entry_idx}")
+
+        pnl_points = current_price - entry_price
+        parts.append(f"pnl_points={pnl_points:+.2f}")
+
+        if exit_type == 'signal':
+            # Strategy-specific exit
+            if self.p.strategy_name == 'ATRBuyDip' and current_idx > 0:
+                prev_high = df.iloc[current_idx - 1]['High']
+                parts.append(f"Close({current_price:.2f}) > High[-1]({prev_high:.2f})")
+
+        elif exit_type == 'stop_loss':
+            stop_atr = self.factory_strategy.stop_loss_atr
+            stop_price = entry_price - (stop_atr * atr)
+            parts.append(f"stop_price={stop_price:.2f} (ATR×{stop_atr})")
+
+        elif exit_type == 'take_profit':
+            tp_atr = self.factory_strategy.take_profit_atr
+            target_price = entry_price + (tp_atr * atr)
+            parts.append(f"target_price={target_price:.2f} (ATR×{tp_atr})")
+
+        elif exit_type == 'time':
+            max_bars = self.factory_strategy.max_bars_held
+            parts.append(f"max_bars={max_bars}")
+
+        elif exit_type == 'eod':
+            parts.append(f"auto_close_time={self.factory_strategy.auto_close_time}")
+
+        return " | ".join(parts)
+
     def _check_entry(self, df: pd.DataFrame, current_idx: int):
         """Check if entry conditions are met."""
         # Block entries on Saturday (5) and Sunday (6) - futures markets closed
@@ -510,7 +596,12 @@ class StrategyFactoryAdapter(bt.Strategy):
         if not has_signal:
             return
 
-        logger.info(f"{self.symbol}: 📊 ENTRY SIGNAL detected at {df['datetime'].iloc[-1]}")
+        # Log entry signal with indicator values
+        indicator_summary = self._get_indicator_summary(df, current_idx)
+        logger.info(
+            f"{self.symbol}: 📊 ENTRY SIGNAL detected at {to_est(df['datetime'].iloc[-1])} | "
+            f"Strategy: {self.p.strategy_name} | {indicator_summary}"
+        )
 
         # Check portfolio coordinator for position limits
         if self.p.portfolio_coordinator:
@@ -568,6 +659,15 @@ class StrategyFactoryAdapter(bt.Strategy):
             return
 
         if exit_result.exit:
+            # Log detailed exit information
+            exit_details = self._get_exit_details(
+                df, current_idx, df_entry_idx, self._entry_price, exit_result.exit_type
+            )
+            current_dt = df['datetime'].iloc[current_idx]
+            logger.info(
+                f"{self.symbol}: 🚪 EXIT SIGNAL at {to_est(current_dt)} | "
+                f"Strategy: {self.p.strategy_name} | {exit_details}"
+            )
             self._exit_position(exit_result.exit_type)
 
     def _enter_position(self):
