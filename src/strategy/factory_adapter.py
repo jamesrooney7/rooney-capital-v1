@@ -277,25 +277,14 @@ class StrategyFactoryAdapter(bt.Strategy):
                 self._entry_price = order.executed.price
                 self._entry_time = self.hourly_data.datetime.datetime(0)
                 self._entry_idx = self._bars_seen
-                # Diagnostic: log bar data at execution time
-                bar_dt = self.hourly_data.datetime.datetime(0)
-                bar_open = self.hourly_data.open[0]
-                bar_close = self.hourly_data.close[0]
-                logger.info(
-                    f"{self.symbol}: BUY executed at {order.executed.price:.2f} | "
-                    f"Bar[0]: {to_est(bar_dt)}, O={bar_open:.2f}, C={bar_close:.2f}"
-                )
+                logger.info(f"{self.symbol}: BUY executed at {order.executed.price:.2f}")
             else:
                 self._in_position = False
                 pnl_points = order.executed.price - self._entry_price if self._entry_price else 0
                 pnl_usd = pnl_points * point_value(self.symbol)
-                # Diagnostic: log bar data at execution time
-                bar_dt = self.hourly_data.datetime.datetime(0)
-                bar_open = self.hourly_data.open[0]
-                bar_close = self.hourly_data.close[0]
                 logger.info(
                     f"{self.symbol}: SELL executed at {order.executed.price:.2f}, "
-                    f"P&L: ${pnl_usd:,.2f} ({pnl_points:+.2f} pts) | Bar[0]: {to_est(bar_dt)}, O={bar_open:.2f}, C={bar_close:.2f}"
+                    f"P&L: ${pnl_usd:,.2f} ({pnl_points:+.2f} pts)"
                 )
                 # Note: Don't reset _entry_price/_entry_time here!
                 # notify_trade runs AFTER notify_order and needs these values.
@@ -337,8 +326,7 @@ class StrategyFactoryAdapter(bt.Strategy):
             }
 
             logger.info(
-                f"{self.symbol}: Trade closed, P&L: ${pnl_usd:,.2f} ({trade.pnl:+.2f} pts), "
-                f"Commission: ${trade.commission * pv:,.2f}"
+                f"{self.symbol}: Trade closed | Net P&L: ${pnlcomm_usd:,.2f} (${trade.commission * pv:.2f} commission)"
             )
 
             # Notify portfolio coordinator (with dollar P&L)
@@ -370,7 +358,6 @@ class StrategyFactoryAdapter(bt.Strategy):
                         exit_reason=exit_snapshot.get('exit_reason', 'strategy_exit'),
                         ml_score=self._ml_last_score,
                     )
-                    logger.info(f"{self.symbol}: Trade persisted to database | P&L: ${pnlcomm_usd:,.2f}")
                 except Exception as e:
                     logger.error(f"{self.symbol}: Failed to persist trade to database: {e}")
 
@@ -403,9 +390,9 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Update cross-asset features for ML filtering
         self._update_cross_asset_features()
 
-        # Log progress periodically (every 50 bars or first 5 bars)
-        if self._bars_seen <= 5 or self._bars_seen % 50 == 0:
-            logger.info(
+        # Log progress periodically during warmup (every 500 bars)
+        if self._bars_seen % 500 == 0:
+            logger.debug(
                 f"{self.symbol}: Bar {self._bars_seen}/{self.p.warmup_bars} "
                 f"at {bar['datetime']} C={bar['Close']:.2f}"
             )
@@ -595,28 +582,17 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Check if current bar has entry signal
         has_signal = entry_signals.iloc[current_idx] if current_idx < len(entry_signals) else False
 
-        # Log signal status periodically (every 10 bars after warmup)
-        if self._bars_seen % 10 == 0:
+        # Log signal status periodically (every 100 bars after warmup) - debug level
+        if self._bars_seen % 100 == 0:
             recent_signals = entry_signals.tail(10).sum()
-
-            # Get ML feature status
             ml_status = self._get_ml_feature_status()
-
-            # Debug: show buffer sizes
             bar_buf_size = len(self._bar_buffer)
-            price_buf_sizes = {k: len(v) for k, v in self._price_buffers.items() if len(v) > 0}
-            feeds_available = len(self._data_feeds)
 
-            logger.info(
+            logger.debug(
                 f"{self.symbol}: Signal check - current={has_signal}, "
                 f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}, "
-                f"ml_features={ml_status}, bar_buf={bar_buf_size}, feeds={feeds_available}"
+                f"ml_features={ml_status}, bar_buf={bar_buf_size}"
             )
-
-            # Log detailed debug info every 100 bars
-            if self._bars_seen % 100 == 0:
-                logger.info(f"{self.symbol}: DEBUG - price_buffers: {price_buf_sizes}")
-                logger.info(f"{self.symbol}: DEBUG - data_feeds: {sorted(self._data_feeds.keys())}")
 
         if not has_signal:
             return
@@ -654,8 +630,6 @@ class StrategyFactoryAdapter(bt.Strategy):
             logger.info(
                 f"{self.symbol}: ✅ ML approved entry (score={ml_score:.3f} >= {self.p.ml_threshold})"
             )
-        else:
-            logger.info(f"{self.symbol}: No ML model - proceeding without filter")
 
         # Place entry order
         self._enter_position()
@@ -711,15 +685,7 @@ class StrategyFactoryAdapter(bt.Strategy):
             size=self.p.size,
             exectype=bt.Order.Market,
         )
-
-        # Diagnostic: log bar data when order is placed
-        bar_dt = self.hourly_data.datetime.datetime(0)
-        bar_open = self.hourly_data.open[0]
-        bar_close = self.hourly_data.close[0]
-        logger.info(
-            f"{self.symbol}: Entry order placed (size={self.p.size}) | "
-            f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
-        )
+        logger.info(f"{self.symbol}: Entry order placed (size={self.p.size})")
 
     def _exit_position(self, reason: str):
         """Place exit order."""
@@ -730,15 +696,7 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Use self.hourly_data to ensure we close on the correct symbol's feed
         # exectype=Market ensures execution at next bar's open (not current bar's close)
         self._pending_order = self.close(data=self.hourly_data, exectype=bt.Order.Market)
-
-        # Diagnostic: log bar data when order is placed
-        bar_dt = self.hourly_data.datetime.datetime(0)
-        bar_open = self.hourly_data.open[0]
-        bar_close = self.hourly_data.close[0]
-        logger.info(
-            f"{self.symbol}: Exit order placed (reason: {reason}) | "
-            f"Bar[0]: dt={bar_dt}, O={bar_open:.2f}, C={bar_close:.2f}"
-        )
+        logger.info(f"{self.symbol}: Exit order placed (reason: {reason})")
 
     def _get_ml_score(self, df: pd.DataFrame, current_idx: int) -> Optional[float]:
         """Get ML model prediction score for current entry."""
