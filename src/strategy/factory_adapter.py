@@ -553,9 +553,29 @@ class StrategyFactoryAdapter(bt.Strategy):
 
     def _check_entry(self, df: pd.DataFrame, current_idx: int):
         """Check if entry conditions are met."""
-        # Block entries on Saturday (5) and Sunday (6) - futures markets closed
+        # Futures trading hours filter (data is in UTC)
+        # - Saturday: market fully closed
+        # - Sunday: market opens at 6pm EST (23:00 UTC)
+        # - Mon-Thu: market closed 5pm-6pm EST (22:00-23:00 UTC) daily maintenance
+        # - Friday: market closes at 5pm EST (22:00 UTC) for weekend
         current_dt = df['datetime'].iloc[current_idx]
-        if current_dt.weekday() >= 5:  # Saturday=5, Sunday=6
+        weekday = current_dt.weekday()
+        hour_utc = current_dt.hour
+
+        # Saturday - market fully closed
+        if weekday == 5:
+            return
+
+        # Sunday - market opens at 6pm EST = 23:00 UTC
+        if weekday == 6 and hour_utc < 23:
+            return
+
+        # Monday-Thursday: block 5pm-6pm EST (22:00-23:00 UTC) daily maintenance
+        if weekday in (0, 1, 2, 3) and hour_utc == 22:
+            return
+
+        # Friday: block after 5pm EST (22:00 UTC) - market closed for weekend
+        if weekday == 4 and hour_utc >= 22:
             return
 
         # Get entry signals from Strategy Factory
