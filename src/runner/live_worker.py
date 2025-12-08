@@ -959,12 +959,15 @@ class LiveWorker:
             )
             self.portfolio_coordinator = None
 
-        self._setup_data_and_strategies()
-
+        # Initialize storage for historical warmup bars BEFORE setting up strategies
+        # (strategies receive reference to this dict in addstrategy())
+        self._strategy_warmup_bars: dict[str, list[dict]] = {}
         self._historical_warmup_counts: dict[str, int] = {}
         self._historical_warmup_started = False
         self._historical_warmup_lock = threading.Lock()
         self._historical_warmup_wait_log_interval = 5.0
+
+        self._setup_data_and_strategies()
 
         if self.config.heartbeat_file:
             logger.info("Heartbeat file configured at %s", self.config.heartbeat_file)
@@ -1306,6 +1309,7 @@ class LiveWorker:
                     portfolio_coordinator=self.portfolio_coordinator,
                     feature_tracker=self.ml_feature_tracker,
                     trades_db=self.trades_db,
+                    warmup_bars_source=self._strategy_warmup_bars,  # Dict populated during historical warmup
                     **{k: v for k, v in strategy_kwargs.items()
                        if k not in ('symbol', 'portfolio_coordinator')},
                 )
@@ -1502,6 +1506,26 @@ class LiveWorker:
         if not bars:
             logger.info("No historical bars available for %s warmup", symbol)
             return
+
+        # Store 15-min bars for direct strategy injection (bypasses Backtrader feed sync issues)
+        # Only store for trading symbols (not all reference symbols)
+        if compression == "15min" and symbol.upper() in [s.upper() for s in self.symbols]:
+            bar_dicts = [
+                {
+                    'datetime': bar.timestamp,
+                    'Open': bar.open,
+                    'High': bar.high,
+                    'Low': bar.low,
+                    'Close': bar.close,
+                    'volume': bar.volume,
+                }
+                for bar in bars
+            ]
+            self._strategy_warmup_bars[symbol.upper()] = bar_dicts
+            logger.info(
+                "Stored %d 15-min bars for %s strategy direct injection",
+                len(bar_dicts), symbol
+            )
 
         logger.info(
             "Converted %s historical data to %d %s bars (queuing to feed: %s)",
