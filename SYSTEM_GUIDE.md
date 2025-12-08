@@ -676,7 +676,7 @@ sqlite3 /opt/pine/runtime/trades.db "DELETE FROM trades WHERE entry_time < date(
 | **Service file** | `/etc/systemd/system/pine-runner.service` |
 | **Service name** | `pine-runner.service` |
 | **Working directory** | `/opt/pine/rooney-capital-v1` |
-| **Runs as user** | `linuxuser` (or whatever is configured) |
+| **Runs as user** | `root` |
 
 ---
 
@@ -691,25 +691,34 @@ sudo systemctl status pine-runner.service
 sudo journalctl -u pine-runner.service -f
 
 # === CONFIGURATION ===
+cd /opt/pine/rooney-capital-v1
 cat config.yml | grep -A 10 "symbols:"
 cat config.yml | grep -A 3 "portfolio:"
 cat .env
 
 # === DEPLOYMENT ===
-git pull origin <branch>
-sudo systemctl stop pine-runner.service
-sudo bash scripts/clean_for_new_optimizer.sh
-sudo systemctl start pine-runner.service
+cd /opt/pine/rooney-capital-v1
+cp config.yml /tmp/config.yml.backup && cp .env /tmp/.env.backup
+git pull origin claude/show-strategy-results-01AeKC416rG5ZpWkoxbJmoxS
+git lfs pull
+cp /tmp/config.yml.backup config.yml && cp /tmp/.env.backup .env
+sudo systemctl restart pine-runner.service
 
 # === MONITORING ===
-ps aux | grep launch_worker | grep -v grep  # Should show ONE process
+ps aux | grep "runner.main" | grep -v grep  # Should show ONE process
 sqlite3 /opt/pine/runtime/trades.db "SELECT COUNT(*) FROM trades;"
-sudo journalctl -u pine-runner.service -n 100 | grep -i "model loaded" | wc -l  # Should match portfolio instruments
+sudo journalctl -u pine-runner.service | grep -i "model loaded" | wc -l
+
+# === EMERGENCY STOP ===
+sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/rooney-capital-v1/.env
+sudo systemctl restart pine-runner.service
 
 # === DASHBOARD ===
-cd dashboard && streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+cd /opt/pine/rooney-capital-v1/dashboard
+streamlit run app.py --server.port 8501 --server.address 0.0.0.0
 
 # === PORTFOLIO OPTIMIZATION ===
+cd /opt/pine/rooney-capital-v1
 python3 research/portfolio_optimizer_greedy_train_test.py \
     --train-start 2023-01-01 --train-end 2023-12-31 \
     --test-start 2024-01-01 --test-end 2024-12-31 \
@@ -723,109 +732,123 @@ python3 research/portfolio_optimizer_greedy_train_test.py \
 
 This section covers day-to-day operations for running the Strategy Factory live trading system.
 
+### Server Details
+
+| Item | Value |
+|------|-------|
+| **Hostname** | rooney-capital-v2 |
+| **SSH User** | root |
+| **Working Directory** | /opt/pine/rooney-capital-v1 |
+| **Git Branch** | claude/show-strategy-results-01AeKC416rG5ZpWkoxbJmoxS |
+
 ### Quick Start: Deploy and Run
 
 ```bash
 # 1. SSH to server
-ssh linuxuser@your-server
+ssh root@your-server-ip
 
 # 2. Navigate to project
 cd /opt/pine/rooney-capital-v1
 
-# 3. Pull latest changes
-git pull origin <branch-name>
+# 3. Pull latest changes (backup config first)
+cp config.yml /tmp/config.yml.backup
+cp .env /tmp/.env.backup
+git pull origin claude/show-strategy-results-01AeKC416rG5ZpWkoxbJmoxS
+git lfs pull  # Required for ML model files
+cp /tmp/config.yml.backup config.yml
+cp /tmp/.env.backup .env
 
-# 4. Verify code is updated (check for recent commit)
+# 4. Verify code is updated
 git log --oneline -1
 
-# 5. Start the worker
-./run_live.sh start
+# 5. Restart the service
+sudo systemctl restart pine-runner.service
 
 # 6. Verify it's running
-ps aux | grep "runner.main" | grep -v grep
+sudo systemctl status pine-runner.service
 ```
 
-### run_live.sh Commands
+### Systemd Service Commands
 
 ```bash
-# Start the worker
-./run_live.sh start
+# Start service
+sudo systemctl start pine-runner.service
 
-# Stop the worker
-./run_live.sh stop
+# Stop service
+sudo systemctl stop pine-runner.service
 
-# Restart (stop + start)
-./run_live.sh restart
+# Restart service
+sudo systemctl restart pine-runner.service
 
-# Check if running
-./run_live.sh status
+# Check status
+sudo systemctl status pine-runner.service
 
-# Stream logs (Ctrl+C to exit)
-./run_live.sh logs
+# Enable on boot
+sudo systemctl enable pine-runner.service
 ```
 
 ### Monitoring Logs
 
 ```bash
-# Stream all logs in real-time
-tail -f /opt/pine/rooney-capital-v1/logs/worker.log
+# Stream logs in real-time
+sudo journalctl -u pine-runner.service -f
+
+# View recent logs (last hour)
+sudo journalctl -u pine-runner.service --since "1 hour ago"
+
+# View logs since service start
+sudo journalctl -u pine-runner.service -b
 
 # View recent trade executions
-grep -a -E "BUY executed|SELL executed" logs/worker.log | tail -20
-
-# View entry/exit orders with diagnostic info (Bar[0] shows bar data at execution)
-grep -a -E "executed at|order placed" logs/worker.log | tail -30
+sudo journalctl -u pine-runner.service | grep -E "BUY executed|SELL executed" | tail -20
 
 # View entry signals (including ML-blocked ones)
-grep -a -E "ENTRY SIGNAL|Entry blocked" logs/worker.log | tail -30
-
-# View signal checks for specific symbol
-grep -a "CL: Signal check" logs/worker.log | tail -20
+sudo journalctl -u pine-runner.service | grep -E "ENTRY SIGNAL|Entry blocked" | tail -30
 
 # View errors only
-grep -a -i "error" logs/worker.log | tail -50
+sudo journalctl -u pine-runner.service | grep -i "error" | tail -50
 
-# View factory_adapter logs only
-grep -a "factory_adapter" logs/worker.log | tail -50
+# View strategy bar processing
+sudo journalctl -u pine-runner.service | grep "Bar.*signal=" | tail -20
 ```
 
 ### Checking Worker Status
 
 ```bash
+# Check service status
+sudo systemctl status pine-runner.service
+
 # Check if process is running (shows PID and start time)
 ps aux | grep "runner.main" | grep -v grep
 
 # Example output:
-# linuxus+ 1629144  3.0  0.4 6950576 546836 ?  Sl  14:37  0:04 python3 -m runner.main
+# root     1629144  3.0  0.4 6950576 546836 ?  Sl  14:37  0:04 python3 -m runner.main
 #                                                          ^^^^^^ start time
 
-# Check PID file
-cat /opt/pine/rooney-capital-v1/logs/worker.pid
-
-# Check log file modification time (should be recent if worker is active)
-stat /opt/pine/rooney-capital-v1/logs/worker.log | grep Modify
+# Check heartbeat file
+cat /var/run/pine/worker_heartbeat.json
 ```
 
 ### Force Killing a Stuck Worker
 
-If `./run_live.sh stop` doesn't work:
+If `sudo systemctl stop` doesn't work:
 
 ```bash
 # 1. Find the PID
 ps aux | grep "runner.main" | grep -v grep
 
 # 2. Force kill by PID
-kill -9 <PID>
+sudo kill -9 <PID>
 
-# 3. Verify it's dead
+# 3. Or force kill all runner processes
+sudo pkill -9 -f "runner.main"
+
+# 4. Verify it's dead
 ps aux | grep "runner.main" | grep -v grep
 # (should show nothing)
 
-# 4. Clean up PID file
-rm /opt/pine/rooney-capital-v1/logs/worker.pid
-
 # 5. Start fresh
-./run_live.sh start
+sudo systemctl start pine-runner.service
 ```
 
 ### Full Redeploy Workflow
@@ -834,25 +857,45 @@ When you need to update code and restart:
 
 ```bash
 # 1. Stop current worker
-./run_live.sh stop
+sudo systemctl stop pine-runner.service
 
 # 2. If that doesn't work, force kill
-kill -9 $(ps aux | grep "runner.main" | grep -v grep | awk '{print $2}')
+sudo pkill -9 -f "runner.main"
 
-# 3. Pull latest code
-git pull origin <branch-name>
+# 3. Backup config files
+cp config.yml /tmp/config.yml.backup
+cp .env /tmp/.env.backup
 
-# 4. Verify the update (e.g., check for specific code change)
-grep -n "Bar\[0\]" src/strategy/factory_adapter.py
+# 4. Pull latest code
+git pull origin claude/show-strategy-results-01AeKC416rG5ZpWkoxbJmoxS
+git lfs pull
 
-# 5. Start fresh
-./run_live.sh start
+# 5. Restore config files
+cp /tmp/config.yml.backup config.yml
+cp /tmp/.env.backup .env
 
-# 6. Verify new process is running with today's date
-ps aux | grep "runner.main" | grep -v grep
+# 6. Verify the update
+git log --oneline -1
 
-# 7. Monitor logs for errors
-tail -f logs/worker.log
+# 7. Start fresh
+sudo systemctl start pine-runner.service
+
+# 8. Monitor logs for errors
+sudo journalctl -u pine-runner.service -f
+```
+
+### Emergency Stop (Killswitch)
+
+To immediately stop all trading:
+
+```bash
+# Enable killswitch
+sed -i 's/POLICY_KILLSWITCH=false/POLICY_KILLSWITCH=true/' /opt/pine/rooney-capital-v1/.env
+sudo systemctl restart pine-runner.service
+
+# To re-enable trading
+sed -i 's/POLICY_KILLSWITCH=true/POLICY_KILLSWITCH=false/' /opt/pine/rooney-capital-v1/.env
+sudo systemctl restart pine-runner.service
 ```
 
 ### Common Issues and Solutions
@@ -872,58 +915,61 @@ tail -f logs/worker.log
 **Solution:**
 ```bash
 # Force kill ALL runner processes
-pkill -9 -f "runner.main"
+sudo pkill -9 -f "runner.main"
 # Start fresh
-./run_live.sh start
+sudo systemctl start pine-runner.service
 ```
 
-#### Issue: Logs show "binary file matches" with grep
-
-**Cause:** Log file contains some binary content.
-
-**Solution:** Use `-a` flag with grep:
-```bash
-grep -a "pattern" /opt/pine/rooney-capital-v1/logs/worker.log
-```
-
-#### Issue: No diagnostic output in logs (missing Bar[0] info)
+#### Issue: No diagnostic output in logs
 
 **Cause:** Running old code that doesn't have diagnostic logging.
 
 **Solution:**
-1. Pull latest code: `git pull`
-2. Kill old process: `kill -9 <PID>`
-3. Verify code has diagnostic logging: `grep -n "Bar\[0\]" src/strategy/factory_adapter.py`
-4. Restart: `./run_live.sh start`
+1. Pull latest code: `git pull origin claude/show-strategy-results-01AeKC416rG5ZpWkoxbJmoxS`
+2. Run `git lfs pull` to ensure ML models are present
+3. Restart: `sudo systemctl restart pine-runner.service`
 
 #### Issue: Orders filling at wrong prices
 
 **Diagnostic steps:**
 1. Check the diagnostic logs for order execution:
    ```bash
-   grep -a "executed at.*Bar\[0\]" logs/worker.log | tail -10
+   sudo journalctl -u pine-runner.service | grep "executed at" | tail -10
    ```
-2. Compare executed price vs Bar[0] open/close
+2. Compare executed price vs bar data
 3. If executed price matches Bar open instead of previous bar close, there may be a timing issue
 
-### Log File Locations
+### Log Access
 
-| File | Purpose |
-|------|---------|
-| `/opt/pine/rooney-capital-v1/logs/worker.log` | Main worker log (trades, signals, errors) |
-| `/opt/pine/rooney-capital-v1/logs/worker.pid` | PID of running worker |
+Logs are managed by journalctl (systemd):
+
+```bash
+# Stream live logs
+sudo journalctl -u pine-runner.service -f
+
+# View last 100 lines
+sudo journalctl -u pine-runner.service -n 100
+
+# View logs since specific time
+sudo journalctl -u pine-runner.service --since "2 hours ago"
+
+# Export logs to file
+sudo journalctl -u pine-runner.service --since today > /tmp/today.log
+```
 
 ### Diagnostic Log Format
 
-After deploying diagnostic logging, trade executions show:
+Strategy bar processing logs show:
 ```
-CL: BUY executed at 59.13 | Bar[0]: dt=2025-12-04 12:00:00, O=59.10, C=59.15
-CL: SELL executed at 59.50, P&L: 0.37 | Bar[0]: dt=2025-12-04 14:00:00, O=59.48, C=59.52
+ES: Bar 1159 @ 2025-12-08 16:45:00 | signal=False, last_10_signals=0, close=6853.25, ML_features=10/10
 ```
 
-This helps diagnose:
-- **Executed price** vs **Bar[0] Open** vs **Bar[0] Close**
-- Whether orders are filling at the expected price
+This shows:
+- **Bar number** and **timestamp**
+- **Signal status** (True/False)
+- **Recent signals** count
+- **Close price**
+- **ML features** availability (e.g., 10/10 = all features calculated)
 
 ---
 
