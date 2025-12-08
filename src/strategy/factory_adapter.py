@@ -582,16 +582,16 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Check if current bar has entry signal
         has_signal = entry_signals.iloc[current_idx] if current_idx < len(entry_signals) else False
 
-        # Log signal status periodically (every 100 bars after warmup) - debug level
-        if self._bars_seen % 100 == 0:
+        # Log signal status periodically (every 50 bars after warmup) - INFO level for visibility
+        if self._bars_seen % 50 == 0:
             recent_signals = entry_signals.tail(10).sum()
             ml_status = self._get_ml_feature_status()
             bar_buf_size = len(self._bar_buffer)
 
-            logger.debug(
-                f"{self.symbol}: Signal check - current={has_signal}, "
-                f"last_10_bars_signals={recent_signals}, close={df['Close'].iloc[-1]:.2f}, "
-                f"ml_features={ml_status}, bar_buf={bar_buf_size}"
+            logger.info(
+                f"{self.symbol}: Bar {self._bars_seen} @ {df['datetime'].iloc[-1]} | "
+                f"signal={has_signal}, last_10_signals={int(recent_signals)}, "
+                f"close={df['Close'].iloc[-1]:.2f}, ML_features={ml_status}"
             )
 
         if not has_signal:
