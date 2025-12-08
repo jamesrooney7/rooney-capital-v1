@@ -202,6 +202,7 @@ class StrategyFactoryAdapter(bt.Strategy):
         # ML filtering
         self._ml_last_score = None
         self._latest_ml_score = None  # Alias for compatibility with Discord callback
+        self._last_logged_bar_dt = None  # Track last logged bar to avoid duplicate logs
 
         # Data feeds - build map of symbol -> data feed
         # NOTE: Using 15-minute bars to match Strategy Factory training
@@ -582,15 +583,18 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Check if current bar has entry signal
         has_signal = entry_signals.iloc[current_idx] if current_idx < len(entry_signals) else False
 
-        # Log signal status every bar (each bar is 15 min) - INFO level for visibility
-        recent_signals = entry_signals.tail(10).sum()
-        ml_status = self._get_ml_feature_status()
+        # Log signal status only when 15-min bar changes (avoid duplicate logs from multi-feed sync)
+        current_bar_dt = df['datetime'].iloc[-1]
+        if current_bar_dt != self._last_logged_bar_dt:
+            self._last_logged_bar_dt = current_bar_dt
+            recent_signals = entry_signals.tail(10).sum()
+            ml_status = self._get_ml_feature_status()
 
-        logger.info(
-            f"{self.symbol}: Bar {self._bars_seen} @ {df['datetime'].iloc[-1]} | "
-            f"signal={has_signal}, last_10_signals={int(recent_signals)}, "
-            f"close={df['Close'].iloc[-1]:.2f}, ML_features={ml_status}"
-        )
+            logger.info(
+                f"{self.symbol}: Bar {self._bars_seen} @ {current_bar_dt} | "
+                f"signal={has_signal}, last_10_signals={int(recent_signals)}, "
+                f"close={df['Close'].iloc[-1]:.2f}, ML_features={ml_status}"
+            )
 
         if not has_signal:
             return
