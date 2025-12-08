@@ -172,7 +172,6 @@ class StrategyFactoryAdapter(bt.Strategy):
         ('size', 1),  # Position size (number of contracts)
         ('ml_feature_collector', None),  # Optional feature collector for ML warmup
         ('trades_db', None),  # TradesDB instance for persisting trades
-        ('warmup_bars_source', None),  # Dict[symbol -> list of bar dicts] for direct warmup injection
     )
 
     def __init__(self):
@@ -191,21 +190,6 @@ class StrategyFactoryAdapter(bt.Strategy):
         # Rolling window of bars for DataFrame construction
         self._bar_buffer: deque = deque(maxlen=max(500, self.p.warmup_bars + 50))
         self._bars_seen = 0
-
-        # Load historical bars directly if provided (bypasses Backtrader feed sync issues)
-        if self.p.warmup_bars_source is not None:
-            warmup_bars = self.p.warmup_bars_source.get(self.symbol.upper(), [])
-            if warmup_bars:
-                for bar in warmup_bars:
-                    self._bar_buffer.append(bar)
-                self._bars_seen = len(warmup_bars)
-                logger.info(
-                    f"{self.symbol}: Loaded {self._bars_seen} historical bars directly into strategy buffer - warmup complete!"
-                )
-            else:
-                logger.warning(
-                    f"{self.symbol}: warmup_bars_source provided but no bars found for symbol"
-                )
 
         # State tracking
         self._in_position = False
