@@ -68,3 +68,11 @@ requests_local/
 !research/**/*.py
 !dashboard/**/*.py
 results/
+
+# Archived docs
+docs/archived/
+
+# ML model artifacts (binary files, regenerated from training)
+models/factory/*.pkl
+models/factory/*.txt
+models/factory/pipeline_results.json
