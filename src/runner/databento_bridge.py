@@ -773,6 +773,7 @@ class DatabentoLiveData(bt.feeds.DataBase):
         self._stopped = False
         self._warmup_bars: "collections.deque[Bar]" = collections.deque()
         self._current_contract_symbol: Optional[str] = None  # Actual contract (e.g., "ESZ4")
+        self._live_bars_loaded: int = 0  # Counter for live bars (not warmup)
 
     def start(self) -> None:
         super().start()
@@ -843,6 +844,21 @@ class DatabentoLiveData(bt.feeds.DataBase):
         # Track the actual contract symbol from Databento (e.g., "ESZ4", "HGX2025")
         if payload.contract_symbol:
             self._current_contract_symbol = payload.contract_symbol
+
+        # Track and log live bars (not warmup) for diagnostics
+        if not self._warmup_bars:  # This was a live bar, not from warmup queue
+            self._live_bars_loaded += 1
+            if self._live_bars_loaded == 1:
+                logger.info(
+                    "%s: First LIVE bar received @ %s (warmup complete)",
+                    self.p.symbol, payload.timestamp
+                )
+            elif self._live_bars_loaded % 100 == 0:
+                logger.info(
+                    "%s: Live bar %d @ %s C=%.2f",
+                    self.p.symbol, self._live_bars_loaded, payload.timestamp, payload.close
+                )
+
         return True
 
     # ------------------------------------------------------------------
