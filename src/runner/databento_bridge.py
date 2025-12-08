@@ -853,7 +853,7 @@ class DatabentoLiveData(bt.feeds.DataBase):
                     "%s: First LIVE bar received @ %s (warmup complete)",
                     self.p.symbol, payload.timestamp
                 )
-            elif self._live_bars_loaded % 100 == 0:
+            elif self._live_bars_loaded % 15 == 0:  # Every 15 bars = 15 min for 1-min bars
                 logger.info(
                     "%s: Live bar %d @ %s C=%.2f",
                     self.p.symbol, self._live_bars_loaded, payload.timestamp, payload.close
